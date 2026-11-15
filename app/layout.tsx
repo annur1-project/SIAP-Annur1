@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import Navbar from '@/components/Navbar';
+import SupabaseEnvScript from '@/components/SupabaseEnvScript';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -19,6 +21,9 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body className={inter.className}>
+        <Suspense fallback={null}>
+          <SupabaseEnvScript />
+        </Suspense>
         <Navbar>{children}</Navbar>
       </body>
     </html>

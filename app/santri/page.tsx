@@ -107,6 +107,7 @@ export default function DataSantriPage() {
 
   const [todayStr, setTodayStr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingFoto, setUploadingFoto] = useState(false);
   const [search, setSearch] = useState('');
@@ -176,17 +177,32 @@ export default function DataSantriPage() {
 
   const fetchSantri = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('santri').select('*').order('nis', { ascending: true });
-    if (!error && data) {
-      setSantriList(data);
+    setFetchError(null);
+    try {
+      const { data, error } = await supabase.from('santri').select('*').order('nis', { ascending: true });
+      if (error) {
+        setFetchError(error.message || 'Gagal mengambil data santri dari Supabase.');
+        showToast('error', 'Gagal Memuat Data Santri', error.message || 'Terjadi kendala saat mengambil data santri.');
+      } else {
+        setSantriList(data || []);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan koneksi ke database.';
+      setFetchError(message);
+      showToast('error', 'Gagal Memuat Data Santri', message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fetchPengaturan = async () => {
-    const { data } = await supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).single();
-    if (data) {
-      setPengaturan((prev: any) => ({ ...prev, ...data }));
+    try {
+      const { data } = await supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle();
+      if (data) {
+        setPengaturan((prev: any) => ({ ...prev, ...data }));
+      }
+    } catch {
+      // Abaikan jika pengaturan belum tersedia
     }
   };
 
@@ -1273,6 +1289,22 @@ export default function DataSantriPage() {
               {loading ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400">Memuat data santri...</td>
+                </tr>
+              ) : fetchError ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center">
+                    <div className="inline-flex flex-col items-center gap-2 text-rose-700">
+                      <AlertCircle className="w-6 h-6 text-rose-600" />
+                      <p className="font-semibold text-xs">Gagal memuat data santri: {fetchError}</p>
+                      <button
+                        type="button"
+                        onClick={fetchSantri}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold text-rose-800"
+                      >
+                        Muat Ulang Data
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ) : filteredSantri.length === 0 ? (
                 <tr>

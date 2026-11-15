@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   Wallet,
   CreditCard,
-  Receipt,
+  ReceiptText,
   AlertTriangle,
   BookOpen,
   DatabaseBackup,
@@ -715,14 +715,24 @@ export default function KeuanganPage() {
           }
           html, body {
             width: 210mm !important;
-            height: 99mm !important;
-            max-height: 99mm !important;
+            height: 98mm !important;
+            max-height: 98mm !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow: hidden !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          #print-kuitansi-sheet {
+            width: 210mm !important;
+            height: 98mm !important;
+            max-height: 98mm !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       `;
@@ -2334,7 +2344,7 @@ export default function KeuanganPage() {
     return (
       <div
         className={`relative bg-white text-slate-900 border-2 border-emerald-800 select-none overflow-hidden flex flex-col justify-between ${
-          isForPrint ? 'w-[210mm] h-[99mm] p-[4.5mm]' : 'w-[210mm] min-w-[210mm] h-[100mm] p-4 shadow-md rounded-sm'
+          isForPrint ? 'w-[210mm] h-[98mm] max-h-[98mm] p-[4mm]' : 'w-[210mm] min-w-[210mm] h-[100mm] p-4 shadow-md rounded-sm'
         }`}
       >
         {/* WATERMARK LOGO PONDOK DI TENGAH (TANPA TEKS SIAP AN-NUR 1) */}
@@ -2868,58 +2878,58 @@ export default function KeuanganPage() {
 
           {/* 4 KARTU DOMPET REAL-TIME */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* 1. Dompet Pendaftaran */}
-            <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3">
-              <div className="flex items-center justify-between text-sky-800">
+            {/* 1. Dompet Pendaftaran (Biru) */}
+            <div className="rounded-xl border border-blue-700 bg-gradient-to-br from-blue-600 to-blue-800 p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-blue-100">
                 <span className="text-[11px] font-bold uppercase tracking-wider">1. Dompet Pendaftaran</span>
-                <Building2 className="w-4 h-4 text-sky-600" />
+                <Building2 className="w-4 h-4 text-blue-200" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-base font-extrabold text-white mt-1 tabular-nums">
                 {formatRupiah(walletSummary.totals.pendaftaran)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+              <p className="text-[10.5px] text-blue-100/90 mt-0.5 truncate">
                 Pemasukan PSB Reguler, VIP &amp; Custom
               </p>
             </div>
 
-            {/* 2. Dompet Syahriyah & Iuran Tahunan */}
-            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3">
-              <div className="flex items-center justify-between text-emerald-800">
+            {/* 2. Dompet Syahriyah & Iuran Tahunan (Hijau Emerald) */}
+            <div className="rounded-xl border border-emerald-700 bg-gradient-to-br from-emerald-600 to-emerald-800 p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-emerald-100">
                 <span className="text-[11px] font-bold uppercase tracking-wider">2. Syahriyah &amp; Tahunan</span>
-                <Wallet className="w-4 h-4 text-emerald-600" />
+                <Wallet className="w-4 h-4 text-emerald-200" />
               </div>
-              <p className="text-base font-extrabold text-emerald-950 mt-1">
+              <p className="text-base font-extrabold text-white mt-1 tabular-nums">
                 {formatRupiah(walletSummary.totals.operasional)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+              <p className="text-[10.5px] text-emerald-100/90 mt-0.5 truncate">
                 Dompet Utama Operasional Pondok
               </p>
             </div>
 
-            {/* 3. Dompet Kas (Lain-lain) */}
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
-              <div className="flex items-center justify-between text-amber-800">
+            {/* 3. Dompet Kas Lain-lain (Kuning Amber) */}
+            <div className="rounded-xl border border-amber-600 bg-gradient-to-br from-amber-500 to-amber-700 p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-amber-50">
                 <span className="text-[11px] font-bold uppercase tracking-wider">3. Dompet Kas (Lain-lain)</span>
-                <Landmark className="w-4 h-4 text-amber-600" />
+                <Landmark className="w-4 h-4 text-amber-100" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-base font-extrabold text-white mt-1 tabular-nums">
                 {formatRupiah(walletSummary.totals.kas_pondok)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+              <p className="text-[10.5px] text-amber-50/90 mt-0.5 truncate">
                 Kotak Amal, Setoran Kantin &amp; Donasi
               </p>
             </div>
 
-            {/* 4. Dompet MDA */}
-            <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3">
-              <div className="flex items-center justify-between text-indigo-800">
+            {/* 4. Dompet MDA (Ungu) */}
+            <div className="rounded-xl border border-purple-700 bg-gradient-to-br from-purple-600 to-purple-800 p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-purple-100">
                 <span className="text-[11px] font-bold uppercase tracking-wider">4. Dompet MDA (Madin)</span>
-                <GraduationCap className="w-4 h-4 text-indigo-600" />
+                <GraduationCap className="w-4 h-4 text-purple-200" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-base font-extrabold text-white mt-1 tabular-nums">
                 {formatRupiah(walletSummary.totals.mda)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+              <p className="text-[10.5px] text-purple-100/90 mt-0.5 truncate">
                 Ujian MDA Sm 1 &amp; 2, Raport Madin
               </p>
             </div>
@@ -2955,7 +2965,7 @@ export default function KeuanganPage() {
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
               }`}
             >
-              <Receipt className="w-3.5 h-3.5" />
+              <ReceiptText className="w-3.5 h-3.5" />
               2. Kuitansi 21×10 cm
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-black/15">
                 {kuitansiGroups.length}
@@ -3142,9 +3152,21 @@ export default function KeuanganPage() {
                             onChange={(e) => setTahunAjaran(e.target.value)}
                             className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-bold text-slate-800 text-xs"
                           >
-                            <option value="2025/2026">2025/2026</option>
-                            <option value="2026/2027">2026/2027</option>
-                            <option value="2027/2028">2027/2028</option>
+                            {(() => {
+                              const now = new Date();
+                              const activeStart = now.getMonth() + 1 >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+                              const maxStart = Math.max(activeStart + 1, 2026);
+                              const opts: string[] = [];
+                              for (let y = 2024; y <= maxStart; y += 1) {
+                                opts.push(`${y}/${y + 1}`);
+                              }
+                              if (!opts.includes(tahunAjaran)) opts.push(tahunAjaran);
+                              return opts.map((ta) => (
+                                <option key={ta} value={ta}>
+                                  {ta}
+                                </option>
+                              ));
+                            })()}
                           </select>
                         </div>
                         <div>
@@ -3387,7 +3409,7 @@ export default function KeuanganPage() {
                     </div>
 
                     {/* FOOTER BAR GRADASI HIJAU EMERALD PEKAT (TOTAL BAYAR & SIMPAN KUITANSI) */}
-                    <div className="shrink-0 px-4 py-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white border-t border-emerald-700 flex flex-wrap items-center justify-between gap-3">
+                    <div className="shrink-0 px-4 py-3 md:py-5 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white border-t border-emerald-700 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-200">
                           Metode Bayar:
@@ -3434,7 +3456,7 @@ export default function KeuanganPage() {
                           onClick={handleSimpanPembayaran}
                           className="px-5 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer"
                         >
-                          <Receipt className="w-4 h-4" />
+                          <ReceiptText className="w-4 h-4" />
                           {savingPayment ? 'Menyimpan...' : 'Simpan & Terbitkan Kuitansi'}
                         </button>
                       </div>

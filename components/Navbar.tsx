@@ -26,7 +26,7 @@ const menuItems = [
   { name: 'Data Santri', href: '/santri', icon: Users },
   { name: 'Data Pengurus', href: '/pengurus', icon: UserCheck },
   { name: 'Keuangan', href: '/keuangan', icon: Wallet },
-  { name: 'Absen Jamaah', href: '/absen', icon: CheckSquare },
+  { name: 'Absen Jamaah', href: '/absen-jamaah', icon: CheckSquare },
   { name: 'Perizinan', href: '/perizinan', icon: FileText },
   { name: 'Keamanan & Poin', href: '/keamanan', icon: ShieldAlert },
   { name: 'Poskestren', href: '/kesehatan', icon: HeartPulse },

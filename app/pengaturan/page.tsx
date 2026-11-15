@@ -34,6 +34,7 @@ export default function PengaturanPage() {
     email_resmi: 'annur1bululawang@gmail.com',
     slogan: "Mencetak Generasi Qur'ani, Berakhlakul Karimah, dan Berwawasan Luas",
     logo_url: '',
+    logo_watermark_url: '',
     stempel_url: '',
     nama_pengasuh: 'Dr. KH. A. Fahrur Rozi',
     ttd_pengasuh_url: '',
@@ -511,18 +512,27 @@ export default function PengaturanPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-2">
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <span className="font-bold text-slate-800 block">Logo Pondok Pesantren (PNG)</span>
-              {formData.logo_url && <img src={formData.logo_url} alt="Logo" className="h-14 object-contain" />}
+              <span className="font-bold text-slate-800 block">Logo 1: Kop Surat &amp; Dokumen (PNG)</span>
+              {formData.logo_url && <img src={formData.logo_url} alt="Logo" referrerPolicy="no-referrer" className="h-14 object-contain" />}
               <input type="file" accept="image/*" onChange={(e) => handleUploadImage(e, 'logo_url')} className="w-full text-[11px]" />
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <span className="font-bold text-slate-800 block">Logo 2: Outline / Watermark Kuitansi (PNG)</span>
+              {formData.logo_watermark_url && <img src={formData.logo_watermark_url} alt="Logo Watermark" referrerPolicy="no-referrer" className="h-14 object-contain" />}
+              <input type="file" accept="image/*" onChange={(e) => handleUploadImage(e, 'logo_watermark_url')} className="w-full text-[11px]" />
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <span className="font-bold text-slate-800 block">Stempel Resmi Pondok (PNG Transparan)</span>
-              {formData.stempel_url && <img src={formData.stempel_url} alt="Stempel" className="h-14 object-contain" />}
+              {formData.stempel_url && <img src={formData.stempel_url} alt="Stempel" referrerPolicy="no-referrer" className="h-14 object-contain" />}
               <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'stempel_url')} className="w-full text-[11px]" />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-1">
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <label className="font-bold text-slate-800 block">Pengasuh Pondok Pesantren</label>
