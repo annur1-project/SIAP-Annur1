@@ -394,6 +394,7 @@ function createMockSupabaseClient(): SupabaseClient {
     ],
     pembayaran_santri_detail: [],
     keuangan_transaksi: [],
+    absen_jamaah: [],
     wilayah_indonesia: [
       { Kelurahan: 'Bululawang', Kecamatan: 'Bululawang', Kabupaten: 'KAB. MALANG', Provinsi: 'JAWA TIMUR', 'Kode Pos': '65171' },
       { Kelurahan: 'Krebet', Kecamatan: 'Bululawang', Kabupaten: 'KAB. MALANG', Provinsi: 'JAWA TIMUR', 'Kode Pos': '65171' },

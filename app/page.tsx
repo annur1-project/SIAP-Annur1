@@ -40,6 +40,14 @@ interface PengaturanRow {
   saldo_awal_mda?: number;
 }
 
+interface AbsenRow {
+  id: string;
+  tgl: string;
+  santri_id?: string;
+  waktu_sholat: 'subuh' | 'dzuhur' | 'ashar' | 'maghrib' | 'isya';
+  status: 'hadir' | 'sakit' | 'izin' | 'alpha';
+}
+
 function formatRupiah(nominal: number): string {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -66,11 +74,40 @@ export default function DashboardPage() {
     namaPesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
   });
 
+  const [jamaahToday, setJamaahToday] = useState({
+    total: 0,
+    hadir: 0,
+    sakit: 0,
+    izin: 0,
+    alpha: 0,
+    persenHadir: 0,
+    subuhCount: 0,
+    dzuhurCount: 0,
+    asharCount: 0,
+    maghribCount: 0,
+    isyaCount: 0,
+  });
+
+  const [jamaahMonthly, setJamaahMonthly] = useState({
+    total: 0,
+    hadir: 0,
+    sakit: 0,
+    izin: 0,
+    alpha: 0,
+    persenHadir: 0,
+    hariTercatat: 0,
+  });
+
   const fetchDashboardData = async () => {
     const now = new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayIso = `${yyyy}-${mm}-${dd}`;
     const monthPrefix = `${yyyy}-${mm}`;
+    const lastDayOfMonth = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+    const monthStart = `${monthPrefix}-01`;
+    const monthEnd = `${monthPrefix}-${String(lastDayOfMonth).padStart(2, '0')}`;
     const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
 
     const namaBulan = [
@@ -78,10 +115,15 @@ export default function DashboardPage() {
       'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
     ];
 
-    const [santriRes, transaksiRes, pengaturanRes] = await Promise.all([
+    const [santriRes, transaksiRes, pengaturanRes, jamaahRes] = await Promise.all([
       supabase.from('santri').select('id, status, kamar'),
       supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi'),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
+      supabase
+        .from('absen_jamaah')
+        .select('id, tgl, santri_id, waktu_sholat, status')
+        .gte('tgl', monthStart)
+        .lte('tgl', monthEnd),
     ]);
 
     if (santriRes.error) throw santriRes.error;
@@ -90,6 +132,7 @@ export default function DashboardPage() {
     const santriList = (santriRes.data || []) as SantriRow[];
     const transaksiList = (transaksiRes.data || []) as TransaksiRow[];
     const setting = (pengaturanRes.data || {}) as PengaturanRow;
+    const jamaahMonthList = (jamaahRes.error ? [] : jamaahRes.data || []) as AbsenRow[];
 
     const santriAktif = santriList.filter((s) =>
       ['aktif', 'ndalem', 'beasiswa_lazis'].includes(s.status)
@@ -116,6 +159,55 @@ export default function DashboardPage() {
       }
     }
 
+    const activeSantriIds = new Set(
+      santriList
+        .filter((s) => ['aktif', 'ndalem', 'beasiswa_lazis'].includes(s.status))
+        .map((s) => s.id)
+    );
+
+    let jHadir = 0;
+    let jSakit = 0;
+    let jIzin = 0;
+    let jAlpha = 0;
+    let jTotal = 0;
+    let subuhCount = 0;
+    let dzuhurCount = 0;
+    let asharCount = 0;
+    let maghribCount = 0;
+    let isyaCount = 0;
+
+    let mHadir = 0;
+    let mSakit = 0;
+    let mIzin = 0;
+    let mAlpha = 0;
+    let mTotal = 0;
+    const mDaysSet = new Set<string>();
+
+    for (const row of jamaahMonthList) {
+      if (row.santri_id && !activeSantriIds.has(row.santri_id)) continue;
+
+      mTotal += 1;
+      if (row.tgl) mDaysSet.add(row.tgl);
+      if (row.status === 'hadir') mHadir += 1;
+      else if (row.status === 'sakit') mSakit += 1;
+      else if (row.status === 'izin') mIzin += 1;
+      else if (row.status === 'alpha') mAlpha += 1;
+
+      if (row.tgl === todayIso) {
+        jTotal += 1;
+        if (row.status === 'hadir') jHadir += 1;
+        else if (row.status === 'sakit') jSakit += 1;
+        else if (row.status === 'izin') jIzin += 1;
+        else if (row.status === 'alpha') jAlpha += 1;
+
+        if (row.waktu_sholat === 'subuh') subuhCount += 1;
+        else if (row.waktu_sholat === 'dzuhur') dzuhurCount += 1;
+        else if (row.waktu_sholat === 'ashar') asharCount += 1;
+        else if (row.waktu_sholat === 'maghrib') maghribCount += 1;
+        else if (row.waktu_sholat === 'isya') isyaCount += 1;
+      }
+    }
+
     return {
       tahunAjaran: `${startYear}/${startYear + 1}`,
       bulanLabel: `${namaBulan[now.getMonth()]} ${yyyy}`,
@@ -131,6 +223,28 @@ export default function DashboardPage() {
         masukBulanIni,
         namaPesantren: setting.nama_pesantren || 'Pondok Pesantren An-Nur 1 Bululawang',
       },
+      jamaahToday: {
+        total: jTotal,
+        hadir: jHadir,
+        sakit: jSakit,
+        izin: jIzin,
+        alpha: jAlpha,
+        persenHadir: jTotal > 0 ? Math.round((jHadir / jTotal) * 100) : 0,
+        subuhCount,
+        dzuhurCount,
+        asharCount,
+        maghribCount,
+        isyaCount,
+      },
+      jamaahMonthly: {
+        total: mTotal,
+        hadir: mHadir,
+        sakit: mSakit,
+        izin: mIzin,
+        alpha: mAlpha,
+        persenHadir: mTotal > 0 ? Math.round((mHadir / mTotal) * 100) : 0,
+        hariTercatat: mDaysSet.size,
+      },
     };
   };
 
@@ -143,6 +257,8 @@ export default function DashboardPage() {
       setTahunAjaran(result.tahunAjaran);
       setBulanLabel(result.bulanLabel);
       setStats(result.stats);
+      setJamaahToday(result.jamaahToday);
+      setJamaahMonthly(result.jamaahMonthly);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gagal memuat ringkasan database.';
       setErrorMsg(msg);
@@ -159,6 +275,8 @@ export default function DashboardPage() {
         setTahunAjaran(result.tahunAjaran);
         setBulanLabel(result.bulanLabel);
         setStats(result.stats);
+        setJamaahToday(result.jamaahToday);
+        setJamaahMonthly(result.jamaahMonthly);
       })
       .catch((err) => {
         if (!active) return;
@@ -395,6 +513,125 @@ export default function DashboardPage() {
               <span className="font-bold text-purple-800 text-sm tabular-nums">
                 {loading ? '...' : formatRupiah(stats.saldoMda)}
               </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* RINGKASAN KEHADIRAN SHOLAT JAMAAH HARI INI & CAPAIAN BULANAN */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+              <CalendarCheck className="w-4 h-4 text-emerald-600" />
+              Ringkasan Kehadiran Sholat Jamaah (5 Waktu)
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Capaian bulanan seluruh santri ({bulanLabel}) &amp; pantauan presensi hari ini.
+            </p>
+          </div>
+          <Link
+            href="/absen-jamaah"
+            className="text-xs font-semibold text-emerald-700 hover:underline flex items-center gap-0.5 whitespace-nowrap shrink-0"
+          >
+            Input / Rekap &amp; Laporan WA <ArrowUpRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {/* CAPAIAN BULANAN SELURUH SANTRI */}
+        <div className="p-4 bg-gradient-to-r from-emerald-50 to-slate-50 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-800 block">
+              Persentase Jamaah Bulanan Seluruh Santri &middot; {bulanLabel}
+            </span>
+            <div className="flex items-baseline gap-2.5 mt-1">
+              <strong className="text-2xl font-extrabold text-emerald-950 tabular-nums">
+                {loading
+                  ? '...'
+                  : jamaahMonthly.total > 0
+                  ? `${jamaahMonthly.persenHadir}%`
+                  : 'Belum Ada Data'}
+              </strong>
+              <span className="text-xs text-emerald-800 tabular-nums">
+                ({jamaahMonthly.hadir}/{jamaahMonthly.total} sesi &middot;{' '}
+                {jamaahMonthly.hariTercatat} hari tercatat)
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-xs shrink-0">
+            <div className="px-3 py-2 bg-white border border-rose-200 rounded-lg text-center">
+              <span className="text-[11px] text-rose-700 font-semibold block">Alpha</span>
+              <strong className="text-sm font-bold text-rose-700 tabular-nums">
+                {loading ? '...' : jamaahMonthly.alpha}
+              </strong>
+            </div>
+            <div className="px-3 py-2 bg-white border border-sky-200 rounded-lg text-center">
+              <span className="text-[11px] text-sky-700 font-semibold block">Izin</span>
+              <strong className="text-sm font-bold text-sky-700 tabular-nums">
+                {loading ? '...' : jamaahMonthly.izin}
+              </strong>
+            </div>
+            <div className="px-3 py-2 bg-white border border-amber-200 rounded-lg text-center">
+              <span className="text-[11px] text-amber-700 font-semibold block">Sakit</span>
+              <strong className="text-sm font-bold text-amber-700 tabular-nums">
+                {loading ? '...' : jamaahMonthly.sakit}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        {/* PANTAUAN HARI INI */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+            <span className="text-emerald-800 font-semibold block">Hadir Hari Ini</span>
+            <strong className="text-xl font-bold text-emerald-950 tabular-nums mt-1 block">
+              {loading ? '...' : jamaahToday.total > 0 ? `${jamaahToday.persenHadir}%` : 'Belum Diinput'}
+            </strong>
+            <span className="text-[11px] text-emerald-700 tabular-nums">
+              {jamaahToday.hadir}/{jamaahToday.total} catatan
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-xl">
+            <span className="text-rose-800 font-semibold block">Alpha (Wajib Takzir)</span>
+            <strong className="text-xl font-bold text-rose-700 tabular-nums mt-1 block">
+              {loading ? '...' : jamaahToday.alpha}
+            </strong>
+            <span className="text-[11px] text-rose-600">Tanpa keterangan</span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-slate-600 font-semibold block">Izin</span>
+            <strong className="text-xl font-bold text-sky-700 tabular-nums mt-1 block">
+              {loading ? '...' : jamaahToday.izin}
+            </strong>
+            <span className="text-[11px] text-slate-500">Santri izin keluar</span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-slate-600 font-semibold block">Sakit</span>
+            <strong className="text-xl font-bold text-amber-700 tabular-nums mt-1 block">
+              {loading ? '...' : jamaahToday.sakit}
+            </strong>
+            <span className="text-[11px] text-slate-500">Santri izin sakit</span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl col-span-2 sm:col-span-1">
+            <span className="text-slate-600 font-semibold block">Tercatat 5 Waktu</span>
+            <div className="mt-1 space-y-0.5 text-[11px] tabular-nums text-slate-700">
+              <div className="flex justify-between">
+                <span>Subuh / Dzh</span>
+                <strong>{jamaahToday.subuhCount} / {jamaahToday.dzuhurCount}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Ashar / Mgh</span>
+                <strong>{jamaahToday.asharCount} / {jamaahToday.maghribCount}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Isya</span>
+                <strong>{jamaahToday.isyaCount}</strong>
+              </div>
             </div>
           </div>
         </div>
