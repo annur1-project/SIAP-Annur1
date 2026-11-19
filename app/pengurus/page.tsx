@@ -1206,25 +1206,25 @@ export default function DataPengurusPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           <button
             type="button"
             onClick={() => {
               setActiveTab("bagan");
               setTimeout(() => window.print(), 250);
             }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 shadow-sm transition"
+            className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs sm:text-sm font-medium hover:bg-slate-50 shadow-sm transition whitespace-nowrap"
           >
-            <Printer className="w-4 h-4 text-slate-600" />
+            <Printer className="w-4 h-4 text-slate-600 shrink-0" />
             Cetak Bagan (A4)
           </button>
 
           <button
             type="button"
             onClick={openAddModal}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 shadow-sm transition"
+            className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs sm:text-sm font-semibold hover:bg-emerald-800 shadow-sm transition whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             Tambah Pengurus
           </button>
         </div>
@@ -1295,12 +1295,12 @@ export default function DataPengurusPage() {
       </div>
 
       {/* BAR NAVIGASI TAB & FILTER MASA KHIDMAT */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print">
-        <div className="flex items-center gap-2">
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3 no-print">
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5 lg:pb-0">
           <button
             type="button"
             onClick={() => setActiveTab("daftar")}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
+            className={`min-h-[40px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap shrink-0 ${
               activeTab === "daftar"
                 ? "bg-emerald-700 text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
@@ -1311,7 +1311,7 @@ export default function DataPengurusPage() {
           <button
             type="button"
             onClick={() => setActiveTab("bagan")}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
+            className={`min-h-[40px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap shrink-0 ${
               activeTab === "bagan"
                 ? "bg-emerald-700 text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
@@ -1321,12 +1321,12 @@ export default function DataPengurusPage() {
           </button>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <span className="text-xs font-medium text-slate-500">Masa Khidmat:</span>
+        <div className="flex items-center justify-between sm:justify-start gap-2.5 shrink-0">
+          <span className="text-xs font-medium text-slate-500 whitespace-nowrap">Masa Khidmat:</span>
           <select
             value={masaKhidmat}
             onChange={(e) => setMasaKhidmat(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            className="min-h-[38px] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             {MASA_KHIDMAT_OPTIONS.map((mk) => (
               <option key={mk} value={mk}>
@@ -1343,22 +1343,22 @@ export default function DataPengurusPage() {
       {activeTab === "daftar" && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {/* Filter Bar */}
-          <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <div className="p-3.5 sm:p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+            <div className="relative sm:col-span-2 lg:col-span-6 min-w-0">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Cari nama pengurus, jabatan, atau divisi..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                className="w-full min-h-[40px] pl-10 pr-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
             <select
               value={filterDivisi}
               onChange={(e) => setFilterDivisi(e.target.value)}
-              className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="lg:col-span-3 min-h-[40px] rounded-xl border border-slate-200 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
               <option value="semua">Semua Divisi</option>
               {DIVISI_OPTIONS.map((div) => (
@@ -1371,7 +1371,7 @@ export default function DataPengurusPage() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="lg:col-span-3 min-h-[40px] rounded-xl border border-slate-200 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
               <option value="aktif">Status: Aktif</option>
               <option value="nonaktif">Status: Nonaktif</option>
@@ -1409,20 +1409,143 @@ export default function DataPengurusPage() {
             </span>
           </div>
 
-          {/* Tabel Pengurus */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          {/* MOBILE CARD VIEW (PWA / HP) */}
+          <div className="md:hidden divide-y divide-slate-200/70">
+            {loading ? (
+              <div className="py-10 text-center text-xs text-slate-400">
+                Memuat data pengurus...
+              </div>
+            ) : filteredPengurus.length === 0 ? (
+              <div className="py-10 text-center text-xs text-slate-400">
+                Belum ada data pengurus yang sesuai dengan filter.
+              </div>
+            ) : (
+              filteredPengurus.map((item) => {
+                const sortedBadges = [...item.jabatan_list].sort((a, b) =>
+                  compareTuples(
+                    getJabatanHierarchyTuple(a, kamarOptions),
+                    getJabatanHierarchyTuple(b, kamarOptions)
+                  )
+                );
+                const rowStyle = getRowHierarchyStyle(item, kamarOptions);
+
+                return (
+                  <div key={item.id} className={`${rowStyle.rowBg} ${rowStyle.leftAccent} p-4 space-y-2.5 text-xs`}>
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {item.foto_url ? (
+                          <img
+                            src={item.foto_url}
+                            alt={item.nama_lengkap}
+                            className="w-10 h-10 rounded-full object-cover border border-white shadow-2xs shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-white text-emerald-800 border border-slate-200 font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                            {getInitials(item.nama_lengkap)}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-slate-900 leading-snug">
+                            {item.nama_lengkap}
+                          </p>
+                          {item.ttd_url && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium mt-0.5">
+                              <FileSignature className="w-3 h-3" /> TTD Digital Tersedia
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span
+                        className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold capitalize whitespace-nowrap shrink-0 ${
+                          item.status === "aktif"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                            : item.status === "boyong"
+                            ? "bg-amber-100 text-amber-800 border border-amber-200"
+                            : "bg-slate-200 text-slate-700"
+                        }`}
+                      >
+                        {item.status}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {sortedBadges.map((jab, idx) => {
+                        const label = formatTableJabatanLabel(jab);
+                        const style = getHierarchyBadgeStyle(jab.divisi);
+                        return (
+                          <span
+                            key={idx}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${style.badgeClass}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dotClass}`} />
+                            <span className="font-semibold">{label.primary}</span>
+                            {label.secondary && (
+                              <span className="text-[10.5px] opacity-75">({label.secondary})</span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-[11px] tabular-nums">
+                      <div>
+                        {item.no_wa ? (
+                          <a
+                            href={formatWaLink(item.no_wa)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                            {item.no_wa}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400">WA: -</span>
+                        )}
+                      </div>
+                      <div className="font-bold text-slate-800">
+                        Bisyaroh: {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(item)}
+                        className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-white text-slate-700 hover:text-emerald-700 border border-slate-200 font-bold inline-flex items-center justify-center gap-1.5"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" /> Edit Profil &amp; Jabatan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
+                        title="Hapus Pengurus"
+                        aria-label={`Hapus ${item.nama_lengkap}`}
+                        className="min-h-[40px] min-w-[40px] rounded-xl bg-white text-slate-500 hover:text-rose-600 border border-slate-200 inline-flex items-center justify-center"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Tabel Pengurus Desktop */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4">Profil Pengurus</th>
-                  <th className="py-3.5 px-4">Amanah & Jabatan (Rangkap)</th>
-                  <th className="py-3.5 px-4">Kontak WA</th>
-                  <th className="py-3.5 px-4">Bisyaroh</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Aksi</th>
+                  <th className="py-3 px-3.5 min-w-[195px]">Profil Pengurus</th>
+                  <th className="py-3 px-3.5 min-w-[230px]">Amanah &amp; Jabatan (Rangkap)</th>
+                  <th className="py-3 px-3.5 w-36 whitespace-nowrap">Kontak WA</th>
+                  <th className="py-3 px-3.5 w-28 whitespace-nowrap">Bisyaroh</th>
+                  <th className="py-3 px-3.5 w-24 whitespace-nowrap">Status</th>
+                  <th className="py-3 px-3.5 w-24 text-right whitespace-nowrap">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200/60 text-sm">
+              <tbody className="divide-y divide-slate-200/60 text-xs sm:text-sm">
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-slate-400">
@@ -1451,24 +1574,24 @@ export default function DataPengurusPage() {
                         className={`${rowStyle.rowBg} transition-colors`}
                       >
                         {/* Profil Pengurus */}
-                        <td className={`py-3.5 px-4 ${rowStyle.leftAccent}`}>
+                        <td className={`py-3 px-3.5 ${rowStyle.leftAccent}`}>
                           <div className="flex items-center gap-3">
                             {item.foto_url ? (
                               <img
                                 src={item.foto_url}
                                 alt={item.nama_lengkap}
-                                className="w-10 h-10 rounded-full object-cover border border-white shadow-2xs shrink-0"
+                                className="w-9 h-9 rounded-full object-cover border border-white shadow-2xs shrink-0"
                               />
                             ) : (
-                              <div className="w-10 h-10 rounded-full bg-white text-emerald-800 border border-slate-200 font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                              <div className="w-9 h-9 rounded-full bg-white text-emerald-800 border border-slate-200 font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
                                 {getInitials(item.nama_lengkap)}
                               </div>
                             )}
-                            <div>
-                              <p className="font-semibold text-slate-800">{item.nama_lengkap}</p>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-800 leading-snug">{item.nama_lengkap}</p>
                               {item.ttd_url && (
-                                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium mt-0.5">
-                                  <FileSignature className="w-3 h-3" /> TTD Digital Tersedia
+                                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium mt-0.5 whitespace-nowrap">
+                                  <FileSignature className="w-3 h-3" /> TTD Digital
                                 </span>
                               )}
                             </div>
@@ -1476,7 +1599,7 @@ export default function DataPengurusPage() {
                         </td>
 
                         {/* Amanah & Jabatan */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3 px-3.5">
                           <div className="flex flex-wrap gap-1.5">
                             {sortedBadges.map((jab, idx) => {
                               const label = formatTableJabatanLabel(jab);
@@ -1487,7 +1610,7 @@ export default function DataPengurusPage() {
                                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${style.badgeClass}`}
                                 >
                                   <span
-                                    className={`w-1.5 h-1.5 rounded-full ${style.dotClass}`}
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dotClass}`}
                                   />
                                   <span className="font-semibold">{label.primary}</span>
                                   {label.secondary && (
@@ -1502,15 +1625,15 @@ export default function DataPengurusPage() {
                         </td>
 
                         {/* Kontak WA */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3 px-3.5 whitespace-nowrap">
                           {item.no_wa ? (
                             <a
                               href={formatWaLink(item.no_wa)}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:underline"
+                              className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:underline whitespace-nowrap"
                             >
-                              <Phone className="w-3.5 h-3.5" />
+                              <Phone className="w-3.5 h-3.5 shrink-0" />
                               {item.no_wa}
                             </a>
                           ) : (
@@ -1519,14 +1642,14 @@ export default function DataPengurusPage() {
                         </td>
 
                         {/* Bisyaroh */}
-                        <td className="py-3.5 px-4 font-semibold text-slate-700">
+                        <td className="py-3 px-3.5 font-semibold text-slate-700 whitespace-nowrap tabular-nums text-xs sm:text-sm">
                           {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
                         </td>
 
                         {/* Status */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3 px-3.5 whitespace-nowrap">
                           <span
-                            className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                            className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize whitespace-nowrap ${
                               item.status === "aktif"
                                 ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
                                 : item.status === "boyong"
@@ -1539,21 +1662,23 @@ export default function DataPengurusPage() {
                         </td>
 
                         {/* Aksi */}
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5">
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => openEditModal(item)}
-                              className="p-2 rounded-lg bg-white/80 text-slate-600 hover:text-emerald-700 hover:bg-white border border-slate-200/70 transition"
+                              className="p-2 rounded-lg bg-white/80 text-slate-600 hover:text-emerald-700 hover:bg-white border border-slate-200/70 transition shrink-0"
                               title="Edit Profil & Jabatan"
+                              aria-label={`Edit ${item.nama_lengkap}`}
                             >
                               <Edit3 className="w-4 h-4" />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
-                              className="p-2 rounded-lg bg-white/80 text-slate-500 hover:text-rose-600 hover:bg-white border border-slate-200/70 transition"
+                              className="p-2 rounded-lg bg-white/80 text-slate-500 hover:text-rose-600 hover:bg-white border border-slate-200/70 transition shrink-0"
                               title="Hapus Pengurus"
+                              aria-label={`Hapus ${item.nama_lengkap}`}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>

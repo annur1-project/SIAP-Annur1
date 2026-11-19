@@ -1161,7 +1161,19 @@ export default function AbsenJamaahPage() {
 
   const buildWaWaliMessage = (s: SantriRow, alphaCount: number, recentDates: string[]) => {
     const wali = getWaliContact(s);
-    return `Assalamu'alaikum Wr. Wb. Yth. Bapak/Ibu ${wali.nama}, kami pengurus ${pengaturan.nama_pesantren} menginformasikan bahwa ananda ${s.nama_lengkap} (NIS ${s.nis}, Kamar ${s.kamar}) tercatat tidak mengikuti sholat berjamaah tanpa keterangan (Alpha) sebanyak ${alphaCount} waktu dalam ${alphaWindowDays} hari terakhir (${recentDates.slice(0, 3).join(', ')}). Mohon doa serta dukungan keluarga agar ananda semakin istiqomah berjamaah. Wassalamu'alaikum Wr. Wb.`;
+    return [
+      `Assalamu'alaikum Wr. Wb.`,
+      `Yth. Bapak/Ibu ${wali.nama},`,
+      `Wali santri dari *${s.nama_lengkap}* (NIS ${s.nis} / Kamar ${s.kamar}).`,
+      ``,
+      `Kami pengurus ${pengaturan.nama_pesantren} menginformasikan catatan sholat berjamaah ananda:`,
+      `• Ketidakhadiran Tanpa Keterangan (Alpha): *${alphaCount} waktu*`,
+      `• Periode Pemantauan: ${alphaWindowDays} hari terakhir`,
+      ...(recentDates.length > 0 ? [`• Tanggal Tercatat: ${recentDates.slice(0, 3).join(', ')}`] : []),
+      ``,
+      `Mohon doa serta dukungan keluarga agar ananda semakin istiqomah mengikuti sholat berjamaah.`,
+      `Wassalamu'alaikum Wr. Wb.`,
+    ].join('\n');
   };
 
   return (
@@ -1539,22 +1551,33 @@ export default function AbsenJamaahPage() {
       )}
 
       {/* KONTROL FILTER UMUM (TANGGAL, KAMAR, PENCARIAN) */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 print:hidden">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-2.5 print:hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-center">
+          <div className="relative sm:col-span-2 lg:col-span-5 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Cari Nama atau NIS..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full min-h-[40px] pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            />
+          </div>
+
+          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 min-h-[40px]">
             <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
+              className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
             />
           </div>
 
           <select
             value={selectedKamar}
             onChange={(e) => setSelectedKamar(e.target.value)}
-            className="bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
+            className="lg:col-span-4 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
           >
             <option value="SEMUA">Semua Kamar ({santriList.length})</option>
             {kamarOptions.map((km) => (
@@ -1563,27 +1586,20 @@ export default function AbsenJamaahPage() {
               </option>
             ))}
           </select>
-
-          <div className="flex items-center gap-2 text-xs text-slate-500 px-2">
-            <span className="font-bold text-emerald-800">H</span> Hadir
-            <span aria-hidden="true">&middot;</span>
-            <span className="font-bold text-rose-700">A</span> Alpha
-            <span aria-hidden="true">&middot;</span>
-            <span className="font-bold text-sky-700">I</span> Izin
-            <span aria-hidden="true">&middot;</span>
-            <span className="font-bold text-amber-700">S</span> Sakit
-          </div>
         </div>
 
-        <div className="relative flex-1 lg:max-w-xs">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Cari Nama atau NIS..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600"
-          />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 pt-0.5">
+          <span className="font-semibold text-slate-600">Keterangan Status:</span>
+          <span><strong className="text-emerald-800">H</strong> Hadir</span>
+          <span aria-hidden="true">&middot;</span>
+          <span><strong className="text-rose-700">A</strong> Alpha</span>
+          <span aria-hidden="true">&middot;</span>
+          <span><strong className="text-sky-700">I</strong> Izin</span>
+          <span aria-hidden="true">&middot;</span>
+          <span><strong className="text-amber-700">S</strong> Sakit</span>
+          <span className="text-[11px] text-slate-400 sm:ml-auto">
+            Klik kode untuk mengubah H &rarr; A &rarr; I &rarr; S
+          </span>
         </div>
       </div>
 
@@ -1592,8 +1608,8 @@ export default function AbsenJamaahPage() {
       ==================================================================== */}
       {activeTab === 'input' && (
         <div className="space-y-4 print:hidden">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 flex-1">
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 flex-1">
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[11px] text-slate-500 block">Santri Tampil</span>
                 <strong className="text-lg font-bold text-slate-900 tabular-nums">
@@ -1618,7 +1634,7 @@ export default function AbsenJamaahPage() {
                   {dailySummary.izin}
                 </strong>
               </div>
-              <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200">
+              <div className="col-span-2 sm:col-span-1 p-2.5 bg-amber-50 rounded-xl border border-amber-200">
                 <span className="text-[11px] text-amber-700 block">Sakit (S)</span>
                 <strong className="text-lg font-bold text-amber-900 tabular-nums">
                   {dailySummary.sakit}
@@ -1626,15 +1642,15 @@ export default function AbsenJamaahPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0">
-              <div className="text-xs text-slate-600 mr-1">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
+              <div className="text-xs text-slate-600 mr-1 w-full sm:w-auto">
                 {savedCountInScope > 0 ? (
-                  <span className="text-emerald-800 font-semibold flex items-center gap-1.5">
+                  <span className="text-emerald-800 font-semibold flex items-center gap-1.5 whitespace-nowrap">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     Tercatat ({savedCountInScope}/{filteredSantri.length})
                   </span>
                 ) : (
-                  <span className="text-slate-500 flex items-center gap-1.5">
+                  <span className="text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
                     <Clock className="w-4 h-4 text-slate-400 shrink-0" />
                     Belum disimpan (Default H)
                   </span>
@@ -1644,38 +1660,122 @@ export default function AbsenJamaahPage() {
               <button
                 type="button"
                 onClick={handleSetSemuaHadir}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+                className="flex-1 sm:flex-none min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                Set Semua Hadir
+                Semua Hadir
               </button>
 
               <button
                 type="button"
                 disabled={saving || loading || filteredSantri.length === 0}
                 onClick={handleSaveDailyFiveWaktu}
-                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
+                className="flex-1 sm:flex-none min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
               >
                 <Save className="w-4 h-4" />
-                {saving ? 'Menyimpan...' : 'Simpan Absen 5 Waktu'}
+                {saving ? 'Menyimpan...' : 'Simpan Absen'}
               </button>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* MOBILE / PWA CARD LIST (INPUT 5 WAKTU) */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {loading ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Memuat daftar santri dan presensi 5 waktu...
+                </div>
+              ) : filteredSantri.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Tidak ada santri aktif yang cocok dengan filter kamar atau pencarian.
+                </div>
+              ) : (
+                filteredSantri.map((s, idx) => {
+                  const entry = dailyMap[s.id] || {
+                    statuses: createDefaultStatuses(),
+                    alasan: '',
+                    sudahTakzir: false,
+                  };
+                  const hasNonHadir = WAKTU_SHOLAT_LIST.some(
+                    (w) => entry.statuses[w.key] !== 'hadir'
+                  );
+                  return (
+                    <div
+                      key={s.id}
+                      className={`p-3.5 space-y-2.5 text-xs ${
+                        hasNonHadir ? 'bg-amber-50/40' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 truncate">
+                            <span className="font-mono text-slate-400 mr-1.5">#{idx + 1}</span>
+                            {s.nama_lengkap}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-500 mt-0.5 tabular-nums">
+                            NIS {s.nis} &middot; Kamar {s.kamar}
+                          </div>
+                        </div>
+                        {hasNonHadir ? (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold shrink-0 whitespace-nowrap">
+                            Ada Ketidakhadiran
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-semibold shrink-0 whitespace-nowrap">
+                            Hadir 5 Waktu
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {WAKTU_SHOLAT_LIST.map((w) => {
+                          const st = entry.statuses[w.key];
+                          const meta = STATUS_META[st];
+                          return (
+                            <button
+                              key={w.key}
+                              type="button"
+                              onClick={() => handleCycleStatus(s.id, w.key)}
+                              className={`min-h-[48px] py-1.5 px-1 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-colors ${meta.buttonClass}`}
+                            >
+                              <span className="text-[9.5px] font-semibold opacity-80 leading-none">
+                                {w.label.slice(0, 4)}
+                              </span>
+                              <span className="text-sm font-extrabold leading-none">{meta.code}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {hasNonHadir && (
+                        <input
+                          type="text"
+                          placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
+                          value={entry.alasan}
+                          onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
+                          className="w-full min-h-[38px] px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* DESKTOP TABLE (INPUT 5 WAKTU) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px] tracking-wider">
                   <tr>
-                    <th className="p-3.5 w-10 text-center">No</th>
-                    <th className="p-3.5">NIS &amp; Nama Santri</th>
-                    <th className="p-3.5">Kamar</th>
+                    <th className="py-3 px-3 w-11 text-center">No</th>
+                    <th className="py-3 px-3.5 min-w-[180px]">NIS &amp; Nama Santri</th>
+                    <th className="py-3 px-3 w-24 whitespace-nowrap">Kamar</th>
                     {WAKTU_SHOLAT_LIST.map((w) => (
-                      <th key={w.key} className="p-2.5 text-center whitespace-nowrap">
+                      <th key={w.key} className="py-3 px-2 text-center whitespace-nowrap w-16">
                         {w.label}
                       </th>
                     ))}
-                    <th className="p-3.5 min-w-[200px]">Alasan Ketidakhadiran</th>
+                    <th className="py-3 px-3.5 min-w-[200px]">Alasan Ketidakhadiran</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1708,42 +1808,42 @@ export default function AbsenJamaahPage() {
                             hasNonHadir ? 'bg-amber-50/35 hover:bg-amber-50/60' : 'hover:bg-slate-50'
                           }`}
                         >
-                          <td className="p-3.5 text-center font-mono text-slate-400 tabular-nums">
+                          <td className="py-3 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="p-3.5">
+                          <td className="py-3 px-3.5">
                             <div className="font-semibold text-slate-900">{s.nama_lengkap}</div>
                             <div className="font-mono text-[11px] text-emerald-800 tabular-nums">
                               {s.nis}
                             </div>
                           </td>
-                          <td className="p-3.5 whitespace-nowrap font-medium text-slate-700">
+                          <td className="py-3 px-3 whitespace-nowrap font-medium text-slate-700">
                             {s.kamar}
                           </td>
                           {WAKTU_SHOLAT_LIST.map((w) => {
                             const st = entry.statuses[w.key];
                             const meta = STATUS_META[st];
                             return (
-                              <td key={w.key} className="p-2 text-center">
+                              <td key={w.key} className="py-2 px-1.5 text-center">
                                 <button
                                   type="button"
                                   title={`${w.label}: ${meta.label} (Klik untuk ubah H → A → I → S)`}
                                   onClick={() => handleCycleStatus(s.id, w.key)}
-                                  className={`min-w-[44px] min-h-[40px] px-2.5 py-1.5 rounded-xl border text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer ${meta.buttonClass}`}
+                                  className={`min-w-[44px] min-h-[38px] px-2.5 py-1 rounded-xl border text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer ${meta.buttonClass}`}
                                 >
                                   {meta.code}
                                 </button>
                               </td>
                             );
                           })}
-                          <td className="p-3">
+                          <td className="py-2.5 px-3.5">
                             {hasNonHadir ? (
                               <input
                                 type="text"
                                 placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
                                 value={entry.alasan}
                                 onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
-                                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
                               />
                             ) : (
                               <span className="text-[11px] text-slate-400">Hadir 5 waktu</span>
@@ -1764,9 +1864,9 @@ export default function AbsenJamaahPage() {
           TAB 2: DAFTAR TAKZIR HARIAN (ALPHA) & LAPORAN GRUP WA SEMUA KAMAR
       ==================================================================== */}
       {activeTab === 'laporan' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 print:hidden">
+        <div className="grid grid-cols-1 2xl:grid-cols-12 gap-5 print:hidden">
           {/* KOLOM KIRI: DAFTAR TAKZIR HARIAN KHUSUS ALPHA */}
-          <div className="xl:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+          <div className="2xl:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
@@ -1797,15 +1897,65 @@ export default function AbsenJamaahPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto flex-1">
+            {/* MOBILE CARDS TAKZIR HARIAN */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {dailyTakzirList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  Alhamdulillah, tidak ada santri wajib takzir (Alpha) pada filter saat ini.
+                </div>
+              ) : (
+                dailyTakzirList.map((item) => (
+                  <div key={item.santri.id} className="p-4 space-y-2.5 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 truncate">
+                          {item.santri.nama_lengkap}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+                          Kamar {item.santri.kamar} &middot; NIS {item.santri.nis}
+                        </div>
+                      </div>
+                      <span className="font-bold text-rose-700 text-[11px] shrink-0">
+                        {item.alphaTimes
+                          .map((t) => WAKTU_SHOLAT_LIST.find((w) => w.key === t)?.label || t)
+                          .join(', ')}
+                      </span>
+                    </div>
+                    {item.alasan && (
+                      <div className="text-[11px] text-slate-600">Keterangan: {item.alasan}</div>
+                    )}
+                    <button
+                      type="button"
+                      disabled={togglingTakzirId === item.santri.id}
+                      onClick={() =>
+                        handleToggleTakzirStatus(item.santri.id, !item.sudahTakzir)
+                      }
+                      className={`w-full min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors border ${
+                        item.sudahTakzir
+                          ? 'bg-emerald-700 text-white border-emerald-700'
+                          : 'bg-rose-50 text-rose-700 border-rose-300'
+                      }`}
+                    >
+                      {togglingTakzirId === item.santri.id
+                        ? 'Menyimpan...'
+                        : item.sudahTakzir
+                        ? 'Sudah Ditakzir'
+                        : 'Belum Ditakzir (Tandai Selesai)'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto flex-1">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px] tracking-wider">
                   <tr>
-                    <th className="p-3.5 w-10 text-center">No</th>
-                    <th className="p-3.5">Santri &amp; Kamar</th>
-                    <th className="p-3.5">Waktu Alpha</th>
-                    <th className="p-3.5">Keterangan</th>
-                    <th className="p-3.5 text-right">Status Takzir</th>
+                    <th className="py-3 px-3 w-11 text-center">No</th>
+                    <th className="py-3 px-3.5 min-w-[170px]">Santri &amp; Kamar</th>
+                    <th className="py-3 px-3.5 min-w-[150px]">Waktu Alpha</th>
+                    <th className="py-3 px-3.5 min-w-[150px]">Keterangan</th>
+                    <th className="py-3 px-3.5 text-right w-40 whitespace-nowrap">Status Takzir</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1818,22 +1968,22 @@ export default function AbsenJamaahPage() {
                   ) : (
                     dailyTakzirList.map((item, idx) => (
                       <tr key={item.santri.id} className="hover:bg-slate-50">
-                        <td className="p-3.5 text-center font-mono text-slate-400 tabular-nums">
+                        <td className="py-3.5 px-3 text-center font-mono text-slate-400 tabular-nums">
                           {idx + 1}
                         </td>
-                        <td className="p-3.5">
+                        <td className="py-3.5 px-3.5">
                           <div className="font-semibold text-slate-900">{item.santri.nama_lengkap}</div>
-                          <div className="text-[11px] text-slate-500">
+                          <div className="text-[11px] text-slate-500 whitespace-nowrap">
                             Kamar {item.santri.kamar} &middot; NIS {item.santri.nis}
                           </div>
                         </td>
-                        <td className="p-3.5 font-semibold text-rose-700">
+                        <td className="py-3.5 px-3.5 font-semibold text-rose-700">
                           {item.alphaTimes
                             .map((t) => WAKTU_SHOLAT_LIST.find((w) => w.key === t)?.label || t)
                             .join(', ')}
                         </td>
-                        <td className="p-3.5 text-slate-600">{item.alasan || '-'}</td>
-                        <td className="p-3.5 text-right">
+                        <td className="py-3.5 px-3.5 text-slate-600">{item.alasan || '-'}</td>
+                        <td className="py-3.5 px-3.5 text-right whitespace-nowrap">
                           <button
                             type="button"
                             disabled={togglingTakzirId === item.santri.id}
@@ -1862,7 +2012,7 @@ export default function AbsenJamaahPage() {
           </div>
 
           {/* KOLOM KANAN: GENERATOR LAPORAN HARIAN GRUP WA SEMUA KAMAR */}
-          <div className="xl:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col gap-3">
+          <div className="2xl:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
@@ -1878,7 +2028,7 @@ export default function AbsenJamaahPage() {
             <textarea
               readOnly
               value={whatsappReportText}
-              rows={18}
+              rows={16}
               className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-[11.5px] leading-relaxed text-slate-800 focus:outline-none resize-y"
             />
 
@@ -1893,7 +2043,7 @@ export default function AbsenJamaahPage() {
                     'Format laporan harian seluruh kamar sudah disalin dan siap ditempel ke grup WA pengurus.'
                   );
                 }}
-                className="flex-1 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
+                className="flex-1 min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
               >
                 <Copy className="w-4 h-4" />
                 Salin Teks Laporan WA
@@ -1903,7 +2053,7 @@ export default function AbsenJamaahPage() {
                 href={`https://wa.me/?text=${encodeURIComponent(whatsappReportText)}`}
                 target="_blank"
                 rel="noreferrer"
-                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition-colors"
+                className="min-h-[40px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition-colors"
               >
                 <MessageCircle className="w-4 h-4" />
                 Buka WhatsApp
@@ -1918,8 +2068,8 @@ export default function AbsenJamaahPage() {
       ==================================================================== */}
       {activeTab === 'rekap' && (
         <div className="space-y-4 print:hidden">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2.5">
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
                 {(['harian', 'mingguan', 'bulanan'] as RekapPeriod[]).map((p) => (
                   <button
@@ -1964,7 +2114,7 @@ export default function AbsenJamaahPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
               <span>{rekapBounds.label}</span>
               <span aria-hidden="true">&middot;</span>
               <span className="tabular-nums font-bold text-emerald-800">
@@ -2055,22 +2205,132 @@ export default function AbsenJamaahPage() {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* MOBILE CARD REKAP */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {rekapGroupBy === 'santri' ? (
+                rekapPerSantri.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    Belum ada data santri yang dapat direkap.
+                  </div>
+                ) : (
+                  rekapPerSantri.map((row) => (
+                    <div key={row.santri.id} className="p-4 space-y-2 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 truncate">
+                            {row.santri.nama_lengkap}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-500 tabular-nums">
+                            {row.santri.nis} &middot; Kamar {row.santri.kamar}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 tabular-nums">
+                          <strong className="text-base font-extrabold text-slate-900 block leading-none">
+                            {row.total > 0 ? `${row.pct}%` : '-'}
+                          </strong>
+                          <span
+                            className={`text-[10.5px] font-bold ${
+                              row.total === 0
+                                ? 'text-slate-400'
+                                : row.pct >= 90
+                                ? 'text-emerald-700'
+                                : row.pct >= 75
+                                ? 'text-amber-700'
+                                : 'text-rose-700'
+                            }`}
+                          >
+                            {row.total === 0
+                              ? 'Belum ada sesi'
+                              : row.pct >= 90
+                              ? 'Baik'
+                              : row.pct >= 75
+                              ? 'Perlu Pantau'
+                              : 'Kurang'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-5 gap-1.5 text-center tabular-nums text-[11px]">
+                        <div className="py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+                          <span className="text-slate-500 block text-[10px]">Sesi</span>
+                          <strong>{row.total}</strong>
+                        </div>
+                        <div className="py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800">
+                          <span className="block text-[10px]">Hadir</span>
+                          <strong>{row.hadir}</strong>
+                        </div>
+                        <div className="py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700">
+                          <span className="block text-[10px]">Alpha</span>
+                          <strong>{row.alpha}</strong>
+                        </div>
+                        <div className="py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700">
+                          <span className="block text-[10px]">Izin</span>
+                          <strong>{row.izin}</strong>
+                        </div>
+                        <div className="py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
+                          <span className="block text-[10px]">Sakit</span>
+                          <strong>{row.sakit}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )
+              ) : rekapPerKamar.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Belum ada data kamar yang tersedia.
+                </div>
+              ) : (
+                rekapPerKamar.map((row) => (
+                  <div key={row.kamar} className="p-4 space-y-2 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-sm text-slate-900">Kamar {row.kamar}</div>
+                        <div className="text-[11px] text-slate-500 tabular-nums">
+                          {row.jumlahSantri} santri aktif &middot; {row.total} sesi
+                        </div>
+                      </div>
+                      <strong className="text-lg font-extrabold text-slate-900 tabular-nums shrink-0">
+                        {row.total > 0 ? `${row.pct}%` : '-'}
+                      </strong>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 text-center tabular-nums text-[11px]">
+                      <div className="py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800">
+                        <span className="block text-[10px]">Hadir</span>
+                        <strong>{row.hadir}</strong>
+                      </div>
+                      <div className="py-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700">
+                        <span className="block text-[10px]">Alpha</span>
+                        <strong>{row.alpha}</strong>
+                      </div>
+                      <div className="py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700">
+                        <span className="block text-[10px]">Izin</span>
+                        <strong>{row.izin}</strong>
+                      </div>
+                      <div className="py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
+                        <span className="block text-[10px]">Sakit</span>
+                        <strong>{row.sakit}</strong>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               {rekapGroupBy === 'santri' ? (
                 <table className="w-full text-left text-xs text-slate-700">
-                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px] tracking-wider">
                     <tr>
-                      <th className="p-3.5 w-12 text-center">No</th>
-                      <th className="p-3.5">NIS</th>
-                      <th className="p-3.5">Nama Santri</th>
-                      <th className="p-3.5">Kamar</th>
-                      <th className="p-3.5 text-right">Sesi</th>
-                      <th className="p-3.5 text-right">Hadir</th>
-                      <th className="p-3.5 text-right">Alpha</th>
-                      <th className="p-3.5 text-right">Izin</th>
-                      <th className="p-3.5 text-right">Sakit</th>
-                      <th className="p-3.5 text-right">Kehadiran</th>
-                      <th className="p-3.5">Evaluasi</th>
+                      <th className="py-3 px-3 w-11 text-center">No</th>
+                      <th className="py-3 px-3 w-24 whitespace-nowrap">NIS</th>
+                      <th className="py-3 px-3.5 min-w-[180px]">Nama Santri</th>
+                      <th className="py-3 px-3 w-24 whitespace-nowrap">Kamar</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Sesi</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Hadir</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Alpha</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Izin</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Sakit</th>
+                      <th className="py-3 px-3 text-right whitespace-nowrap">Kehadiran</th>
+                      <th className="py-3 px-3.5 whitespace-nowrap">Evaluasi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2083,33 +2343,33 @@ export default function AbsenJamaahPage() {
                     ) : (
                       rekapPerSantri.map((row, idx) => (
                         <tr key={row.santri.id} className="hover:bg-slate-50">
-                          <td className="p-3.5 text-center font-mono text-slate-400 tabular-nums">
+                          <td className="py-3 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="p-3.5 font-mono font-bold text-emerald-800 tabular-nums">
+                          <td className="py-3 px-3 font-mono font-bold text-emerald-800 tabular-nums whitespace-nowrap">
                             {row.santri.nis}
                           </td>
-                          <td className="p-3.5 font-semibold text-slate-900">
+                          <td className="py-3 px-3.5 font-semibold text-slate-900">
                             {row.santri.nama_lengkap}
                           </td>
-                          <td className="p-3.5 text-slate-600">{row.santri.kamar}</td>
-                          <td className="p-3.5 text-right font-mono tabular-nums">{row.total}</td>
-                          <td className="p-3.5 text-right font-mono font-semibold text-emerald-700 tabular-nums">
+                          <td className="py-3 px-3 text-slate-600 whitespace-nowrap">{row.santri.kamar}</td>
+                          <td className="py-3 px-3 text-right font-mono tabular-nums">{row.total}</td>
+                          <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-700 tabular-nums">
                             {row.hadir}
                           </td>
-                          <td className="p-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">
+                          <td className="py-3 px-3 text-right font-mono font-bold text-rose-700 tabular-nums">
                             {row.alpha}
                           </td>
-                          <td className="p-3.5 text-right font-mono text-sky-700 tabular-nums">
+                          <td className="py-3 px-3 text-right font-mono text-sky-700 tabular-nums">
                             {row.izin}
                           </td>
-                          <td className="p-3.5 text-right font-mono text-amber-700 tabular-nums">
+                          <td className="py-3 px-3 text-right font-mono text-amber-700 tabular-nums">
                             {row.sakit}
                           </td>
-                          <td className="p-3.5 text-right font-mono font-bold text-slate-900 tabular-nums">
+                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 tabular-nums whitespace-nowrap">
                             {row.total > 0 ? `${row.pct}%` : '-'}
                           </td>
-                          <td className="p-3.5">
+                          <td className="py-3 px-3.5 whitespace-nowrap">
                             {row.total === 0 ? (
                               <span className="text-slate-400">Belum ada sesi</span>
                             ) : row.pct >= 90 ? (
@@ -2127,17 +2387,17 @@ export default function AbsenJamaahPage() {
                 </table>
               ) : (
                 <table className="w-full text-left text-xs text-slate-700">
-                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px] tracking-wider">
                     <tr>
-                      <th className="p-3.5 w-12 text-center">No</th>
-                      <th className="p-3.5">Kamar / Khos</th>
-                      <th className="p-3.5 text-right">Santri Aktif</th>
-                      <th className="p-3.5 text-right">Sesi Tercatat</th>
-                      <th className="p-3.5 text-right">Hadir</th>
-                      <th className="p-3.5 text-right">Alpha</th>
-                      <th className="p-3.5 text-right">Izin</th>
-                      <th className="p-3.5 text-right">Sakit</th>
-                      <th className="p-3.5 text-right">Kehadiran</th>
+                      <th className="py-3 px-3 w-11 text-center">No</th>
+                      <th className="py-3 px-3.5 min-w-[140px]">Kamar / Khos</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Santri Aktif</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Sesi Tercatat</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Hadir</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Alpha</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Izin</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Sakit</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">Kehadiran</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2150,25 +2410,25 @@ export default function AbsenJamaahPage() {
                     ) : (
                       rekapPerKamar.map((row, idx) => (
                         <tr key={row.kamar} className="hover:bg-slate-50">
-                          <td className="p-3.5 text-center font-mono text-slate-400 tabular-nums">
+                          <td className="py-3 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="p-3.5 font-bold text-slate-900">Kamar {row.kamar}</td>
-                          <td className="p-3.5 text-right font-mono tabular-nums">{row.jumlahSantri}</td>
-                          <td className="p-3.5 text-right font-mono tabular-nums">{row.total}</td>
-                          <td className="p-3.5 text-right font-mono font-semibold text-emerald-700 tabular-nums">
+                          <td className="py-3 px-3.5 font-bold text-slate-900 whitespace-nowrap">Kamar {row.kamar}</td>
+                          <td className="py-3 px-3.5 text-right font-mono tabular-nums">{row.jumlahSantri}</td>
+                          <td className="py-3 px-3.5 text-right font-mono tabular-nums">{row.total}</td>
+                          <td className="py-3 px-3.5 text-right font-mono font-semibold text-emerald-700 tabular-nums">
                             {row.hadir}
                           </td>
-                          <td className="p-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">
+                          <td className="py-3 px-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">
                             {row.alpha}
                           </td>
-                          <td className="p-3.5 text-right font-mono text-sky-700 tabular-nums">
+                          <td className="py-3 px-3.5 text-right font-mono text-sky-700 tabular-nums">
                             {row.izin}
                           </td>
-                          <td className="p-3.5 text-right font-mono text-amber-700 tabular-nums">
+                          <td className="py-3 px-3.5 text-right font-mono text-amber-700 tabular-nums">
                             {row.sakit}
                           </td>
-                          <td className="p-3.5 text-right font-mono font-bold text-slate-900 tabular-nums">
+                          <td className="py-3 px-3.5 text-right font-mono font-bold text-slate-900 tabular-nums whitespace-nowrap">
                             {row.total > 0 ? `${row.pct}%` : '-'}
                           </td>
                         </tr>
@@ -2187,7 +2447,7 @@ export default function AbsenJamaahPage() {
       ==================================================================== */}
       {activeTab === 'alpha' && (
         <div className="space-y-4 print:hidden">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-600">Periode Evaluasi:</span>
@@ -2217,24 +2477,89 @@ export default function AbsenJamaahPage() {
               </div>
             </div>
 
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-slate-500 whitespace-nowrap">
               Rentang: <span className="font-medium text-slate-700">{formatTanggalIndo(alphaStart)}</span> s/d{' '}
               <span className="font-medium text-slate-700">{formatTanggalIndo(selectedDate)}</span>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* MOBILE CARDS PERINGATAN DINI ALPHA */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {frequentAlphaList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  Alhamdulillah, tidak ada santri dengan Alpha &ge; {alphaThreshold} waktu pada rentang{' '}
+                  {alphaWindowDays} hari terakhir.
+                </div>
+              ) : (
+                frequentAlphaList.map((item) => {
+                  const wali = getWaliContact(item.santri);
+                  const msg = buildWaWaliMessage(item.santri, item.alphaCount, item.recentDates);
+                  return (
+                    <div key={item.santri.id} className="p-4 space-y-2.5 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-slate-900 truncate">
+                            {item.santri.nama_lengkap}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-500 tabular-nums">
+                            {item.santri.nis} &middot; Kamar {item.santri.kamar}
+                          </div>
+                        </div>
+                        <span className="font-mono font-extrabold text-rose-700 shrink-0 whitespace-nowrap">
+                          {item.alphaCount}x Alpha
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Riwayat: {item.recentDates.join(' · ')}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(msg);
+                            showToast(
+                              'info',
+                              'Pesan Disalin',
+                              `Pesan peringatan untuk wali ${item.santri.nama_lengkap} disalin ke clipboard.`
+                            );
+                          }}
+                          className={`min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold flex items-center justify-center gap-1.5 ${
+                            wali.wa ? '' : 'col-span-2'
+                          }`}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Salin Pesan
+                        </button>
+                        {wali.wa && (
+                          <a
+                            href={`https://wa.me/${wali.wa}?text=${encodeURIComponent(msg)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="min-h-[40px] px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold flex items-center justify-center gap-1.5"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            Kirim WA
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px] tracking-wider">
                   <tr>
-                    <th className="p-3.5 w-12 text-center">No</th>
-                    <th className="p-3.5">NIS</th>
-                    <th className="p-3.5">Nama Santri</th>
-                    <th className="p-3.5">Kamar</th>
-                    <th className="p-3.5 text-right">Total Alpha</th>
-                    <th className="p-3.5">Riwayat Terakhir</th>
-                    <th className="p-3.5 text-right">Tindak Lanjut Wali</th>
+                    <th className="py-3 px-3 w-11 text-center">No</th>
+                    <th className="py-3 px-3 w-24 whitespace-nowrap">NIS</th>
+                    <th className="py-3 px-3.5 min-w-[175px]">Nama Santri</th>
+                    <th className="py-3 px-3 w-24 whitespace-nowrap">Kamar</th>
+                    <th className="py-3 px-3.5 text-right whitespace-nowrap w-28">Total Alpha</th>
+                    <th className="py-3 px-3.5 min-w-[200px]">Riwayat Terakhir</th>
+                    <th className="py-3 px-3.5 text-right w-56">Tindak Lanjut Wali</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -2251,24 +2576,24 @@ export default function AbsenJamaahPage() {
                       const msg = buildWaWaliMessage(item.santri, item.alphaCount, item.recentDates);
                       return (
                         <tr key={item.santri.id} className="hover:bg-rose-50/30">
-                          <td className="p-3.5 text-center font-mono text-slate-400 tabular-nums">
+                          <td className="py-3.5 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="p-3.5 font-mono font-bold text-emerald-800 tabular-nums">
+                          <td className="py-3.5 px-3 font-mono font-bold text-emerald-800 tabular-nums whitespace-nowrap">
                             {item.santri.nis}
                           </td>
-                          <td className="p-3.5 font-semibold text-slate-900">
+                          <td className="py-3.5 px-3.5 font-semibold text-slate-900">
                             {item.santri.nama_lengkap}
                           </td>
-                          <td className="p-3.5 text-slate-600">{item.santri.kamar}</td>
-                          <td className="p-3.5 text-right font-mono font-extrabold text-rose-700 tabular-nums">
+                          <td className="py-3.5 px-3 text-slate-600 whitespace-nowrap">{item.santri.kamar}</td>
+                          <td className="py-3.5 px-3.5 text-right font-mono font-extrabold text-rose-700 tabular-nums whitespace-nowrap">
                             {item.alphaCount}x Alpha
                           </td>
-                          <td className="p-3.5 text-[11px] text-slate-500">
+                          <td className="py-3.5 px-3.5 text-[11px] text-slate-500">
                             {item.recentDates.join(' · ')}
                           </td>
-                          <td className="p-3.5">
-                            <div className="flex items-center justify-end gap-1.5">
+                          <td className="py-3.5 px-3.5">
+                            <div className="flex flex-nowrap items-center justify-end gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2279,7 +2604,7 @@ export default function AbsenJamaahPage() {
                                     `Pesan peringatan untuk wali ${item.santri.nama_lengkap} disalin ke clipboard.`
                                   );
                                 }}
-                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold flex items-center gap-1 whitespace-nowrap shrink-0"
+                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold flex items-center gap-1 whitespace-nowrap shrink-0"
                               >
                                 <Copy className="w-3.5 h-3.5" />
                                 Salin Pesan
@@ -2290,13 +2615,13 @@ export default function AbsenJamaahPage() {
                                   href={`https://wa.me/${wali.wa}?text=${encodeURIComponent(msg)}`}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold flex items-center gap-1 whitespace-nowrap shrink-0"
+                                  className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold flex items-center gap-1 whitespace-nowrap shrink-0"
                                 >
                                   <MessageCircle className="w-3.5 h-3.5" />
                                   Kirim WA
                                 </a>
                               ) : (
-                                <span className="text-[11px] text-slate-400">No. WA kosong</span>
+                                <span className="text-[11px] text-slate-400 whitespace-nowrap">No. WA kosong</span>
                               )}
                             </div>
                           </td>

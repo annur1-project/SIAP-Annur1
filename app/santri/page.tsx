@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Users, Plus, Search, Filter, X, Upload, FileSpreadsheet,
@@ -9,16 +9,15 @@ import {
   MapPin, Phone, UserCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-
-const DAFTAR_KAMAR = [
-  'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10',
-  'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
-  'Al-Fachriyah 1 (VIP)',
-  'Al-Fachriyah 2 (VIP)',
-  'Al-Fachriyah 3 (VIP)',
-  'Al-Fachriyah 4 (VIP)',
-  'NDALEM'
-];
+import {
+  DEFAULT_KAMAR_MASTER,
+  DEFAULT_SKEMA_PENDAFTARAN,
+  getTahunAjaranForDate,
+  hitungRincianPendaftaran,
+  mergeAturanOperasional,
+  readExtendedLocal,
+  type SkemaPendaftaranConfig,
+} from '@/lib/pengaturan';
 
 const ALLOWED_DB_COLUMNS = [
   'nis', 'tgl_masuk', 'nama_lengkap', 'kamar', 'tarif_syahriyah',
@@ -141,16 +140,21 @@ export default function DataSantriPage() {
   const [wilayahResults, setWilayahResults] = useState<any[]>([]);
   const [importing, setImporting] = useState(false);
 
+  const [skemaPendaftaran, setSkemaPendaftaran] = useState<SkemaPendaftaranConfig>(
+    DEFAULT_SKEMA_PENDAFTARAN
+  );
+  const [daftarKamar, setDaftarKamar] = useState<string[]>(DEFAULT_KAMAR_MASTER);
+
   // Form Pendaftaran Santri Baru (Ringkas)
   const [isCustomNominal, setIsCustomNominal] = useState(false);
   const [formData, setFormData] = useState({
     tgl_masuk: '',
     nama_lengkap: '',
     paket_pendaftaran: 'reguler',
-    nominal_pendaftaran: 1500000,
+    nominal_pendaftaran: 850000,
     catatan_keringanan: '',
     kamar: 'A1',
-    tarif_syahriyah: 425000,
+    tarif_syahriyah: 450000,
     no_wa_wali: '',
     alamat_jalan: '',
     desa: '',
@@ -197,40 +201,120 @@ export default function DataSantriPage() {
 
   const fetchPengaturan = async () => {
     try {
+      const localExt = readExtendedLocal();
       const { data } = await supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle();
       if (data) {
         setPengaturan((prev: any) => ({ ...prev, ...data }));
       }
+      const aturan = mergeAturanOperasional(
+        (data as Record<string, unknown> | null)?.aturan_operasional ?? localExt?.aturan_operasional
+      );
+      setSkemaPendaftaran(aturan.pendaftaran);
+      setDaftarKamar(aturan.daftar_kamar);
+      setFormData((prev) => ({
+        ...prev,
+        tarif_syahriyah: prev.kamar.toUpperCase().includes('VIP')
+          ? aturan.pendaftaran.syahriyah_vip
+          : prev.kamar === 'NDALEM'
+          ? 145000
+          : aturan.pendaftaran.syahriyah_reguler,
+      }));
     } catch {
       // Abaikan jika pengaturan belum tersedia
     }
   };
 
   useEffect(() => {
-    const currentDate = new Date().toISOString().split('T')[0];
-    setTodayStr(currentDate);
-    setFormData((prev) => ({ ...prev, tgl_masuk: prev.tgl_masuk || currentDate }));
-    fetchSantri();
-    fetchPengaturan();
+    const timer = setTimeout(() => {
+      const currentDate = new Date().toISOString().split('T')[0];
+      setTodayStr(currentDate);
+      setFormData((prev) => ({ ...prev, tgl_masuk: prev.tgl_masuk || currentDate }));
+      void fetchSantri();
+      void fetchPengaturan();
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update otomatis biaya pendaftaran
-  useEffect(() => {
-    if (!isCustomNominal) {
-      const isEarlyBird = santriList.length < 100;
-      if (formData.paket_pendaftaran === 'reguler') {
-        setFormData((prev) => ({ ...prev, nominal_pendaftaran: isEarlyBird ? 1500000 : 4500000 }));
-      } else {
-        setFormData((prev) => ({ ...prev, nominal_pendaftaran: isEarlyBird ? 3100000 : 6100000 }));
-      }
+  const rincianReguler = useMemo(
+    () =>
+      hitungRincianPendaftaran({
+        paket: 'reguler',
+        jumlahPendaftarSaatIni: santriList.length,
+        skema: skemaPendaftaran,
+      }),
+    [santriList.length, skemaPendaftaran]
+  );
+
+  const rincianVip = useMemo(
+    () =>
+      hitungRincianPendaftaran({
+        paket: 'vip',
+        jumlahPendaftarSaatIni: santriList.length,
+        skema: skemaPendaftaran,
+      }),
+    [santriList.length, skemaPendaftaran]
+  );
+
+  const rincianPsbAktif = useMemo(
+    () =>
+      hitungRincianPendaftaran({
+        paket: formData.paket_pendaftaran === 'vip' ? 'vip' : 'reguler',
+        jumlahPendaftarSaatIni: santriList.length,
+        skema: skemaPendaftaran,
+        customNominal: isCustomNominal ? Number(formData.nominal_pendaftaran || 0) : null,
+      }),
+    [
+      formData.paket_pendaftaran,
+      formData.nominal_pendaftaran,
+      isCustomNominal,
+      santriList.length,
+      skemaPendaftaran,
+    ]
+  );
+
+  const handleSelectPaketPendaftaran = (paket: 'reguler' | 'vip') => {
+    const nextRincian = paket === 'vip' ? rincianVip : rincianReguler;
+    const isCurrentVipRoom = formData.kamar.toUpperCase().includes('VIP');
+    let nextKamar = formData.kamar;
+    if (paket === 'vip' && !isCurrentVipRoom) {
+      nextKamar = daftarKamar.find((k) => k.toUpperCase().includes('VIP')) || 'Al-Fachriyah 1 (VIP)';
+    } else if (paket === 'reguler' && isCurrentVipRoom) {
+      nextKamar = daftarKamar.find((k) => !k.toUpperCase().includes('VIP') && k !== 'NDALEM') || 'A1';
     }
-  }, [formData.paket_pendaftaran, isCustomNominal, santriList.length]);
+    const nextSyahriyah =
+      nextKamar === 'NDALEM'
+        ? 145000
+        : paket === 'vip'
+        ? skemaPendaftaran.syahriyah_vip
+        : skemaPendaftaran.syahriyah_reguler;
+
+    setFormData((prev) => ({
+      ...prev,
+      paket_pendaftaran: paket,
+      kamar: nextKamar,
+      tarif_syahriyah: nextSyahriyah,
+      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.totalBayar,
+    }));
+  };
 
   const handleSelectKamarPendaftaran = (kamarValue: string) => {
-    let tarif = 425000;
-    if (kamarValue.includes('VIP')) tarif = 475000;
-    else if (kamarValue === 'NDALEM') tarif = 145000;
-    setFormData((prev) => ({ ...prev, kamar: kamarValue, tarif_syahriyah: tarif }));
+    const isVipRoom = kamarValue.toUpperCase().includes('VIP') || kamarValue.toUpperCase().includes('FACHRIYAH');
+    const isNdalem = kamarValue === 'NDALEM';
+    const nextPaket: 'reguler' | 'vip' = isVipRoom ? 'vip' : 'reguler';
+    const nextTarif = isNdalem
+      ? 145000
+      : isVipRoom
+      ? skemaPendaftaran.syahriyah_vip
+      : skemaPendaftaran.syahriyah_reguler;
+    const nextRincian = isVipRoom ? rincianVip : rincianReguler;
+    setFormData((prev) => ({
+      ...prev,
+      kamar: kamarValue,
+      paket_pendaftaran: nextPaket,
+      tarif_syahriyah: nextTarif,
+      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.totalBayar,
+    }));
   };
 
   // Trigger Cetak Satuan maupun Massal
@@ -289,11 +373,19 @@ export default function DataSantriPage() {
     }
 
     setSaving(true);
-    const assignedNis = generateNextNis(formData.tgl_masuk || todayStr, santriList, 1);
+    const tglMasukFinal = formData.tgl_masuk || todayStr;
+    const assignedNis = generateNextNis(tglMasukFinal, santriList, 1);
+    const rincianFinal = hitungRincianPendaftaran({
+      paket: formData.paket_pendaftaran === 'vip' ? 'vip' : 'reguler',
+      jumlahPendaftarSaatIni: santriList.length,
+      skema: skemaPendaftaran,
+      customNominal: isCustomNominal ? Number(formData.nominal_pendaftaran || 0) : null,
+    });
 
     const payload = sanitizePayload({
       ...formData,
-      tgl_masuk: formData.tgl_masuk || todayStr,
+      nominal_pendaftaran: rincianFinal.totalBayar,
+      tgl_masuk: tglMasukFinal,
       nis: assignedNis,
       no_wa_ayah: formData.no_wa_wali,
       status: 'aktif',
@@ -308,14 +400,72 @@ export default function DataSantriPage() {
       return;
     }
 
-    await supabase.from('keuangan_transaksi').insert([{
-      santri_id: newSantri.id,
-      dompet: 'pendaftaran',
-      tipe: 'masuk',
-      kategori: `Pendaftaran ${formData.paket_pendaftaran.toUpperCase()}`,
-      nominal: formData.nominal_pendaftaran,
-      keterangan: formData.catatan_keringanan || `Pendaftaran Santri Baru (${formData.nama_lengkap})`
-    }]);
+    const noKuitansiPsb = `KWT-PSB-${tglMasukFinal.replace(/-/g, '').slice(2)}-${assignedNis.slice(-4)}`;
+    const periodeBulanPertama = tglMasukFinal.slice(0, 7);
+    const tahunAjaranMasuk = getTahunAjaranForDate(tglMasukFinal);
+
+    const kasPayloads: Array<Record<string, unknown>> = [];
+    if (rincianFinal.nominalDompetPendaftaran > 0) {
+      kasPayloads.push({
+        santri_id: newSantri.id,
+        dompet: 'pendaftaran',
+        tipe: 'masuk',
+        kategori: `Pendaftaran ${rincianFinal.paket.toUpperCase()}`,
+        nominal: rincianFinal.nominalDompetPendaftaran,
+        keterangan:
+          formData.catatan_keringanan ||
+          `Pendaftaran Santri Baru ${rincianFinal.paket.toUpperCase()} (${formData.nama_lengkap})${
+            rincianFinal.isFreeUangPangkal ? ' - Free Uang Pangkal' : ''
+          }`,
+        metode_pembayaran: 'tunai',
+        tgl_transaksi: tglMasukFinal,
+        no_kuitansi: noKuitansiPsb,
+      });
+    }
+
+    if (rincianFinal.nominalSyahriyahBulanPertama > 0) {
+      kasPayloads.push({
+        santri_id: newSantri.id,
+        dompet: 'operasional',
+        tipe: 'masuk',
+        kategori: 'Syahriyah & Iuran Santri',
+        nominal: rincianFinal.nominalSyahriyahBulanPertama,
+        bulan_tagihan: `Syahriyah Bulan Pertama (${periodeBulanPertama})`,
+        keterangan: `Syahriyah Bulan Pertama PSB - ${formData.nama_lengkap} (${formData.kamar})`,
+        metode_pembayaran: 'tunai',
+        tgl_transaksi: tglMasukFinal,
+        no_kuitansi: noKuitansiPsb,
+      });
+    }
+
+    if (kasPayloads.length > 0) {
+      await supabase.from('keuangan_transaksi').insert(kasPayloads);
+    }
+
+    if (rincianFinal.nominalSyahriyahBulanPertama > 0) {
+      await supabase.from('pembayaran_santri_detail').insert([
+        {
+          santri_id: newSantri.id,
+          tahun_ajaran: tahunAjaranMasuk,
+          item_kode: 'syahriyah',
+          periode_bulan: periodeBulanPertama,
+          label_item: `Syahriyah Bulan Pertama (${periodeBulanPertama})`,
+          dompet: 'operasional',
+          nominal: rincianFinal.nominalSyahriyahBulanPertama,
+          is_migrasi: false,
+          no_kuitansi: noKuitansiPsb,
+          metode_pembayaran: 'tunai',
+          tgl_bayar: tglMasukFinal,
+          petugas_nama: 'Pendaftaran PSB',
+        },
+      ]);
+    }
+
+    const nextDefaultReguler = hitungRincianPendaftaran({
+      paket: 'reguler',
+      jumlahPendaftarSaatIni: santriList.length + 1,
+      skema: skemaPendaftaran,
+    });
 
     setSaving(false);
     setShowModalForm(false);
@@ -323,10 +473,10 @@ export default function DataSantriPage() {
       tgl_masuk: todayStr,
       nama_lengkap: '',
       paket_pendaftaran: 'reguler',
-      nominal_pendaftaran: santriList.length + 1 < 100 ? 1500000 : 4500000,
+      nominal_pendaftaran: nextDefaultReguler.totalBayar,
       catatan_keringanan: '',
       kamar: 'A1',
-      tarif_syahriyah: 425000,
+      tarif_syahriyah: skemaPendaftaran.syahriyah_reguler,
       no_wa_wali: '',
       alamat_jalan: '',
       desa: '',
@@ -337,7 +487,11 @@ export default function DataSantriPage() {
     });
     setWilayahQuery('');
     setIsCustomNominal(false);
-    showToast('success', 'Santri Berhasil Didaftarkan!', `${newSantri.nama_lengkap} terdaftar dengan NIS ${assignedNis}.`);
+    showToast(
+      'success',
+      'Santri Berhasil Didaftarkan!',
+      `${newSantri.nama_lengkap} (NIS ${assignedNis}) tercatat · No. Kuitansi ${noKuitansiPsb}.`
+    );
     fetchSantri();
   };
 
@@ -494,7 +648,11 @@ export default function DataSantriPage() {
           const tglMasuk = row['Tanggal Masuk'] || todayStr || '2026-01-01';
           const autoNis = row['NIS'] ? String(row['NIS']).trim() : generateNextNis(tglMasuk, santriList, idx + 1);
           const tipeSpp = String(row['Tipe SPP'] || 'Reguler').toLowerCase();
-          const tarif = tipeSpp.includes('vip') ? 475000 : tipeSpp.includes('ndalem') ? 145000 : 425000;
+          const tarif = tipeSpp.includes('vip')
+            ? skemaPendaftaran.syahriyah_vip
+            : tipeSpp.includes('ndalem')
+            ? 145000
+            : skemaPendaftaran.syahriyah_reguler;
 
           return sanitizePayload({
             nis: autoNis,
@@ -566,7 +724,12 @@ export default function DataSantriPage() {
       'Tanggal Masuk': s.tgl_masuk || '',
       'Nama Lengkap': s.nama_lengkap || '',
       'Khos / Kamar': s.kamar || '',
-      'Tipe SPP': s.tarif_syahriyah === 475000 ? 'VIP' : s.tarif_syahriyah === 145000 ? 'Ndalem' : 'Reguler',
+      'Tipe SPP':
+        s.tarif_syahriyah >= 475000 || String(s.kamar || '').toUpperCase().includes('VIP')
+          ? 'VIP'
+          : s.tarif_syahriyah === 145000
+          ? 'Ndalem'
+          : 'Reguler',
       'NISN': s.nisn || '',
       'NIK': s.nik || '',
       'No KK': s.no_kk || '',
@@ -1083,11 +1246,11 @@ export default function DataSantriPage() {
       )}
 
       {/* HEADER PAGE + PROGRESS BAR KELENGKAPAN EMIS */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden space-y-4">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden space-y-4">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <Users className="w-6 h-6 text-emerald-700" />
+              <Users className="w-6 h-6 text-emerald-700 shrink-0" />
               Master Data Santri &amp; Pendaftaran EMIS
             </h1>
             <p className="text-xs text-slate-500 mt-1">
@@ -1098,25 +1261,25 @@ export default function DataSantriPage() {
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             <button
               onClick={handleDownloadTemplate}
-              className="px-3 py-2.5 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              className="min-h-[40px] px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+              <FileSpreadsheet className="w-4 h-4 text-emerald-700 shrink-0" />
               Template Excel
             </button>
 
             <button
               onClick={() => setShowModalImport(true)}
-              className="px-3 py-2.5 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              className="min-h-[40px] px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-4 h-4 shrink-0" />
               Import Excel
             </button>
 
             <button
               onClick={handleExportExcel}
-              className="px-3 py-2.5 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              className="min-h-[40px] px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-4 h-4 shrink-0" />
               Export Excel
             </button>
 
@@ -1125,9 +1288,9 @@ export default function DataSantriPage() {
                 setWilayahQuery('');
                 setShowModalForm(true);
               }}
-              className="px-4 py-2.5 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 transition-colors shadow-sm"
+              className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               Pendaftaran Santri Baru
             </button>
           </div>
@@ -1215,74 +1378,186 @@ export default function DataSantriPage() {
       )}
 
       {/* FILTER & PENCARIAN */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 print:hidden">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 print:hidden">
+        <div className="relative sm:col-span-2 lg:col-span-5 min-w-0">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Cari Nama Santri atau NIS..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            className="w-full min-h-[40px] pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-400 hidden md:block" />
-          <select
-            value={filterKelengkapan}
-            onChange={(e) => setFilterKelengkapan(e.target.value)}
-            className="bg-slate-50 border border-slate-200 text-xs text-slate-700 px-3 py-2 rounded-xl"
-          >
-            <option value="Semua">Semua Kelengkapan EMIS</option>
-            <option value="Lengkap">Berkas EMIS Lengkap</option>
-            <option value="Belum">Berkas Belum Lengkap</option>
-          </select>
+        <select
+          value={filterKelengkapan}
+          onChange={(e) => setFilterKelengkapan(e.target.value)}
+          className="lg:col-span-3 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
+        >
+          <option value="Semua">Semua Kelengkapan EMIS</option>
+          <option value="Lengkap">Berkas EMIS Lengkap</option>
+          <option value="Belum">Berkas Belum Lengkap</option>
+        </select>
 
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="bg-slate-50 border border-slate-200 text-xs text-slate-700 px-3 py-2 rounded-xl"
-          >
-            <option value="Semua">Semua Status</option>
-            <option value="aktif">Aktif (Induk)</option>
-            <option value="pindah_al_burhany">An-Nur Al-Burhany</option>
-            <option value="boyong">Boyong</option>
-          </select>
+        <select
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="lg:col-span-2 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
+        >
+          <option value="Semua">Semua Status</option>
+          <option value="aktif">Aktif (Induk)</option>
+          <option value="pindah_al_burhany">An-Nur Al-Burhany</option>
+          <option value="boyong">Boyong</option>
+        </select>
 
-          <select
-            value={filterKamar}
-            onChange={(e) => setFilterKamar(e.target.value)}
-            className="bg-slate-50 border border-slate-200 text-xs text-slate-700 px-3 py-2 rounded-xl"
-          >
-            <option value="Semua">Semua Kamar</option>
-            {DAFTAR_KAMAR.map((k) => (
-              <option key={k} value={k}>Kamar {k}</option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={filterKamar}
+          onChange={(e) => setFilterKamar(e.target.value)}
+          className="sm:col-span-2 lg:col-span-2 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
+        >
+          <option value="Semua">Semua Kamar</option>
+          {daftarKamar.map((k) => (
+            <option key={k} value={k}>Kamar {k}</option>
+          ))}
+        </select>
       </div>
 
-      {/* TABEL SANTRI */}
+      {/* TABEL & KARTU SANTRI */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden print:hidden">
-        <div className="overflow-x-auto">
+        {/* MOBILE CARD VIEW (PWA / HP) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {loading ? (
+            <div className="p-8 text-center text-xs text-slate-400">Memuat data santri...</div>
+          ) : fetchError ? (
+            <div className="p-8 text-center">
+              <div className="inline-flex flex-col items-center gap-2 text-rose-700">
+                <AlertCircle className="w-6 h-6 text-rose-600" />
+                <p className="font-semibold text-xs">Gagal memuat data santri: {fetchError}</p>
+                <button
+                  type="button"
+                  onClick={fetchSantri}
+                  className="min-h-[40px] px-3.5 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold text-rose-800"
+                >
+                  Muat Ulang Data
+                </button>
+              </div>
+            </div>
+          ) : filteredSantri.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400">Tidak ada data santri yang cocok.</div>
+          ) : (
+            filteredSantri.map((item) => {
+              const statusEmis = cekKelengkapanEmis(item);
+              const hasAyah = item.no_wa_ayah && String(item.no_wa_ayah).trim() !== '';
+              const hasIbu = item.no_wa_ibu && String(item.no_wa_ibu).trim() !== '';
+              const hasWali = item.no_wa_wali && String(item.no_wa_wali).trim() !== '';
+              const isSelected = selectedIds.includes(item.id);
+
+              return (
+                <div key={item.id} className="p-4 space-y-2.5 text-xs">
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        aria-label={`Pilih ${item.nama_lengkap}`}
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds([...selectedIds, item.id]);
+                          else setSelectedIds(selectedIds.filter((id) => id !== item.id));
+                        }}
+                        className="mt-1 w-4 h-4 accent-emerald-700 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-bold text-sm text-slate-900 leading-snug">
+                          {item.nama_lengkap}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5 tabular-nums">
+                          NIS {item.nis}
+                          {item.nisn ? ` · NISN ${item.nisn}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-700 font-bold rounded-md text-[11px] whitespace-nowrap shrink-0">
+                      Kamar {item.kamar}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {statusEmis.lengkap ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 whitespace-nowrap">
+                        EMIS LENGKAP
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 whitespace-nowrap">
+                        EMIS BELUM ({statusEmis.kurang})
+                      </span>
+                    )}
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
+                        item.status === 'aktif'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : item.status === 'pindah_al_burhany'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {String(item.status || 'aktif').toUpperCase()}
+                    </span>
+                  </div>
+
+                  {(hasAyah || hasIbu || hasWali) && (
+                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 space-y-1">
+                      {hasAyah && renderKontakRow('Ayah', item.no_wa_ayah)}
+                      {hasIbu && renderKontakRow('Ibu', item.no_wa_ibu)}
+                      {!hasAyah && !hasIbu && hasWali && renderKontakRow('Wali', item.no_wa_wali)}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSantri(item);
+                        setShowModalDetail(true);
+                      }}
+                      className="flex-1 min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 font-bold rounded-xl text-slate-700 text-xs"
+                    >
+                      Detail Santri
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditModal(item)}
+                      className="flex-1 min-h-[40px] px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl border border-amber-200 text-xs flex items-center justify-center gap-1.5"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Edit Data
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* DESKTOP TABLE VIEW */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase tracking-wider">
+            <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase tracking-wider text-[11px]">
               <tr>
-                <th className="p-4 w-10">
+                <th className="py-3 px-3 w-10 text-center">
                   <input
                     type="checkbox"
+                    aria-label="Pilih semua santri"
                     checked={filteredSantri.length > 0 && selectedIds.length === filteredSantri.length}
                     onChange={(e) => setSelectedIds(e.target.checked ? filteredSantri.map((s) => s.id) : [])}
                   />
                 </th>
-                <th className="p-4">NIS / NISN</th>
-                <th className="p-4">Nama Lengkap</th>
-                <th className="p-4">Kamar</th>
-                <th className="p-4">Kontak Ortu / WA</th>
-                <th className="p-4">Kelengkapan EMIS</th>
-                <th className="p-4">Status</th>
-                <th className="p-4 text-center">Aksi</th>
+                <th className="py-3 px-3 w-28 whitespace-nowrap">NIS / NISN</th>
+                <th className="py-3 px-3 min-w-[170px]">Nama Lengkap</th>
+                <th className="py-3 px-3 w-24 whitespace-nowrap">Kamar</th>
+                <th className="py-3 px-3 min-w-[190px]">Kontak Ortu / WA</th>
+                <th className="py-3 px-3 w-40 whitespace-nowrap">Kelengkapan EMIS</th>
+                <th className="py-3 px-3 w-28 whitespace-nowrap">Status</th>
+                <th className="py-3 px-3 w-[150px] text-right whitespace-nowrap">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1319,9 +1594,10 @@ export default function DataSantriPage() {
 
                   return (
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4">
+                      <td className="py-3 px-3 text-center">
                         <input
                           type="checkbox"
+                          aria-label={`Pilih ${item.nama_lengkap}`}
                           checked={selectedIds.includes(item.id)}
                           onChange={(e) => {
                             if (e.target.checked) setSelectedIds([...selectedIds, item.id]);
@@ -1329,63 +1605,63 @@ export default function DataSantriPage() {
                           }}
                         />
                       </td>
-                      <td className="p-4 font-mono font-bold text-emerald-800">
+                      <td className="py-3 px-3 font-mono font-bold text-emerald-800 whitespace-nowrap tabular-nums">
                         {item.nis}
                         {item.nisn && <span className="block text-[10px] text-slate-400 font-normal">NISN: {item.nisn}</span>}
                       </td>
-                      <td className="p-4 font-semibold text-slate-800">{item.nama_lengkap}</td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-medium rounded-lg">
+                      <td className="py-3 px-3 font-semibold text-slate-800">{item.nama_lengkap}</td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-semibold rounded-lg whitespace-nowrap">
                           {item.kamar}
                         </span>
                       </td>
 
-                      <td className="p-4">
+                      <td className="py-3 px-3">
                         {hasAyah || hasIbu ? (
-                          <div className="space-y-1">
+                          <div className="space-y-1 whitespace-nowrap">
                             {hasAyah && renderKontakRow('Ayah', item.no_wa_ayah)}
                             {hasIbu && renderKontakRow('Ibu', item.no_wa_ibu)}
                           </div>
                         ) : hasWali ? (
-                          renderKontakRow('Wali', item.no_wa_wali)
+                          <div className="whitespace-nowrap">{renderKontakRow('Wali', item.no_wa_wali)}</div>
                         ) : (
                           <span className="text-slate-400">-</span>
                         )}
                       </td>
 
-                      <td className="p-4">
+                      <td className="py-3 px-3 whitespace-nowrap">
                         {statusEmis.lengkap ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          <span className="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 whitespace-nowrap">
                             LENGKAP
                           </span>
                         ) : (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                          <span className="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 whitespace-nowrap">
                             BELUM LENGKAP ({statusEmis.kurang})
                           </span>
                         )}
                       </td>
-                      <td className="p-4">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold whitespace-nowrap ${
                           item.status === 'aktif' ? 'bg-emerald-100 text-emerald-800' :
                           item.status === 'pindah_al_burhany' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
                         }`}>
                           {String(item.status || 'aktif').toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                      <td className="py-3 px-3 text-right">
+                        <div className="flex flex-nowrap items-center justify-end gap-1.5">
                           <button
                             onClick={() => {
                               setSelectedSantri(item);
                               setShowModalDetail(true);
                             }}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold rounded-lg text-slate-700 text-xs"
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 font-bold rounded-lg text-slate-700 text-xs whitespace-nowrap shrink-0"
                           >
                             Detail
                           </button>
                           <button
                             onClick={() => handleOpenEditModal(item)}
-                            className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-lg border border-amber-200 text-xs flex items-center gap-1"
+                            className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-lg border border-amber-200 text-xs inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                           >
                             <Edit3 className="w-3 h-3" /> Edit
                           </button>
@@ -1418,48 +1694,106 @@ export default function DataSantriPage() {
 
             <form onSubmit={handleSaveSantri} className="p-6 space-y-4 text-xs overflow-y-auto">
               <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-emerald-900">1. Skema Biaya Pendaftaran</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold">
-                    {santriList.length < 100 ? `Kuota Diskon 100 Pendaftar Pertama (${santriList.length}/100)` : 'Tarif Normal (>100)'}
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <span className="font-bold text-emerald-900">1. Skema Biaya Pendaftaran (PSB)</span>
+                  <span className="text-[11px] font-bold text-emerald-800 tabular-nums">
+                    {rincianPsbAktif.isFreeUangPangkal
+                      ? `Promo Free Uang Pangkal (${santriList.length}/${rincianPsbAktif.kuotaPromoTotal} pendaftar)`
+                      : `Tarif Normal (Kuota ${rincianPsbAktif.kuotaPromoTotal} penuh)`}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <label className={`p-3 border rounded-xl flex items-center gap-2.5 cursor-pointer transition-all ${
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className={`p-3 border rounded-xl flex items-start gap-2.5 cursor-pointer transition-all ${
                     formData.paket_pendaftaran === 'reguler' && !isCustomNominal ? 'bg-white border-emerald-600 ring-2 ring-emerald-600/20' : 'bg-white/70 border-slate-200'
                   }`}>
                     <input
                       type="radio"
                       name="paket"
+                      className="mt-0.5"
                       checked={formData.paket_pendaftaran === 'reguler'}
-                      onChange={() => setFormData({ ...formData, paket_pendaftaran: 'reguler' })}
+                      onChange={() => handleSelectPaketPendaftaran('reguler')}
                     />
-                    <div>
+                    <div className="min-w-0">
                       <span className="font-bold text-slate-800 block">Paket Reguler</span>
-                      <span className="text-[11px] text-emerald-700 font-semibold">
-                        {santriList.length < 100 ? 'Rp 1.500.000 (Diskon 3jt)' : 'Rp 4.500.000'}
+                      <span className="text-xs text-emerald-700 font-bold tabular-nums block">
+                        Rp {rincianReguler.totalBayar.toLocaleString('id-ID')}
                       </span>
+                      {rincianReguler.isFreeUangPangkal && (
+                        <span className="text-[10px] text-slate-500 tabular-nums block">
+                          Normal Rp {rincianReguler.totalNormal.toLocaleString('id-ID')} (Free Uang Pangkal)
+                        </span>
+                      )}
                     </div>
                   </label>
 
-                  <label className={`p-3 border rounded-xl flex items-center gap-2.5 cursor-pointer transition-all ${
+                  <label className={`p-3 border rounded-xl flex items-start gap-2.5 cursor-pointer transition-all ${
                     formData.paket_pendaftaran === 'vip' && !isCustomNominal ? 'bg-white border-emerald-600 ring-2 ring-emerald-600/20' : 'bg-white/70 border-slate-200'
                   }`}>
                     <input
                       type="radio"
                       name="paket"
+                      className="mt-0.5"
                       checked={formData.paket_pendaftaran === 'vip'}
-                      onChange={() => setFormData({ ...formData, paket_pendaftaran: 'vip' })}
+                      onChange={() => handleSelectPaketPendaftaran('vip')}
                     />
-                    <div>
-                      <span className="font-bold text-slate-800 block">Paket VIP (+Dipan &amp; Kasur)</span>
-                      <span className="text-[11px] text-emerald-700 font-semibold">
-                        {santriList.length < 100 ? 'Rp 3.100.000 (Diskon 3jt)' : 'Rp 6.100.000'}
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-800 block">Paket Kamar VIP (+Dipan)</span>
+                      <span className="text-xs text-emerald-700 font-bold tabular-nums block">
+                        Rp {rincianVip.totalBayar.toLocaleString('id-ID')}
                       </span>
+                      {rincianVip.isFreeUangPangkal && (
+                        <span className="text-[10px] text-slate-500 tabular-nums block">
+                          Normal Rp {rincianVip.totalNormal.toLocaleString('id-ID')} (Free Uang Pangkal)
+                        </span>
+                      )}
                     </div>
                   </label>
                 </div>
+
+                {/* Rincian Otomatis Sesuai Skema + Pembagian Dompet Keuangan */}
+                {!isCustomNominal && (
+                  <div className="bg-white rounded-xl border border-emerald-200/80 p-3 space-y-2 text-[11px]">
+                    <div className="font-bold text-slate-700 flex items-center justify-between">
+                      <span>Rincian Komponen ({formData.paket_pendaftaran === 'vip' ? 'Kamar VIP' : 'Reguler'})</span>
+                      <span className="text-emerald-800 font-mono tabular-nums">
+                        Total: Rp {rincianPsbAktif.totalBayar.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {rincianPsbAktif.items.map((item) => (
+                        <div key={item.label} className="py-1 flex items-center justify-between gap-2">
+                          <span className="text-slate-600">
+                            {item.label}
+                            <span className="text-[10px] text-slate-400 ml-1.5">
+                              ({item.targetDompet === 'operasional' ? 'Dompet Operasional' : 'Dompet Pendaftaran'})
+                            </span>
+                          </span>
+                          <span className="font-mono font-semibold text-slate-900 tabular-nums shrink-0">
+                            {item.isFreePromo ? (
+                              <span>
+                                <span className="line-through text-slate-400 mr-1.5">
+                                  Rp {item.nominalNormal.toLocaleString('id-ID')}
+                                </span>
+                                <span className="text-emerald-700 font-bold">GRATIS</span>
+                              </span>
+                            ) : (
+                              `Rp ${item.nominalBayar.toLocaleString('id-ID')}`
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-100 flex flex-wrap justify-between gap-2 text-[10px] text-slate-500 tabular-nums">
+                      <span>
+                        Masuk Dompet Pendaftaran: <strong className="text-slate-800">Rp {rincianPsbAktif.nominalDompetPendaftaran.toLocaleString('id-ID')}</strong>
+                      </span>
+                      <span>
+                        Masuk Dompet Operasional (Syahriyah Bln 1): <strong className="text-emerald-800">Rp {rincianPsbAktif.nominalSyahriyahBulanPertama.toLocaleString('id-ID')}</strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 pt-1">
                   <input
@@ -1539,7 +1873,7 @@ export default function DataSantriPage() {
                       onChange={(e) => handleSelectKamarPendaftaran(e.target.value)}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
                     >
-                      {DAFTAR_KAMAR.map((k) => (
+                      {daftarKamar.map((k) => (
                         <option key={k} value={k}>Kamar {k}</option>
                       ))}
                     </select>
@@ -1685,16 +2019,20 @@ export default function DataSantriPage() {
                     <div>
                       <label className="font-semibold text-slate-700 block mb-1">Khos / Kamar <span className="text-rose-600">*Wajib</span></label>
                       <select value={editFormData.kamar || 'A1'} onChange={(e) => setEditFormData({ ...editFormData, kamar: e.target.value })} className="w-full p-2.5 bg-slate-50 border rounded-xl">
-                        {DAFTAR_KAMAR.map((k) => (
+                        {daftarKamar.map((k) => (
                           <option key={k} value={k}>Kamar {k}</option>
                         ))}
                       </select>
                     </div>
                     <div>
                       <label className="font-semibold text-slate-700 block mb-1">Tipe SPP / Syahriyah <span className="text-rose-600">*Wajib</span></label>
-                      <select value={editFormData.tarif_syahriyah || 425000} onChange={(e) => setEditFormData({ ...editFormData, tarif_syahriyah: Number(e.target.value) })} className="w-full p-2.5 bg-slate-50 border rounded-xl">
-                        <option value={425000}>Reguler (Rp 425.000)</option>
-                        <option value={475000}>VIP / Al-Fachriyah (Rp 475.000)</option>
+                      <select value={editFormData.tarif_syahriyah || skemaPendaftaran.syahriyah_reguler} onChange={(e) => setEditFormData({ ...editFormData, tarif_syahriyah: Number(e.target.value) })} className="w-full p-2.5 bg-slate-50 border rounded-xl">
+                        <option value={skemaPendaftaran.syahriyah_reguler}>
+                          Reguler (Rp {skemaPendaftaran.syahriyah_reguler.toLocaleString('id-ID')})
+                        </option>
+                        <option value={skemaPendaftaran.syahriyah_vip}>
+                          VIP / Al-Fachriyah (Rp {skemaPendaftaran.syahriyah_vip.toLocaleString('id-ID')})
+                        </option>
                         <option value={145000}>Santri Ndalem (Rp 145.000)</option>
                       </select>
                     </div>
@@ -2175,7 +2513,7 @@ export default function DataSantriPage() {
                     </div>
                     <div>
                       <span className="text-[10.5px] text-slate-400 block">Tarif Syahriyah Bulanan</span>
-                      <strong className="text-slate-800">Rp {Number(selectedSantri.tarif_syahriyah || 425000).toLocaleString('id-ID')}</strong>
+                      <strong className="text-slate-800">Rp {Number(selectedSantri.tarif_syahriyah || skemaPendaftaran.syahriyah_reguler).toLocaleString('id-ID')}</strong>
                     </div>
                   </div>
                 </div>
