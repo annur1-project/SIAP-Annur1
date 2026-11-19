@@ -1,22 +1,66 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  Landmark,
+  Palette,
+  Save,
+  Settings,
+  SlidersHorizontal,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
-  Settings, Save, Plus, Edit3, Lock, Calendar, Wallet,
-  CheckCircle2, AlertCircle, X, History, Building2, ShieldCheck
-} from 'lucide-react';
+  applyThemeToDocument,
+  DEFAULT_PENGATURAN_FORM,
+  extractExtendedPayload,
+  isKeamananThresholdValid,
+  isMissingColumnError,
+  mergeAturanOperasional,
+  readExtendedLocal,
+  sanitizeCorePayload,
+  writeExtendedLocal,
+  writeTemaLocal,
+  type MasterPembayaranItem,
+  type PengaturanFormState,
+  type PengaturanTabKey,
+  type TarifRiwayatItem,
+} from '@/lib/pengaturan';
+import {
+  AturanDivisiTab,
+  IdentitasRekeningTab,
+  KeuanganTarifTab,
+  LogoLegalitasTab,
+  TemaAplikasiTab,
+} from '@/components/PengaturanTabs';
+import {
+  NEW_MASTER_PEMBAYARAN_SEEDS,
+  resolveCanonicalDompetForItem,
+} from '@/lib/keuangan';
 
-const NAMA_DOMPET: Record<string, string> = {
-  pendaftaran: '1. Dompet Pendaftaran',
-  operasional: '2. Syahriyah & Iuran Tahunan (Operasional)',
-  kas_pondok: '3. Dompet Kas (Lain-lain)',
-  mda: '4. Dompet MDA (Madin)'
-};
+const TAB_ITEMS: Array<{
+  key: PengaturanTabKey;
+  label: string;
+  shortLabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { key: 'identitas', label: '1. Identitas & Rekening', shortLabel: '1. Identitas', icon: Building2 },
+  { key: 'legalitas', label: '2. Logo, Stempel & TTD', shortLabel: '2. Logo & Kop', icon: Landmark },
+  { key: 'keuangan', label: '3. Keuangan & Tarif', shortLabel: '3. Keuangan', icon: Wallet },
+  { key: 'operasional', label: '4. Aturan Divisi & Kamar', shortLabel: '4. Aturan & Kal', icon: SlidersHorizontal },
+  { key: 'tema', label: '5. Tema & Tampilan', shortLabel: '5. Tema & Tampilan', icon: Palette },
+];
 
 export default function PengaturanPage() {
+  const [activeTab, setActiveTab] = useState<PengaturanTabKey>('identitas');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
+  const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [todayStr, setTodayStr] = useState('');
   const [userRole, setUserRole] = useState<string>('super_admin');
   const [canManageFinance, setCanManageFinance] = useState<boolean>(true);
@@ -27,35 +71,15 @@ export default function PengaturanPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const [formData, setFormData] = useState<any>({
-    nama_pesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
-    alamat_lengkap: 'Jl. Diponegoro IV / 2-6 Bululawang, Kab. Malang, Jawa Timur',
-    no_telepon: '085604551562',
-    email_resmi: 'annur1bululawang@gmail.com',
-    slogan: "Mencetak Generasi Qur'ani, Berakhlakul Karimah, dan Berwawasan Luas",
-    logo_url: '',
-    stempel_url: '',
-    nama_pengasuh: 'Dr. KH. A. Fahrur Rozi',
-    ttd_pengasuh_url: '',
-    nama_kepala_pondok: 'Ust. M. Fajar Wahyudi',
-    ttd_kepala_pondok_url: '',
-    nama_sekretaris: 'Ust. Moh. Sayid Ali',
-    ttd_sekretaris_url: '',
-    nama_bendahara: 'Ust. Ali Nur Ikasan',
-    ttd_bendahara_url: '',
-    jatuh_tempo_tanggal: 10,
-    saldo_awal_pendaftaran: 0,
-    saldo_awal_operasional: 0,
-    saldo_awal_kas_pondok: 0,
-    saldo_awal_mda: 0
-  });
+  const [formData, setFormData] = useState<PengaturanFormState>(DEFAULT_PENGATURAN_FORM);
+  const [savedSnapshot, setSavedSnapshot] = useState<string>(JSON.stringify(DEFAULT_PENGATURAN_FORM));
 
   // Master Pembayaran & Riwayat Tarif
-  const [masterItems, setMasterItems] = useState<any[]>([]);
-  const [riwayatMap, setRiwayatMap] = useState<Record<string, any[]>>({});
+  const [masterItems, setMasterItems] = useState<MasterPembayaranItem[]>([]);
+  const [riwayatMap, setRiwayatMap] = useState<Record<string, TarifRiwayatItem[]>>({});
 
   // Modal Edit Nominal + Tanggal Berlaku
-  const [editTarifItem, setEditTarifItem] = useState<any | null>(null);
+  const [editTarifItem, setEditTarifItem] = useState<MasterPembayaranItem | null>(null);
   const [newNominal, setNewNominal] = useState<number>(0);
   const [berlakuMulai, setBerlakuMulai] = useState<string>('');
   const [catatanPerubahan, setCatatanPerubahan] = useState<string>('');
@@ -64,15 +88,32 @@ export default function PengaturanPage() {
   const [showModalBaru, setShowModalBaru] = useState(false);
   const [newItemForm, setNewItemForm] = useState({
     nama_item: '',
-    tipe_periode: 'tahunan',
+    tipe_periode: 'tahunan' as 'bulanan' | 'tahunan',
     dompet_tujuan: 'operasional',
     nominal_awal: 0,
     berlaku_mulai: '',
-    wajib_ndalem: false
+    wajib_ndalem: false,
   });
 
-  const checkRoleAccess = async () => {
-    const { data: authData } = await supabase.auth.getUser();
+  const hasUnsavedChanges = useMemo(
+    () => JSON.stringify(formData) !== savedSnapshot,
+    [formData, savedSnapshot]
+  );
+
+  const loadAllData = async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
+    const [{ data: authData }, { data: setRow }, { data: items }, { data: riwayat }] =
+      await Promise.all([
+        supabase.auth.getUser(),
+        supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('master_pembayaran').select('*').order('urutan', { ascending: true }),
+        supabase
+          .from('master_pembayaran_riwayat')
+          .select('*')
+          .order('berlaku_mulai', { ascending: false }),
+      ]);
+
+    let resolvedRole = userRole;
     if (authData?.user) {
       const { data: prof } = await supabase
         .from('profiles')
@@ -80,99 +121,331 @@ export default function PengaturanPage() {
         .eq('id', authData.user.id)
         .single();
       if (prof?.role) {
+        resolvedRole = prof.role;
         setUserRole(prof.role);
         setCanManageFinance(['super_admin', 'admin', 'keuangan'].includes(prof.role));
       }
     }
-  };
 
-  const fetchAll = async () => {
-    setLoading(true);
-    const { data: setRow } = await supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).single();
-    if (setRow) setFormData((prev: any) => ({ ...prev, ...setRow }));
+    const localExt = readExtendedLocal();
+    const rowObj = (setRow || {}) as Record<string, unknown>;
 
-    const { data: items } = await supabase
-      .from('master_pembayaran')
-      .select('*')
-      .order('urutan', { ascending: true });
+    const nextForm: PengaturanFormState = {
+      ...DEFAULT_PENGATURAN_FORM,
+      nama_pesantren: String(rowObj.nama_pesantren ?? DEFAULT_PENGATURAN_FORM.nama_pesantren),
+      alamat_lengkap: String(rowObj.alamat_lengkap ?? DEFAULT_PENGATURAN_FORM.alamat_lengkap),
+      no_telepon: String(rowObj.no_telepon ?? DEFAULT_PENGATURAN_FORM.no_telepon),
+      email_resmi: String(rowObj.email_resmi ?? DEFAULT_PENGATURAN_FORM.email_resmi),
+      slogan: String(rowObj.slogan ?? DEFAULT_PENGATURAN_FORM.slogan),
+      logo_url: String(rowObj.logo_url ?? ''),
+      logo_watermark_url: String(rowObj.logo_watermark_url ?? ''),
+      stempel_url: String(rowObj.stempel_url ?? ''),
+      nama_pengasuh: String(rowObj.nama_pengasuh ?? DEFAULT_PENGATURAN_FORM.nama_pengasuh),
+      ttd_pengasuh_url: String(rowObj.ttd_pengasuh_url ?? ''),
+      nama_kepala_pondok: String(
+        rowObj.nama_kepala_pondok ?? DEFAULT_PENGATURAN_FORM.nama_kepala_pondok
+      ),
+      ttd_kepala_pondok_url: String(rowObj.ttd_kepala_pondok_url ?? ''),
+      nama_sekretaris: String(rowObj.nama_sekretaris ?? DEFAULT_PENGATURAN_FORM.nama_sekretaris),
+      ttd_sekretaris_url: String(rowObj.ttd_sekretaris_url ?? ''),
+      nama_bendahara: String(rowObj.nama_bendahara ?? DEFAULT_PENGATURAN_FORM.nama_bendahara),
+      ttd_bendahara_url: String(rowObj.ttd_bendahara_url ?? ''),
+      jatuh_tempo_tanggal: Number(rowObj.jatuh_tempo_tanggal ?? 10),
+      saldo_awal_pendaftaran: Number(rowObj.saldo_awal_pendaftaran ?? 0),
+      saldo_awal_operasional: Number(rowObj.saldo_awal_operasional ?? 0),
+      saldo_awal_kas_pondok: Number(rowObj.saldo_awal_kas_pondok ?? 0),
+      saldo_awal_mda: Number(rowObj.saldo_awal_mda ?? 0),
+      kota_surat: String(
+        rowObj.kota_surat ?? localExt?.kota_surat ?? DEFAULT_PENGATURAN_FORM.kota_surat
+      ),
+      rekening_bank: String(
+        rowObj.rekening_bank ?? localExt?.rekening_bank ?? DEFAULT_PENGATURAN_FORM.rekening_bank
+      ),
+      rekening_nomor: String(
+        rowObj.rekening_nomor ?? localExt?.rekening_nomor ?? DEFAULT_PENGATURAN_FORM.rekening_nomor
+      ),
+      rekening_atas_nama: String(
+        rowObj.rekening_atas_nama ??
+          localExt?.rekening_atas_nama ??
+          DEFAULT_PENGATURAN_FORM.rekening_atas_nama
+      ),
+      kop_surat_url: String(
+        rowObj.kop_surat_url ?? localExt?.kop_surat_url ?? ''
+      ),
+      aturan_operasional: mergeAturanOperasional(
+        rowObj.aturan_operasional ?? localExt?.aturan_operasional
+      ),
+    };
 
-    const { data: riwayat } = await supabase
-      .from('master_pembayaran_riwayat')
-      .select('*')
-      .order('berlaku_mulai', { ascending: false });
+    setFormData(nextForm);
+    setSavedSnapshot(JSON.stringify(nextForm));
+    applyThemeToDocument(nextForm.aturan_operasional.tema, { logoUrl: nextForm.logo_url });
 
-    if (items) setMasterItems(items);
-    if (riwayat) {
-      const grouped: Record<string, any[]> = {};
-      riwayat.forEach((r) => {
-        if (!grouped[r.item_id]) grouped[r.item_id] = [];
-        grouped[r.item_id].push(r);
-      });
-      setRiwayatMap(grouped);
+    const today = new Date().toISOString().split('T')[0];
+    setTodayStr(today);
+    setBerlakuMulai((prev) => prev || today);
+    setNewItemForm((prev) => (prev.berlaku_mulai ? prev : { ...prev, berlaku_mulai: today }));
+
+    const rawItems = (items as MasterPembayaranItem[]) || [];
+    const existingKodes = new Set(rawItems.map((m) => m.kode));
+    const missingSeeds = NEW_MASTER_PEMBAYARAN_SEEDS.filter((seed) => !existingKodes.has(seed.kode));
+
+    let effectiveItems = [...rawItems];
+    const grouped: Record<string, TarifRiwayatItem[]> = {};
+    ((riwayat as TarifRiwayatItem[]) || []).forEach((r) => {
+      if (!grouped[r.item_id]) grouped[r.item_id] = [];
+      grouped[r.item_id].push(r);
+    });
+
+    if (missingSeeds.length > 0) {
+      const canEditFin = ['super_admin', 'admin', 'keuangan'].includes(resolvedRole);
+      let syncedFromDb = false;
+
+      if (canEditFin) {
+        const { data: upserted } = await supabase
+          .from('master_pembayaran')
+          .upsert(
+            missingSeeds.map((seed) => ({
+              kode: seed.kode,
+              nama_item: seed.nama_item,
+              tipe_periode: seed.tipe_periode,
+              kategori_santri: seed.kategori_santri,
+              dompet_tujuan: seed.dompet_tujuan,
+              wajib_ndalem: seed.wajib_ndalem,
+              aktif: true,
+              urutan: seed.urutan,
+            })),
+            { onConflict: 'kode' }
+          )
+          .select('*');
+
+        if (Array.isArray(upserted) && upserted.length > 0) {
+          syncedFromDb = true;
+          const upsertedItems = upserted as MasterPembayaranItem[];
+          const riwayatSeeds = upsertedItems
+            .filter((it) => !grouped[it.id] || grouped[it.id].length === 0)
+            .map((it) => {
+              const seedInfo = NEW_MASTER_PEMBAYARAN_SEEDS.find((s) => s.kode === it.kode);
+              return {
+                item_id: it.id,
+                nominal: seedInfo?.defaultNominal ?? 50000,
+                berlaku_mulai: '2026-07-01',
+                catatan: 'Tarif awal pos pembayaran baru',
+              };
+            });
+
+          if (riwayatSeeds.length > 0) {
+            const { data: insertedRiwayat } = await supabase
+              .from('master_pembayaran_riwayat')
+              .insert(riwayatSeeds)
+              .select('*');
+            ((insertedRiwayat as TarifRiwayatItem[]) || []).forEach((r) => {
+              if (!grouped[r.item_id]) grouped[r.item_id] = [];
+              grouped[r.item_id].push(r);
+            });
+          }
+
+          upsertedItems.forEach((it) => {
+            if (!existingKodes.has(it.kode)) {
+              effectiveItems.push(it);
+              existingKodes.add(it.kode);
+            }
+          });
+        }
+      }
+
+      if (!syncedFromDb) {
+        missingSeeds.forEach((seed) => {
+          const virtualId = `seed-${seed.kode}`;
+          effectiveItems.push({
+            id: virtualId,
+            kode: seed.kode,
+            nama_item: seed.nama_item,
+            tipe_periode: seed.tipe_periode,
+            kategori_santri: seed.kategori_santri,
+            dompet_tujuan: seed.dompet_tujuan,
+            wajib_ndalem: seed.wajib_ndalem,
+            aktif: true,
+            urutan: seed.urutan,
+          });
+          grouped[virtualId] = [
+            {
+              id: `seed-riwayat-${seed.kode}`,
+              item_id: virtualId,
+              nominal: seed.defaultNominal,
+              berlaku_mulai: '2026-07-01',
+              catatan: 'Tarif awal pos pembayaran baru',
+            },
+          ];
+        });
+      }
     }
+
+    effectiveItems = effectiveItems
+      .map((item) => ({
+        ...item,
+        dompet_tujuan: resolveCanonicalDompetForItem(item.kode, item.dompet_tujuan),
+      }))
+      .sort((a, b) => Number(a.urutan || 0) - Number(b.urutan || 0));
+
+    setMasterItems(effectiveItems);
+    setRiwayatMap(grouped);
     setLoading(false);
   };
 
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setTodayStr(today);
-    setBerlakuMulai(today);
-    setNewItemForm((prev) => ({ ...prev, berlaku_mulai: today }));
-    checkRoleAccess();
-    fetchAll();
+    const timer = setTimeout(() => {
+      void loadAllData(false);
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
-  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>, fieldName: string) => {
+  const handleUpdateField = <K extends keyof PengaturanFormState>(
+    field: K,
+    value: PengaturanFormState[K]
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleUploadImage = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    fieldName: keyof PengaturanFormState
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingField(fieldName);
     const ext = file.name.split('.').pop();
     const fileName = `${fieldName}_${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('ttd-stempel').upload(fileName, file, { upsert: true });
+    const { error } = await supabase.storage
+      .from('ttd-stempel')
+      .upload(fileName, file, { upsert: true });
+    setUploadingField(null);
     if (error) {
-      showToast('error', 'Gagal upload gambar: ' + error.message);
+      showToast('error', 'Gagal unggah gambar: ' + error.message);
       return;
     }
     const { data } = supabase.storage.from('ttd-stempel').getPublicUrl(fileName);
-    setFormData((prev: any) => ({ ...prev, [fieldName]: data.publicUrl }));
-    showToast('success', 'Gambar berhasil diunggah. Klik Simpan Pengaturan untuk menerapkan.');
+    setFormData((prev) => ({ ...prev, [fieldName]: data.publicUrl }));
+    showToast('success', 'Gambar terunggah. Tekan Simpan Pengaturan untuk menerapkan.');
   };
 
-  const handleSavePengaturan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const { error } = await supabase.from('pengaturan_aplikasi').upsert({
-      id: 1,
-      ...formData,
-      updated_at: new Date().toISOString()
-    });
-    setSaving(false);
-    if (error) {
-      showToast('error', 'Gagal menyimpan: ' + error.message);
-    } else {
-      showToast('success', 'Pengaturan Lembaga, Saldo Awal & TTD Digital tersimpan!');
+  const handleSavePengaturan = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isKeamananThresholdValid(formData.aturan_operasional.keamanan)) {
+      setActiveTab('operasional');
+      showToast('error', 'Ambang poin keamanan harus menanjak: SP 1 < SP 2 < SP 3.');
+      return;
     }
+
+    setSaving(true);
+    const core = sanitizeCorePayload(formData);
+    const ext = extractExtendedPayload(formData);
+    const updatedAt = new Date().toISOString();
+
+    const { error: fullError } = await supabase.from('pengaturan_aplikasi').upsert({
+      id: 1,
+      ...core,
+      ...ext,
+      updated_at: updatedAt,
+    });
+
+    if (fullError && isMissingColumnError(fullError)) {
+      const { error: coreError } = await supabase.from('pengaturan_aplikasi').upsert({
+        id: 1,
+        ...core,
+        updated_at: updatedAt,
+      });
+      setSaving(false);
+      if (coreError) {
+        showToast('error', 'Gagal menyimpan pengaturan: ' + coreError.message);
+        return;
+      }
+      writeExtendedLocal(ext);
+      writeTemaLocal(formData.aturan_operasional.tema);
+      applyThemeToDocument(formData.aturan_operasional.tema, { logoUrl: formData.logo_url });
+      setSavedSnapshot(JSON.stringify(formData));
+      showToast(
+        'success',
+        'Pengaturan inti tersimpan ke database & aturan lanjutan tersimpan lokal.'
+      );
+      return;
+    }
+
+    setSaving(false);
+    if (fullError) {
+      showToast('error', 'Gagal menyimpan: ' + fullError.message);
+      return;
+    }
+
+    writeExtendedLocal(ext);
+    writeTemaLocal(formData.aturan_operasional.tema);
+    applyThemeToDocument(formData.aturan_operasional.tema, { logoUrl: formData.logo_url });
+    setSavedSnapshot(JSON.stringify(formData));
+    showToast('success', 'Seluruh pengaturan pondok, keuangan, legalitas, divisi & tema tersimpan!');
   };
 
-  // Simpan Perubahan Nominal + Tanggal Mulai Berlaku
   const handleSaveEditTarif = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editTarifItem || !canManageFinance) return;
 
     setSaving(true);
-    const { error } = await supabase.from('master_pembayaran_riwayat').insert([{
-      item_id: editTarifItem.id,
-      nominal: Number(newNominal),
-      berlaku_mulai: berlakuMulai || todayStr,
-      catatan: catatanPerubahan || `Penyesuaian tarif per ${berlakuMulai || todayStr}`
-    }]);
+    let targetItemId = editTarifItem.id;
 
-    // Jika item adalah Syahriyah Reguler / VIP / Ndalem, sinkronkan juga kolom default di tabel santri
+    if (targetItemId.startsWith('seed-')) {
+      const { data: ensured, error: upsertErr } = await supabase
+        .from('master_pembayaran')
+        .upsert(
+          [
+            {
+              kode: editTarifItem.kode,
+              nama_item: editTarifItem.nama_item,
+              tipe_periode: editTarifItem.tipe_periode,
+              kategori_santri: editTarifItem.kategori_santri || 'semua',
+              dompet_tujuan: resolveCanonicalDompetForItem(
+                editTarifItem.kode,
+                editTarifItem.dompet_tujuan
+              ),
+              wajib_ndalem: editTarifItem.wajib_ndalem,
+              aktif: editTarifItem.aktif,
+              urutan: editTarifItem.urutan,
+            },
+          ],
+          { onConflict: 'kode' }
+        )
+        .select('id')
+        .single();
+      if (upsertErr || !ensured) {
+        setSaving(false);
+        showToast(
+          'error',
+          'Gagal menyinkronkan pos pembayaran: ' + (upsertErr?.message || 'Error DB')
+        );
+        return;
+      }
+      targetItemId = String((ensured as { id: string }).id);
+    }
+
+    const { error } = await supabase.from('master_pembayaran_riwayat').insert([
+      {
+        item_id: targetItemId,
+        nominal: Number(newNominal),
+        berlaku_mulai: berlakuMulai || todayStr,
+        catatan: catatanPerubahan || `Penyesuaian tarif per ${berlakuMulai || todayStr}`,
+      },
+    ]);
+
     if (!error && editTarifItem.kode.startsWith('syahriyah_')) {
       const targetKategori = editTarifItem.kategori_santri;
       if (targetKategori === 'vip') {
-        await supabase.from('santri').update({ tarif_syahriyah: Number(newNominal) }).ilike('kamar', '%VIP%');
+        await supabase
+          .from('santri')
+          .update({ tarif_syahriyah: Number(newNominal) })
+          .ilike('kamar', '%VIP%');
       } else if (targetKategori === 'ndalem') {
-        await supabase.from('santri').update({ tarif_syahriyah: Number(newNominal) }).eq('kamar', 'NDALEM');
+        await supabase
+          .from('santri')
+          .update({ tarif_syahriyah: Number(newNominal) })
+          .eq('kamar', 'NDALEM');
       } else if (targetKategori === 'reguler') {
         await supabase
           .from('santri')
@@ -189,11 +462,10 @@ export default function PengaturanPage() {
       setEditTarifItem(null);
       setCatatanPerubahan('');
       showToast('success', `Tarif ${editTarifItem.nama_item} diperbarui mulai ${berlakuMulai}!`);
-      fetchAll();
+      void loadAllData(false);
     }
   };
 
-  // Tambah Kategori Pembayaran Baru
   const handleCreateItemBaru = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageFinance || !newItemForm.nama_item.trim()) return;
@@ -206,16 +478,18 @@ export default function PengaturanPage() {
 
     const { data: created, error } = await supabase
       .from('master_pembayaran')
-      .insert([{
-        kode: slugKode,
-        nama_item: newItemForm.nama_item.trim(),
-        tipe_periode: newItemForm.tipe_periode,
-        kategori_santri: 'semua',
-        dompet_tujuan: newItemForm.dompet_tujuan,
-        wajib_ndalem: newItemForm.wajib_ndalem,
-        aktif: true,
-        urutan: masterItems.length + 1
-      }])
+      .insert([
+        {
+          kode: slugKode,
+          nama_item: newItemForm.nama_item.trim(),
+          tipe_periode: newItemForm.tipe_periode,
+          kategori_santri: 'semua',
+          dompet_tujuan: newItemForm.dompet_tujuan,
+          wajib_ndalem: newItemForm.wajib_ndalem,
+          aktif: true,
+          urutan: masterItems.length + 1,
+        },
+      ])
       .select()
       .single();
 
@@ -225,12 +499,14 @@ export default function PengaturanPage() {
       return;
     }
 
-    await supabase.from('master_pembayaran_riwayat').insert([{
-      item_id: created.id,
-      nominal: Number(newItemForm.nominal_awal),
-      berlaku_mulai: newItemForm.berlaku_mulai || todayStr,
-      catatan: 'Kategori pembayaran baru'
-    }]);
+    await supabase.from('master_pembayaran_riwayat').insert([
+      {
+        item_id: created.id,
+        nominal: Number(newItemForm.nominal_awal),
+        berlaku_mulai: newItemForm.berlaku_mulai || todayStr,
+        catatan: 'Kategori pembayaran baru',
+      },
+    ]);
 
     setSaving(false);
     setShowModalBaru(false);
@@ -240,333 +516,266 @@ export default function PengaturanPage() {
       dompet_tujuan: 'operasional',
       nominal_awal: 0,
       berlaku_mulai: todayStr,
-      wajib_ndalem: false
+      wajib_ndalem: false,
     });
-    showToast('success', `Kategori "${created.nama_item}" berhasil ditambahkan ke matriks Keuangan!`);
-    fetchAll();
+    showToast('success', `Kategori "${created.nama_item}" ditambahkan ke matriks Keuangan!`);
+    void loadAllData(false);
   };
 
-  const getTarifAktif = (itemId: string) => {
-    const list = riwayatMap[itemId] || [];
-    if (list.length === 0) return { nominal: 0, berlaku_mulai: '-' };
-    const aktif = list.find((r) => r.berlaku_mulai <= todayStr) || list[0];
-    return aktif;
+  const handleToggleItemAktif = async (item: MasterPembayaranItem) => {
+    if (!canManageFinance) return;
+    setTogglingItemId(item.id);
+    const nextStatus = !item.aktif;
+
+    if (item.id.startsWith('seed-')) {
+      const { error } = await supabase.from('master_pembayaran').upsert(
+        [
+          {
+            kode: item.kode,
+            nama_item: item.nama_item,
+            tipe_periode: item.tipe_periode,
+            kategori_santri: item.kategori_santri || 'semua',
+            dompet_tujuan: resolveCanonicalDompetForItem(item.kode, item.dompet_tujuan),
+            wajib_ndalem: item.wajib_ndalem,
+            aktif: nextStatus,
+            urutan: item.urutan,
+          },
+        ],
+        { onConflict: 'kode' }
+      );
+      setTogglingItemId(null);
+      if (error) {
+        showToast('error', 'Gagal mengubah status item: ' + error.message);
+        return;
+      }
+      showToast(
+        'success',
+        `"${item.nama_item}" sekarang ${nextStatus ? 'Aktif' : 'Nonaktif'}.`
+      );
+      void loadAllData(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('master_pembayaran')
+      .update({ aktif: nextStatus })
+      .eq('id', item.id);
+    setTogglingItemId(null);
+    if (error) {
+      showToast('error', 'Gagal mengubah status item: ' + error.message);
+      return;
+    }
+    setMasterItems((prev) =>
+      prev.map((m) => (m.id === item.id ? { ...m, aktif: nextStatus } : m))
+    );
+    showToast(
+      'success',
+      `"${item.nama_item}" sekarang ${nextStatus ? 'Aktif' : 'Nonaktif'}.`
+    );
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-500 text-xs">Memuat Pengaturan Aplikasi...</div>;
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-5">
+        <div className="h-20 rounded-2xl bg-slate-200/70 animate-pulse" />
+        <div className="h-12 rounded-xl bg-slate-200/70 animate-pulse" />
+        <div className="h-80 rounded-2xl bg-slate-200/70 animate-pulse" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-10">
+    <div className="space-y-5 max-w-6xl mx-auto pb-24">
       {toast && (
-        <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex items-center gap-2 border ${
-          toast.type === 'success' ? 'bg-emerald-900 text-white border-emerald-700' : 'bg-rose-600 text-white border-rose-700'
-        }`}>
-          {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+        <div
+          className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex items-center gap-2 border ${
+            toast.type === 'success'
+              ? 'bg-emerald-900 text-white border-emerald-700'
+              : 'bg-rose-600 text-white border-rose-700'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 shrink-0" />
+          )}
           {toast.message}
         </div>
       )}
 
-      {/* HEADER */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Settings className="w-6 h-6 text-emerald-700" />
-            Pengaturan Aplikasi &amp; Master Tarif Dinamis
+      {/* HEADER UTAMA */}
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-emerald-700 shrink-0" />
+            Pengaturan Aplikasi Pondok
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Atur komponen pembayaran santri, tanggal berlaku penyesuaian nominal, saldo awal dompet, dan legalitas TTD digital.
+            Pusat identitas resmi, kop surat JPG, legalitas TTD, tarif &amp; tema · Hak akses:{' '}
+            <span className="font-semibold text-slate-700">{userRole.toUpperCase()}</span>
           </p>
         </div>
-        <span className="px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[11px] font-bold flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          Akses: {userRole.toUpperCase()}
-        </span>
+
+        <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => handleSavePengaturan()}
+            className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
+          </button>
+        </div>
       </div>
 
-      {/* ================================================================= */}
-      {/* BAGIAN 1: MASTER TARIF & KATEGORI PEMBAYARAN (ADMIN & BENDAHARA)  */}
-      {/* ================================================================= */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
-          <div>
-            <h2 className="font-bold text-sm text-slate-800 flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-emerald-700" />
-              1. Master Tarif &amp; Komponen Pembayaran Santri
-            </h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Perubahan nominal berlaku mulai tanggal yang dikonfirmasi; bulan/tagihan sebelumnya tetap memakai tarif lama.
-            </p>
-          </div>
-
-          {canManageFinance ? (
+      {/* NAVIGASI 5 TAB (Rapi di HP & Desktop) */}
+      <div
+        role="tablist"
+        aria-label="Kategori Pengaturan Aplikasi"
+        className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 rounded-xl border border-slate-200"
+      >
+        {TAB_ITEMS.map((tab, idx) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.key;
+          return (
             <button
+              key={tab.key}
               type="button"
-              onClick={() => setShowModalBaru(true)}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setActiveTab(tab.key)}
+              className={`min-h-[40px] px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center justify-center sm:justify-start gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
+                idx === TAB_ITEMS.length - 1 ? 'col-span-2 sm:col-span-1' : ''
+              } ${
+                active
+                  ? 'bg-white text-emerald-800 shadow-xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              Tambah Pembayaran Baru
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="sm:hidden">{tab.shortLabel}</span>
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
-          ) : (
-            <span className="px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" />
-              Hanya Admin Utama &amp; Bendahara
-            </span>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[10px]">
-              <tr>
-                <th className="p-3.5">Nama Pembayaran</th>
-                <th className="p-3.5">Jenis</th>
-                <th className="p-3.5">Dompet Tujuan</th>
-                <th className="p-3.5">Santri Ndalem</th>
-                <th className="p-3.5">Tarif Aktif &amp; Riwayat</th>
-                <th className="p-3.5 text-center">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {masterItems.map((item) => {
-                const tarifAktif = getTarifAktif(item.id);
-                const riwayatList = riwayatMap[item.id] || [];
-                return (
-                  <tr key={item.id} className="hover:bg-slate-50/70">
-                    <td className="p-3.5 font-bold text-slate-800">{item.nama_item}</td>
-                    <td className="p-3.5">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                        item.tipe_periode === 'bulanan' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
-                      }`}>
-                        {item.tipe_periode}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-[11px] text-slate-600">{NAMA_DOMPET[item.dompet_tujuan] || item.dompet_tujuan}</td>
-                    <td className="p-3.5">
-                      {item.wajib_ndalem ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Wajib</span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">Opsional (Tidak Wajib)</span>
-                      )}
-                    </td>
-                    <td className="p-3.5">
-                      <div className="font-mono font-extrabold text-emerald-800 text-xs">
-                        Rp {Number(tarifAktif.nominal).toLocaleString('id-ID')}
-                      </div>
-                      {riwayatList.length > 0 && (
-                        <div className="mt-1 space-y-0.5">
-                          {riwayatList.slice(0, 2).map((r: any) => (
-                            <div key={r.id} className="text-[10px] text-slate-400 flex items-center gap-1">
-                              <History className="w-2.5 h-2.5" />
-                              Rp {Number(r.nominal).toLocaleString('id-ID')} (mulai {r.berlaku_mulai})
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3.5 text-center">
-                      {canManageFinance ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditTarifItem(item);
-                            setNewNominal(Number(tarifAktif.nominal));
-                            setBerlakuMulai(todayStr);
-                            setCatatanPerubahan('');
-                          }}
-                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-[11px] inline-flex items-center gap-1 transition-colors"
-                        >
-                          <Edit3 className="w-3 h-3" /> Ubah Tarif
-                        </button>
-                      ) : (
-                        <span className="text-slate-400 text-[11px]">Terkunci</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          );
+        })}
       </div>
 
-      {/* ================================================================= */}
-      {/* BAGIAN 2: SALDO AWAL TRANSISI 4 DOMPET & ATURAN JATUH TEMPO       */}
-      {/* ================================================================= */}
-      <form onSubmit={handleSavePengaturan} className="space-y-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h2 className="font-bold text-sm text-slate-800 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-emerald-700" />
-              2. Saldo Awal Transisi (4 Dompet) &amp; Jatuh Tempo Syahriyah
-            </h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Isi sisa saldo kas tunai/rekening riil saat mulai memakai aplikasi agar neraca 4 dompet langsung akurat.
-            </p>
-          </div>
+      {/* KONTEN TAB AKTIF */}
+      {activeTab === 'identitas' && (
+        <IdentitasRekeningTab formData={formData} onUpdateField={handleUpdateField} />
+      )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">Saldo Awal Dompet Pendaftaran</label>
-              <input
-                type="number"
-                disabled={!canManageFinance}
-                value={formData.saldo_awal_pendaftaran ?? 0}
-                onChange={(e) => setFormData({ ...formData, saldo_awal_pendaftaran: Number(e.target.value) })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">Saldo Awal Syahriyah &amp; Tahunan</label>
-              <input
-                type="number"
-                disabled={!canManageFinance}
-                value={formData.saldo_awal_operasional ?? 0}
-                onChange={(e) => setFormData({ ...formData, saldo_awal_operasional: Number(e.target.value) })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">Saldo Awal Dompet Kas (Lain-lain)</label>
-              <input
-                type="number"
-                disabled={!canManageFinance}
-                value={formData.saldo_awal_kas_pondok ?? 0}
-                onChange={(e) => setFormData({ ...formData, saldo_awal_kas_pondok: Number(e.target.value) })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">Saldo Awal Dompet MDA</label>
-              <input
-                type="number"
-                disabled={!canManageFinance}
-                value={formData.saldo_awal_mda ?? 0}
-                onChange={(e) => setFormData({ ...formData, saldo_awal_mda: Number(e.target.value) })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
-          </div>
+      {activeTab === 'legalitas' && (
+        <LogoLegalitasTab
+          formData={formData}
+          onUpdateField={handleUpdateField}
+          onUploadImage={handleUploadImage}
+          uploadingField={uploadingField}
+        />
+      )}
 
-          <div className="max-w-xs text-xs pt-1">
-            <label className="font-semibold text-slate-700 block mb-1">Tanggal Jatuh Tempo Syahriyah Bulanan</label>
-            <input
-              type="number"
-              min={1}
-              max={28}
-              disabled={!canManageFinance}
-              value={formData.jatuh_tempo_tanggal ?? 10}
-              onChange={(e) => setFormData({ ...formData, jatuh_tempo_tanggal: Number(e.target.value) })}
-              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-            />
-            <span className="text-[10px] text-slate-400 mt-1 block">Lewat tanggal ini, bulan berjalan otomatis dihitung menunggak.</span>
-          </div>
-        </div>
+      {activeTab === 'keuangan' && (
+        <KeuanganTarifTab
+          formData={formData}
+          onUpdateField={handleUpdateField}
+          onUpdateTahunAjaran={(val) =>
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: { ...prev.aturan_operasional, tahun_ajaran_aktif: val },
+            }))
+          }
+          onUpdatePendaftaran={(updater) =>
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: {
+                ...prev.aturan_operasional,
+                pendaftaran: updater(prev.aturan_operasional.pendaftaran),
+              },
+            }))
+          }
+          canManageFinance={canManageFinance}
+          masterItems={masterItems}
+          riwayatMap={riwayatMap}
+          todayStr={todayStr}
+          onOpenNewModal={() => setShowModalBaru(true)}
+          onOpenEditTarif={(item, nominalAktif) => {
+            setEditTarifItem(item);
+            setNewNominal(nominalAktif);
+            setBerlakuMulai(todayStr);
+            setCatatanPerubahan('');
+          }}
+          onToggleItemAktif={handleToggleItemAktif}
+          togglingItemId={togglingItemId}
+        />
+      )}
 
-        {/* ================================================================= */}
-        {/* BAGIAN 3: PROFIL LEMBAGA, LOGO, STEMPEL & TTD DIGITAL PEJABAT     */}
-        {/* ================================================================= */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h2 className="font-bold text-sm text-slate-800 border-b border-slate-100 pb-3 flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-emerald-700" />
-            3. Profil Pesantren, Logo &amp; Legalitas TTD Digital (Untuk Cetak Surat/Kuitansi)
-          </h2>
+      {activeTab === 'operasional' && (
+        <AturanDivisiTab
+          formData={formData}
+          onUpdateAturan={(updater) =>
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: updater(prev.aturan_operasional),
+            }))
+          }
+        />
+      )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">Nama Pesantren</label>
-              <input
-                type="text"
-                value={formData.nama_pesantren || ''}
-                onChange={(e) => setFormData({ ...formData, nama_pesantren: e.target.value })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-              />
-            </div>
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">No. Telepon / WA Resmi</label>
-              <input
-                type="text"
-                value={formData.no_telepon || ''}
-                onChange={(e) => setFormData({ ...formData, no_telepon: e.target.value })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="font-semibold text-slate-700 block mb-1">Alamat Lengkap</label>
-              <input
-                type="text"
-                value={formData.alamat_lengkap || ''}
-                onChange={(e) => setFormData({ ...formData, alamat_lengkap: e.target.value })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="font-semibold text-slate-700 block mb-1">Slogan Pesantren</label>
-              <input
-                type="text"
-                value={formData.slogan || ''}
-                onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-              />
-            </div>
-          </div>
+      {activeTab === 'tema' && (
+        <TemaAplikasiTab
+          tema={formData.aturan_operasional.tema}
+          logoUrl={formData.logo_url}
+          onUpdateTema={(updater) => {
+            const nextTema = updater(formData.aturan_operasional.tema);
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: {
+                ...prev.aturan_operasional,
+                tema: nextTema,
+              },
+            }));
+            applyThemeToDocument(nextTema, { logoUrl: formData.logo_url });
+          }}
+        />
+      )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <span className="font-bold text-slate-800 block">Logo Pondok Pesantren (PNG)</span>
-              {formData.logo_url && <img src={formData.logo_url} alt="Logo" className="h-14 object-contain" />}
-              <input type="file" accept="image/*" onChange={(e) => handleUploadImage(e, 'logo_url')} className="w-full text-[11px]" />
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <span className="font-bold text-slate-800 block">Stempel Resmi Pondok (PNG Transparan)</span>
-              {formData.stempel_url && <img src={formData.stempel_url} alt="Stempel" className="h-14 object-contain" />}
-              <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'stempel_url')} className="w-full text-[11px]" />
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <label className="font-bold text-slate-800 block">Pengasuh Pondok Pesantren</label>
-              <input type="text" value={formData.nama_pengasuh || ''} onChange={(e) => setFormData({ ...formData, nama_pengasuh: e.target.value })} className="w-full p-2 bg-white border rounded-lg" />
-              {formData.ttd_pengasuh_url && <img src={formData.ttd_pengasuh_url} alt="TTD Pengasuh" className="h-12 object-contain" />}
-              <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'ttd_pengasuh_url')} className="w-full text-[11px]" />
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <label className="font-bold text-slate-800 block">Kepala Pondok</label>
-              <input type="text" value={formData.nama_kepala_pondok || ''} onChange={(e) => setFormData({ ...formData, nama_kepala_pondok: e.target.value })} className="w-full p-2 bg-white border rounded-lg" />
-              {formData.ttd_kepala_pondok_url && <img src={formData.ttd_kepala_pondok_url} alt="TTD Kepala" className="h-12 object-contain" />}
-              <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'ttd_kepala_pondok_url')} className="w-full text-[11px]" />
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <label className="font-bold text-slate-800 block">Sekretaris Pondok</label>
-              <input type="text" value={formData.nama_sekretaris || ''} onChange={(e) => setFormData({ ...formData, nama_sekretaris: e.target.value })} className="w-full p-2 bg-white border rounded-lg" />
-              {formData.ttd_sekretaris_url && <img src={formData.ttd_sekretaris_url} alt="TTD Sekretaris" className="h-12 object-contain" />}
-              <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'ttd_sekretaris_url')} className="w-full text-[11px]" />
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <label className="font-bold text-slate-800 block">Bendahara Pondok</label>
-              <input type="text" value={formData.nama_bendahara || ''} onChange={(e) => setFormData({ ...formData, nama_bendahara: e.target.value })} className="w-full p-2 bg-white border rounded-lg" />
-              {formData.ttd_bendahara_url && <img src={formData.ttd_bendahara_url} alt="TTD Bendahara" className="h-12 object-contain" />}
-              <input type="file" accept="image/png" onChange={(e) => handleUploadImage(e, 'ttd_bendahara_url')} className="w-full text-[11px]" />
+      {/* STICKY SAVE BAR SAAT ADA PERUBAHAN BELUM DISIMPAN */}
+      {hasUnsavedChanges && (
+        <div className="fixed bottom-16 md:bottom-5 inset-x-4 md:left-72 md:right-8 z-40 max-w-4xl mx-auto">
+          <div className="bg-slate-900 text-white rounded-xl px-4 py-2.5 shadow-xl border border-slate-700 flex items-center justify-between gap-3">
+            <span className="text-xs font-medium truncate">
+              Ada perubahan pengaturan yang belum disimpan
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const reverted = JSON.parse(savedSnapshot) as PengaturanFormState;
+                  setFormData(reverted);
+                  applyThemeToDocument(reverted.aturan_operasional.tema, {
+                    logoUrl: reverted.logo_url,
+                  });
+                }}
+                className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer whitespace-nowrap"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSavePengaturan()}
+                className="min-h-[36px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {saving ? 'Menyimpan...' : 'Simpan Sekarang'}
+              </button>
             </div>
           </div>
         </div>
+      )}
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full py-3.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-sm text-xs transition-colors"
-        >
-          <Save className="w-4 h-4" />
-          {saving ? 'Menyimpan...' : 'Simpan Seluruh Pengaturan Aplikasi'}
-        </button>
-      </form>
-
-      {/* ================================================================= */}
-      {/* MODAL EDIT NOMINAL + KONFIRMASI TANGGAL MULAI BERLAKU             */}
-      {/* ================================================================= */}
+      {/* MODAL EDIT NOMINAL + KONFIRMASI TANGGAL MULAI BERLAKU */}
       {editTarifItem && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
@@ -575,31 +784,42 @@ export default function PengaturanPage() {
                 <h3 className="font-bold text-sm">Penyesuaian Nominal Tarif</h3>
                 <span className="text-[11px] text-emerald-200">{editTarifItem.nama_item}</span>
               </div>
-              <button onClick={() => setEditTarifItem(null)} className="text-emerald-200 hover:text-white">
+              <button
+                type="button"
+                onClick={() => setEditTarifItem(null)}
+                aria-label="Tutup modal ubah tarif"
+                className="text-emerald-200 hover:text-white cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEditTarif} className="p-6 space-y-4 text-xs">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-relaxed">
-                <strong>Aturan Berlaku Surut Aman:</strong> Bulan/tagihan sebelum tanggal mulai berlaku akan tetap ditagih menggunakan tarif lama, sedangkan tagihan mulai tanggal tersebut ke depan otomatis memakai nominal baru.
+                <strong>Aturan Berlaku Surut Aman:</strong> Bulan/tagihan sebelum tanggal mulai berlaku tetap ditagih memakai tarif lama.
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Nominal Baru (Rp) *</label>
+                <label htmlFor="nominal_baru" className="font-bold text-slate-700 block mb-1">
+                  Nominal Baru (Rp) *
+                </label>
                 <input
+                  id="nominal_baru"
                   type="number"
                   required
                   min={0}
                   value={newNominal}
                   onChange={(e) => setNewNominal(Number(e.target.value))}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-sm"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-sm tabular-nums"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Berlaku Mulai Tanggal *</label>
+                <label htmlFor="berlaku_mulai" className="font-bold text-slate-700 block mb-1">
+                  Berlaku Mulai Tanggal *
+                </label>
                 <input
+                  id="berlaku_mulai"
                   type="date"
                   required
                   value={berlakuMulai}
@@ -609,10 +829,13 @@ export default function PengaturanPage() {
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Catatan Penyesuaian (Opsional)</label>
+                <label htmlFor="catatan_perubahan" className="font-semibold text-slate-700 block mb-1">
+                  Catatan Penyesuaian (Opsional)
+                </label>
                 <input
+                  id="catatan_perubahan"
                   type="text"
-                  placeholder="Contoh: Penyesuaian hasil rapat pengurus bulan November"
+                  placeholder="Contoh: Penyesuaian hasil rapat pengurus"
                   value={catatanPerubahan}
                   onChange={(e) => setCatatanPerubahan(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
@@ -623,14 +846,14 @@ export default function PengaturanPage() {
                 <button
                   type="button"
                   onClick={() => setEditTarifItem(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
+                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl cursor-pointer"
                 >
                   {saving ? 'Menyimpan...' : 'Konfirmasi Perubahan Tarif'}
                 </button>
@@ -640,23 +863,29 @@ export default function PengaturanPage() {
         </div>
       )}
 
-      {/* ================================================================= */}
-      {/* MODAL TAMBAH KATEGORI PEMBAYARAN BARU                             */}
-      {/* ================================================================= */}
+      {/* MODAL TAMBAH KATEGORI PEMBAYARAN BARU */}
       {showModalBaru && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-emerald-900 text-white px-6 py-4 flex justify-between items-center">
               <h3 className="font-bold text-sm">Tambah Kategori Pembayaran Baru</h3>
-              <button onClick={() => setShowModalBaru(false)} className="text-emerald-200 hover:text-white">
+              <button
+                type="button"
+                onClick={() => setShowModalBaru(false)}
+                aria-label="Tutup modal tambah pembayaran"
+                className="text-emerald-200 hover:text-white cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateItemBaru} className="p-6 space-y-4 text-xs">
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Nama Pembayaran *</label>
+                <label htmlFor="nama_item_baru" className="font-bold text-slate-700 block mb-1">
+                  Nama Pembayaran *
+                </label>
                 <input
+                  id="nama_item_baru"
                   type="text"
                   required
                   placeholder="Contoh: Seragam Pondok / Kitab Madin"
@@ -668,10 +897,18 @@ export default function PengaturanPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Jenis Periode *</label>
+                  <label htmlFor="tipe_periode_baru" className="font-bold text-slate-700 block mb-1">
+                    Jenis Periode *
+                  </label>
                   <select
+                    id="tipe_periode_baru"
                     value={newItemForm.tipe_periode}
-                    onChange={(e) => setNewItemForm({ ...newItemForm, tipe_periode: e.target.value })}
+                    onChange={(e) =>
+                      setNewItemForm({
+                        ...newItemForm,
+                        tipe_periode: e.target.value as 'bulanan' | 'tahunan',
+                      })
+                    }
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                   >
                     <option value="tahunan">Tahunan (Per Tahun Ajaran)</option>
@@ -680,8 +917,11 @@ export default function PengaturanPage() {
                 </div>
 
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Masuk ke Dompet *</label>
+                  <label htmlFor="dompet_tujuan_baru" className="font-bold text-slate-700 block mb-1">
+                    Masuk ke Dompet *
+                  </label>
                   <select
+                    id="dompet_tujuan_baru"
                     value={newItemForm.dompet_tujuan}
                     onChange={(e) => setNewItemForm({ ...newItemForm, dompet_tujuan: e.target.value })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
@@ -696,20 +936,28 @@ export default function PengaturanPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Nominal (Rp) *</label>
+                  <label htmlFor="nominal_awal_baru" className="font-bold text-slate-700 block mb-1">
+                    Nominal (Rp) *
+                  </label>
                   <input
+                    id="nominal_awal_baru"
                     type="number"
                     required
                     min={0}
                     value={newItemForm.nominal_awal}
-                    onChange={(e) => setNewItemForm({ ...newItemForm, nominal_awal: Number(e.target.value) })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono"
+                    onChange={(e) =>
+                      setNewItemForm({ ...newItemForm, nominal_awal: Number(e.target.value) })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono tabular-nums"
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Berlaku Mulai *</label>
+                  <label htmlFor="berlaku_mulai_baru" className="font-bold text-slate-700 block mb-1">
+                    Berlaku Mulai *
+                  </label>
                   <input
+                    id="berlaku_mulai_baru"
                     type="date"
                     required
                     value={newItemForm.berlaku_mulai}
@@ -732,14 +980,14 @@ export default function PengaturanPage() {
                 <button
                   type="button"
                   onClick={() => setShowModalBaru(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
+                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl cursor-pointer"
                 >
                   {saving ? 'Menyimpan...' : 'Simpan Kategori Baru'}
                 </button>
@@ -748,6 +996,7 @@ export default function PengaturanPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

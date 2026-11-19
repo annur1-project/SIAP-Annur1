@@ -1,26 +1,175 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --siap-primary: #047857;
+  --siap-sidebar: #064e3b;
+  --siap-bg: #f8fafc;
+  --siap-surface: #ffffff;
+  --siap-text: #0f172a;
+  --siap-radius: 12px;
+  --siap-font: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--siap-bg);
+  --color-foreground: var(--siap-text);
+  --font-sans: var(--siap-font);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html,
+body {
+  background-color: var(--siap-bg);
+  color: var(--siap-text);
+  font-family: var(--siap-font);
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Sidebar & mobile header follow customized sidebar theme */
+[data-siap-sidebar],
+[data-siap-mobile-header] {
+  background-color: var(--siap-sidebar);
+}
+
+[data-siap-nav-active="true"] {
+  background-color: var(--siap-primary);
+  color: #ffffff;
+}
+
+/* Primary action accent tinting when custom theme is selected */
+[data-theme-custom-accent="true"] button.bg-emerald-700,
+[data-theme-custom-accent="true"] a.bg-emerald-700,
+[data-theme-custom-accent="true"] button.bg-emerald-800,
+[data-theme-custom-accent="true"] button.bg-emerald-600 {
+  background-color: var(--siap-primary);
+}
+
+[data-theme-custom-accent="true"] .text-emerald-700,
+[data-theme-custom-accent="true"] .text-emerald-800 {
+  color: var(--siap-primary);
+}
+
+/* Warm mode soft paper canvas */
+html[data-theme-mode="warm"] [data-siap-shell] {
+  background-color: #f7f4ed;
+}
+
+html[data-theme-mode="warm"] main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+  background-color: #fffdf9;
+  border-color: #e7e1d4;
+}
+
+html[data-theme-mode="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+  background-color: #f4efe4;
+}
+
+/* Dark mode clean surface pairing (excludes printable paper documents) */
+@media screen {
+  html.dark [data-siap-shell] {
+    background-color: #0b1120;
+    color: #f1f5f9;
+  }
+
+  html.dark main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
+  html.dark main .bg-white\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+    background-color: #111827;
+    border-color: #1e293b;
+    color: #f1f5f9;
+  }
+
+  html.dark main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
+  html.dark main .bg-slate-50\/60:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
+  html.dark main .bg-slate-50\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
+  html.dark main .bg-slate-100:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+    background-color: #0f172a;
+    border-color: #1e293b;
+    color: #e2e8f0;
+  }
+
+  html.dark main .bg-emerald-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-emerald-50\/70:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(6, 78, 59, 0.25);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #d1fae5;
+  }
+
+  html.dark main .bg-amber-50:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(120, 53, 15, 0.25);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fef3c7;
+  }
+
+  html.dark main .text-slate-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-slate-800:not(#pusat-laporan-dokumen *) {
+    color: #f8fafc;
+  }
+
+  html.dark main .text-slate-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-slate-600:not(#pusat-laporan-dokumen *) {
+    color: #cbd5e1;
+  }
+
+  html.dark main .text-slate-500:not(#pusat-laporan-dokumen *),
+  html.dark main .text-slate-400:not(#pusat-laporan-dokumen *) {
+    color: #94a3b8;
+  }
+
+  html.dark main .text-emerald-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-emerald-800:not(#pusat-laporan-dokumen *),
+  html.dark main .text-emerald-900:not(#pusat-laporan-dokumen *) {
+    color: color-mix(in srgb, var(--siap-primary) 45%, #ffffff);
+  }
+
+  html.dark main .border-slate-300:not(#pusat-laporan-dokumen *),
+  html.dark main .border-slate-200:not(#pusat-laporan-dokumen *),
+  html.dark main .border-slate-100:not(#pusat-laporan-dokumen *) {
+    border-color: #1e293b;
+  }
+
+  html.dark main input:not(#pusat-laporan-dokumen *),
+  html.dark main select:not(#pusat-laporan-dokumen *),
+  html.dark main textarea:not(#pusat-laporan-dokumen *) {
+    background-color: #0f172a;
+    border-color: #334155;
+    color: #f1f5f9;
+  }
+
+  html.dark [data-siap-mobile-bottom-nav] {
+    background-color: rgba(15, 23, 42, 0.96);
+    border-color: #1e293b;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Radius & density customizer */
+html[data-theme-radius="sharp"] main .rounded-2xl {
+  border-radius: 8px;
+}
+html[data-theme-radius="sharp"] main .rounded-xl {
+  border-radius: 6px;
+}
+
+html[data-theme-radius="rounded"] main .rounded-2xl {
+  border-radius: 22px;
+}
+html[data-theme-radius="rounded"] main .rounded-xl {
+  border-radius: 16px;
+}
+
+html[data-theme-density="compact"] main {
+  padding-top: 1.25rem;
+  padding-bottom: 1.5rem;
+}
+
+@media print {
+  html,
+  body,
+  [data-siap-shell] {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
 }

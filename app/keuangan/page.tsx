@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   Wallet,
   CreditCard,
-  Receipt,
+  ReceiptText,
   AlertTriangle,
   BookOpen,
   DatabaseBackup,
@@ -35,7 +35,30 @@ import {
   ArrowDownLeft,
   Info,
   Save,
+  ImagePlus,
+  Eye,
+  Upload,
 } from 'lucide-react';
+import {
+  DEFAULT_SKEMA_PENDAFTARAN,
+  hitungRincianPendaftaran,
+  mergeAturanOperasional,
+  readExtendedLocal,
+  type SkemaPendaftaranConfig,
+} from '@/lib/pengaturan';
+import {
+  ANNUAL_FEE_FALLBACK_NOMINALS,
+  computeWalletAndTransferSummary,
+  getMigrasiColNameForItem,
+  insertKeuanganTransaksiResilient,
+  NEW_MASTER_PEMBAYARAN_SEEDS,
+  readKeuanganLampiranMap,
+  readMigrasiAnnualFlag,
+  resolveCanonicalDompetForItem,
+  resolveTxLampiranUrl,
+  updateKeuanganLampiranResilient,
+  uploadKeuanganLampiranImage,
+} from '@/lib/keuangan';
 
 // ============================================================================
 // TIPE DATA & KONSTANTA
@@ -117,6 +140,7 @@ interface KeuanganTransaksiItem {
   petugas_id?: string | null;
   tgl_transaksi: string;
   no_kuitansi?: string | null;
+  lampiran_url?: string | null;
   created_at?: string;
   santri?: {
     nama_lengkap: string;
@@ -437,6 +461,9 @@ export default function KeuanganPage() {
     saldo_awal_kas_pondok: 0,
     saldo_awal_mda: 0,
   });
+  const [skemaPendaftaran, setSkemaPendaftaran] = useState<SkemaPendaftaranConfig>(
+    DEFAULT_SKEMA_PENDAFTARAN
+  );
 
   // Tahun Ajaran & Tanggal Hari Ini (Client-safe)
   const [tahunAjaran, setTahunAjaran] = useState<string>('2026/2027');
@@ -475,13 +502,19 @@ export default function KeuanganPage() {
   const [loketSearch, setLoketSearch] = useState<string>('');
   const [loketKamarFilter, setLoketKamarFilter] = useState<string>('SEMUA');
   const [selectedSantriId, setSelectedSantriId] = useState<string>('');
+  const [mobileSantriPickerOpen, setMobileSantriPickerOpen] = useState<boolean>(false);
   const [selectedBulanPeriodes, setSelectedBulanPeriodes] = useState<string[]>([]);
   const [selectedTahunanKodes, setSelectedTahunanKodes] = useState<string[]>([]);
   const [bayarKtlChecked, setBayarKtlChecked] = useState<boolean>(false);
   const [bayarKtlNominal, setBayarKtlNominal] = useState<number>(0);
+  const [bayarPsbChecked, setBayarPsbChecked] = useState<boolean>(false);
+  const [bayarPsbPaket, setBayarPsbPaket] = useState<'reguler' | 'vip'>('reguler');
+  const [bayarPsbFreePangkal, setBayarPsbFreePangkal] = useState<boolean>(true);
   const [metodeBayar, setMetodeBayar] = useState<'tunai' | 'transfer'>('tunai');
   const [tglBayarInput, setTglBayarInput] = useState<string>('2026-11-15');
   const [savingPayment, setSavingPayment] = useState<boolean>(false);
+  const [loketBuktiFile, setLoketBuktiFile] = useState<File | null>(null);
+  const [loketBuktiPreview, setLoketBuktiPreview] = useState<string>('');
 
   // ==========================================================================
   // STATE TAB 2: DAFTAR & PREVIEW KUITANSI 21x10 CM
@@ -517,6 +550,25 @@ export default function KeuanganPage() {
     keterangan: '',
   });
   const [savingKas, setSavingKas] = useState<boolean>(false);
+  const [kasLampiranFile, setKasLampiranFile] = useState<File | null>(null);
+  const [kasLampiranPreview, setKasLampiranPreview] = useState<string>('');
+
+  // Lampiran Bukti Transfer & Scan Nota Pembelian (DB + Fallback Local)
+  const [lampiranMap, setLampiranMap] = useState<Record<string, string>>({});
+  const [uploadingLampiranId, setUploadingLampiranId] = useState<string | null>(null);
+  const [lightboxLampiran, setLightboxLampiran] = useState<{
+    url: string;
+    title: string;
+    subtitle: string;
+    txId?: string | null;
+    noKuitansi?: string | null;
+  } | null>(null);
+  const quickAttachInputRef = useRef<HTMLInputElement | null>(null);
+  const [quickAttachTarget, setQuickAttachTarget] = useState<{
+    txId?: string | null;
+    noKuitansi?: string | null;
+    kind: 'bukti_tf' | 'nota';
+  } | null>(null);
 
   // Modal Bisyaroh Pengurus
   const [showBisyarohModal, setShowBisyarohModal] = useState<boolean>(false);
@@ -528,15 +580,8 @@ export default function KeuanganPage() {
   const [savingBisyaroh, setSavingBisyaroh] = useState<boolean>(false);
 
   // ==========================================================================
-  // STATE TAB 5: MIGRASI BUKU LAMA, KTL & SALDO AWAL
+  // STATE TAB 5: MIGRASI BUKU LAMA & KTL TRANSISI
   // ==========================================================================
-  const [saldoAwalForm, setSaldoAwalForm] = useState({
-    saldo_awal_pendaftaran: '0',
-    saldo_awal_operasional: '0',
-    saldo_awal_kas_pondok: '0',
-    saldo_awal_mda: '0',
-  });
-  const [savingSaldoAwal, setSavingSaldoAwal] = useState<boolean>(false);
   const [migrasiSearch, setMigrasiSearch] = useState<string>('');
   const [migrasiKamarFilter, setMigrasiKamarFilter] = useState<string>('SEMUA');
   const [migrasiSantriId, setMigrasiSantriId] = useState<string>('');
@@ -565,29 +610,31 @@ export default function KeuanganPage() {
   // INISIALISASI TANGGAL & USER AUTH
   // ==========================================================================
   useEffect(() => {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const isoDate = `${yyyy}-${mm}-${dd}`;
-    const isoMonth = `${yyyy}-${mm}`;
+    const timer = setTimeout(() => {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const isoDate = `${yyyy}-${mm}-${dd}`;
+      const isoMonth = `${yyyy}-${mm}`;
 
-    setTodayStr(isoDate);
-    setCurrentMonthStr(isoMonth);
-    setTglBayarInput(isoDate);
-    setKasBulanFilter(isoMonth);
-    setKasForm((prev) => ({ ...prev, tgl_transaksi: isoDate }));
-    setBisyarohTgl(isoDate);
+      setTodayStr(isoDate);
+      setCurrentMonthStr(isoMonth);
+      setTglBayarInput(isoDate);
+      setKasBulanFilter(isoMonth);
+      setKasForm((prev) => ({ ...prev, tgl_transaksi: isoDate }));
+      setBisyarohTgl(isoDate);
 
-    // Tentukan Tahun Ajaran berjalan (Juli = awal TA baru)
-    const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
-    setTahunAjaran(`${startYear}/${startYear + 1}`);
+      // Tentukan Tahun Ajaran berjalan (Juli = awal TA baru)
+      const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
+      setTahunAjaran(`${startYear}/${startYear + 1}`);
 
-    const bulanIndo = [
-      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
-    ];
-    setBisyarohBulanLabel(`${bulanIndo[now.getMonth()]} ${yyyy}`);
+      const bulanIndo = [
+        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+      ];
+      setBisyarohBulanLabel(`${bulanIndo[now.getMonth()]} ${yyyy}`);
+    }, 0);
 
     // Ambil profil user aktif
     const loadUserRole = async () => {
@@ -605,7 +652,8 @@ export default function KeuanganPage() {
         }
       }
     };
-    loadUserRole();
+    void loadUserRole();
+    return () => clearTimeout(timer);
   }, []);
 
   // ==========================================================================
@@ -652,24 +700,25 @@ export default function KeuanganPage() {
       if (riwayatRes.data) setTarifRiwayat(riwayatRes.data as TarifRiwayatItem[]);
       if (detailRes.data) setPembayaranDetails(detailRes.data as PembayaranDetailItem[]);
       if (kasRes.data) setKasTransaksi(kasRes.data as KeuanganTransaksiItem[]);
+      setLampiranMap(readKeuanganLampiranMap());
 
-      if (pengaturanRes.data) {
-        const p = pengaturanRes.data as PengaturanAplikasi;
+      const localExt = readExtendedLocal();
+      const rawPengaturan = pengaturanRes.data as (PengaturanAplikasi & { aturan_operasional?: unknown }) | null;
+      const aturanMerged = mergeAturanOperasional(
+        rawPengaturan?.aturan_operasional ?? localExt?.aturan_operasional
+      );
+      setSkemaPendaftaran(aturanMerged.pendaftaran);
+
+      if (rawPengaturan) {
         setPengaturan((prev) => ({
           ...prev,
-          ...p,
-          jatuh_tempo_tanggal: Number(p.jatuh_tempo_tanggal || 10),
-          saldo_awal_pendaftaran: Number(p.saldo_awal_pendaftaran || 0),
-          saldo_awal_operasional: Number(p.saldo_awal_operasional || 0),
-          saldo_awal_kas_pondok: Number(p.saldo_awal_kas_pondok || 0),
-          saldo_awal_mda: Number(p.saldo_awal_mda || 0),
+          ...rawPengaturan,
+          jatuh_tempo_tanggal: Number(rawPengaturan.jatuh_tempo_tanggal || 10),
+          saldo_awal_pendaftaran: Number(rawPengaturan.saldo_awal_pendaftaran || 0),
+          saldo_awal_operasional: Number(rawPengaturan.saldo_awal_operasional || 0),
+          saldo_awal_kas_pondok: Number(rawPengaturan.saldo_awal_kas_pondok || 0),
+          saldo_awal_mda: Number(rawPengaturan.saldo_awal_mda || 0),
         }));
-        setSaldoAwalForm({
-          saldo_awal_pendaftaran: String(Number(p.saldo_awal_pendaftaran || 0)),
-          saldo_awal_operasional: String(Number(p.saldo_awal_operasional || 0)),
-          saldo_awal_kas_pondok: String(Number(p.saldo_awal_kas_pondok || 0)),
-          saldo_awal_mda: String(Number(p.saldo_awal_mda || 0)),
-        });
       }
 
       if (pengurusRes.data) {
@@ -691,7 +740,10 @@ export default function KeuanganPage() {
   }, [migrasiSantriId, selectedSantriId, showToast]);
 
   useEffect(() => {
-    fetchAllData();
+    const timer = setTimeout(() => {
+      void fetchAllData();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchAllData]);
 
   // ==========================================================================
@@ -715,14 +767,24 @@ export default function KeuanganPage() {
           }
           html, body {
             width: 210mm !important;
-            height: 99mm !important;
-            max-height: 99mm !important;
+            height: 98mm !important;
+            max-height: 98mm !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow: hidden !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          #print-kuitansi-sheet {
+            width: 210mm !important;
+            height: 98mm !important;
+            max-height: 98mm !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       `;
@@ -823,13 +885,19 @@ export default function KeuanganPage() {
         return getNominalByKodeAndDate('syahriyah_ndalem', effectiveDate, 145000);
       }
       if (kategori === 'vip') {
-        const defaultVip = periodeYYYYMM >= '2026-11' ? 500000 : 475000;
-        return getNominalByKodeAndDate('syahriyah_vip', effectiveDate, defaultVip);
+        return getNominalByKodeAndDate(
+          'syahriyah_vip',
+          effectiveDate,
+          skemaPendaftaran.syahriyah_vip || 500000
+        );
       }
-      const defaultReg = periodeYYYYMM >= '2026-11' ? 450000 : 425000;
-      return getNominalByKodeAndDate('syahriyah_reguler', effectiveDate, defaultReg);
+      return getNominalByKodeAndDate(
+        'syahriyah_reguler',
+        effectiveDate,
+        skemaPendaftaran.syahriyah_reguler || 450000
+      );
     },
-    [getNominalByKodeAndDate]
+    [getNominalByKodeAndDate, skemaPendaftaran.syahriyah_vip, skemaPendaftaran.syahriyah_reguler]
   );
 
   // Daftar 12 Bulan dalam Tahun Ajaran aktif (e.g., 2026/2027 -> Jul 2026..Jun 2027)
@@ -849,25 +917,37 @@ export default function KeuanganPage() {
     });
   }, [tahunAjaran]);
 
-  // Item Tahunan Aktif
+  // Item Tahunan Aktif (termasuk 4 pos wajib: Al-Adzkar, Almamater, Kitab Madin, Infaq Madin + pemetaan dompet kanonik)
   const itemTahunanList = useMemo(() => {
-    const fallbackDefaults: Record<string, number> = {
-      ujian_mda_1: 60000,
-      ujian_mda_2: 60000,
-      raport: 40000,
-      kalender: 30000,
-      haul: 50000,
-      kesehatan: 100000,
-    };
-
     const startYear = parseInt(tahunAjaran.split('/')[0] || '2026', 10);
     const refDate = `${startYear}-07-01`;
 
-    return masterPembayaran
-      .filter((m) => m.tipe_periode === 'tahunan')
+    const baseTahunan = masterPembayaran.filter((m) => m.tipe_periode === 'tahunan');
+    const existingKodes = new Set(masterPembayaran.map((m) => m.kode));
+    const missingVirtual: MasterPembayaranItem[] = NEW_MASTER_PEMBAYARAN_SEEDS.filter(
+      (seed) => !existingKodes.has(seed.kode)
+    ).map((seed) => ({
+      id: `seed-${seed.kode}`,
+      kode: seed.kode,
+      nama_item: seed.nama_item,
+      tipe_periode: seed.tipe_periode,
+      kategori_santri: seed.kategori_santri,
+      dompet_tujuan: seed.dompet_tujuan,
+      wajib_ndalem: seed.wajib_ndalem,
+      aktif: true,
+      urutan: seed.urutan,
+    }));
+
+    return [...baseTahunan, ...missingVirtual]
+      .sort((a, b) => Number(a.urutan || 0) - Number(b.urutan || 0))
       .map((m) => ({
         ...m,
-        nominal: getNominalByKodeAndDate(m.kode, refDate, fallbackDefaults[m.kode] || 50000),
+        dompet_tujuan: resolveCanonicalDompetForItem(m.kode, m.dompet_tujuan),
+        nominal: getNominalByKodeAndDate(
+          m.kode,
+          refDate,
+          ANNUAL_FEE_FALLBACK_NOMINALS[m.kode] || 50000
+        ),
       }));
   }, [masterPembayaran, tahunAjaran, getNominalByKodeAndDate]);
 
@@ -892,47 +972,27 @@ export default function KeuanganPage() {
   }, [santriList]);
 
   // ==========================================================================
-  // PERHITUNGAN SALDO 4 DOMPET & ARUS KAS BULAN INI (TUNAI VS TRANSFER)
+  // PERHITUNGAN SALDO 4 DOMPET (KHUSUS TUNAI) & SYAHRIYAH TRANSFER (LAPORAN)
   // ==========================================================================
   const walletSummary = useMemo(() => {
-    const totals: Record<DompetType, number> = {
-      pendaftaran: Number(pengaturan.saldo_awal_pendaftaran || 0),
-      operasional: Number(pengaturan.saldo_awal_operasional || 0),
-      kas_pondok: Number(pengaturan.saldo_awal_kas_pondok || 0),
-      mda: Number(pengaturan.saldo_awal_mda || 0),
-    };
-
-    let tunaiMasukBulanIni = 0;
-    let transferMasukBulanIni = 0;
-    let keluarBulanIni = 0;
-
-    kasTransaksi.forEach((tx) => {
-      const nom = Number(tx.nominal || 0);
-      const dompet = (tx.dompet || 'operasional') as DompetType;
-      if (totals[dompet] !== undefined) {
-        if (tx.tipe === 'masuk') totals[dompet] += nom;
-        else totals[dompet] -= nom;
-      }
-
-      if ((tx.tgl_transaksi || '').startsWith(currentMonthStr)) {
-        if (tx.tipe === 'masuk') {
-          if (tx.metode_pembayaran === 'transfer') transferMasukBulanIni += nom;
-          else tunaiMasukBulanIni += nom;
-        } else {
-          keluarBulanIni += nom;
-        }
-      }
-    });
-
-    const grandTotal =
-      totals.pendaftaran + totals.operasional + totals.kas_pondok + totals.mda;
+    const summary = computeWalletAndTransferSummary(
+      kasTransaksi,
+      {
+        pendaftaran: Number(pengaturan.saldo_awal_pendaftaran || 0),
+        operasional: Number(pengaturan.saldo_awal_operasional || 0),
+        kas_pondok: Number(pengaturan.saldo_awal_kas_pondok || 0),
+        mda: Number(pengaturan.saldo_awal_mda || 0),
+      },
+      currentMonthStr
+    );
 
     return {
-      totals,
-      grandTotal,
-      tunaiMasukBulanIni,
-      transferMasukBulanIni,
-      keluarBulanIni,
+      totals: summary.totals,
+      grandTotal: summary.grandTotalTunai,
+      tunaiMasukBulanIni: summary.tunaiMasukBulanIni,
+      tunaiKeluarBulanIni: summary.tunaiKeluarBulanIni,
+      transferMasukBulanIni: summary.syahriyahTransfer.bulanIniMasuk,
+      syahriyahTransfer: summary.syahriyahTransfer,
     };
   }, [kasTransaksi, pengaturan, currentMonthStr]);
 
@@ -968,13 +1028,68 @@ export default function KeuanganPage() {
     );
   }, [activeSantri, pembayaranDetails, tahunAjaran]);
 
+  const santriSudahPsbSet = useMemo(() => {
+    const set = new Set<string>();
+    kasTransaksi.forEach((tx) => {
+      if (tx.santri_id && tx.dompet === 'pendaftaran' && tx.tipe === 'masuk') {
+        set.add(tx.santri_id);
+      }
+    });
+    pembayaranDetails.forEach((det) => {
+      if (det.item_kode === 'psb_pendaftaran') {
+        set.add(det.santri_id);
+      }
+    });
+    return set;
+  }, [kasTransaksi, pembayaranDetails]);
+
+  const activeSantriHasPsb = activeSantri ? santriSudahPsbSet.has(activeSantri.id) : false;
+
+  const psbBulanPertamaPeriode = (tglBayarInput || todayStr).slice(0, 7);
+  const psbBulanPertamaSudahLunas = useMemo(() => {
+    if (!activeSantri) return false;
+    return (
+      selectedBulanPeriodes.includes(psbBulanPertamaPeriode) ||
+      activeSantriDetails.some(
+        (d) => d.item_kode === 'syahriyah' && d.periode_bulan === psbBulanPertamaPeriode
+      )
+    );
+  }, [activeSantri, activeSantriDetails, psbBulanPertamaPeriode, selectedBulanPeriodes]);
+
+  const psbLoketPreview = useMemo(
+    () =>
+      hitungRincianPendaftaran({
+        paket: bayarPsbPaket,
+        jumlahPendaftarSaatIni: santriList.length,
+        skema: skemaPendaftaran,
+        forceFreeUangPangkal: bayarPsbFreePangkal,
+      }),
+    [bayarPsbPaket, bayarPsbFreePangkal, santriList.length, skemaPendaftaran]
+  );
+
   // Reset centangan saat ganti santri atau tahun ajaran
   useEffect(() => {
-    setSelectedBulanPeriodes([]);
-    setSelectedTahunanKodes([]);
-    setBayarKtlChecked(false);
-    setBayarKtlNominal(Number(activeSantri?.ktl_nominal || 0));
-  }, [selectedSantriId, tahunAjaran, activeSantri?.ktl_nominal]);
+    const timer = setTimeout(() => {
+      setSelectedBulanPeriodes([]);
+      setSelectedTahunanKodes([]);
+      setBayarKtlChecked(false);
+      setBayarKtlNominal(Number(activeSantri?.ktl_nominal || 0));
+      setBayarPsbChecked(false);
+      setBayarPsbPaket(activeSantri && isSantriVip(activeSantri) ? 'vip' : 'reguler');
+      setBayarPsbFreePangkal(
+        Boolean(skemaPendaftaran.promo_aktif) &&
+          santriList.length < Number(skemaPendaftaran.kuota_gratis_uang_pangkal || 100)
+      );
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [
+    selectedSantriId,
+    tahunAjaran,
+    activeSantri,
+    skemaPendaftaran.promo_aktif,
+    skemaPendaftaran.kuota_gratis_uang_pangkal,
+    santriList.length,
+  ]);
 
   const toggleBulanCheckbox = (periode: string) => {
     setSelectedBulanPeriodes((prev) =>
@@ -998,6 +1113,26 @@ export default function KeuanganPage() {
       dompet: DompetType;
       nominal: number;
     }> = [];
+
+    if (bayarPsbChecked && !activeSantriHasPsb) {
+      items.push({
+        item_kode: 'psb_pendaftaran',
+        periode_bulan: 'PSB',
+        label_item: `Biaya Pendaftaran ${bayarPsbPaket === 'vip' ? 'Kamar VIP (Dipan, Formulir, Kotak Almari' : 'Reguler (Formulir, Kotak Almari'}${psbLoketPreview.isFreeUangPangkal ? ', Free Uang Pangkal)' : ', Uang Pangkal)'}`,
+        dompet: 'pendaftaran',
+        nominal: psbLoketPreview.nominalDompetPendaftaran,
+      });
+
+      if (!psbBulanPertamaSudahLunas && psbLoketPreview.nominalSyahriyahBulanPertama > 0) {
+        items.push({
+          item_kode: 'syahriyah',
+          periode_bulan: psbBulanPertamaPeriode,
+          label_item: `Syahriyah Bulan Pertama (${psbBulanPertamaPeriode})`,
+          dompet: 'operasional',
+          nominal: psbLoketPreview.nominalSyahriyahBulanPertama,
+        });
+      }
+    }
 
     if (bayarKtlChecked && Number(bayarKtlNominal) > 0) {
       items.push({
@@ -1029,7 +1164,7 @@ export default function KeuanganPage() {
           item_kode: it.kode,
           periode_bulan: 'TAHUNAN',
           label_item: `${it.nama_item} (${tahunAjaran})`,
-          dompet: it.dompet_tujuan || 'operasional',
+          dompet: resolveCanonicalDompetForItem(it.kode, it.dompet_tujuan),
           nominal: Number(it.nominal),
         });
       }
@@ -1039,6 +1174,12 @@ export default function KeuanganPage() {
     return { items, total };
   }, [
     activeSantri,
+    activeSantriHasPsb,
+    bayarPsbChecked,
+    bayarPsbPaket,
+    psbLoketPreview,
+    psbBulanPertamaSudahLunas,
+    psbBulanPertamaPeriode,
     bayarKtlChecked,
     bayarKtlNominal,
     periodeListTA,
@@ -1123,6 +1264,11 @@ export default function KeuanganPage() {
 
       generatedNoKuitansi = await generateNextNoKuitansi(tglBayarInput);
 
+      let uploadedBuktiUrl = '';
+      if (metodeBayar === 'transfer' && loketBuktiFile) {
+        uploadedBuktiUrl = await uploadKeuanganLampiranImage(loketBuktiFile, 'bukti_tf');
+      }
+
       // 1. Siapkan baris untuk pembayaran_santri_detail
       const detailPayload = loketCartSummary.items.map((item, idx) => ({
         santri_id: activeSantri.id,
@@ -1164,7 +1310,14 @@ export default function KeuanganPage() {
           santri_id: activeSantri.id,
           dompet: d,
           tipe: 'masuk' as const,
-          kategori: d === 'mda' ? 'Iuran Ujian / Raport MDA' : 'Syahriyah & Iuran Santri',
+          kategori:
+            d === 'pendaftaran'
+              ? activeSantriHasPsb
+                ? 'Infaq Madin & Pendaftaran'
+                : `Pendaftaran ${bayarPsbPaket.toUpperCase()} (PSB)`
+              : d === 'mda'
+              ? 'Iuran Ujian / Raport MDA'
+              : 'Syahriyah & Iuran Santri',
           nominal: groupedByDompet[d].nominal,
           bulan_tagihan: groupedByDompet[d].labels.join(', '),
           keterangan: `Pembayaran ${activeSantri.nama_lengkap} (${activeSantri.kamar}) - ${groupedByDompet[d].labels.join(', ')}`,
@@ -1174,9 +1327,10 @@ export default function KeuanganPage() {
           no_kuitansi: generatedNoKuitansi,
         }));
 
-      const { error: kasError } = await supabase
-        .from('keuangan_transaksi')
-        .insert(kasRows);
+      const { error: kasError } = await insertKeuanganTransaksiResilient(
+        kasRows,
+        uploadedBuktiUrl || undefined
+      );
 
       if (kasError) {
         // Rollback detail jika gagal simpan buku kas
@@ -1187,7 +1341,18 @@ export default function KeuanganPage() {
         throw kasError;
       }
 
-      // 3. Jika membayar KTL, kurangi sisa ktl_nominal pada tabel santri
+      // 3. Jika membayar PSB, sinkronkan paket & nominal pendaftaran pada profil santri
+      if (bayarPsbChecked && !activeSantriHasPsb) {
+        await supabase
+          .from('santri')
+          .update({
+            paket_pendaftaran: bayarPsbPaket,
+            nominal_pendaftaran: psbLoketPreview.totalBayar,
+          })
+          .eq('id', activeSantri.id);
+      }
+
+      // 4. Jika membayar KTL, kurangi sisa ktl_nominal pada tabel santri
       if (bayarKtlChecked && Number(bayarKtlNominal) > 0) {
         const sisaBaru = Math.max(0, Number(activeSantri.ktl_nominal || 0) - Number(bayarKtlNominal));
         await supabase
@@ -1224,13 +1389,18 @@ export default function KeuanganPage() {
       setSelectedBulanPeriodes([]);
       setSelectedTahunanKodes([]);
       setBayarKtlChecked(false);
+      setBayarPsbChecked(false);
+      setLoketBuktiFile(null);
+      setLoketBuktiPreview('');
       setSelectedKuitansi(newReceiptGroup);
       setActiveTab('kuitansi');
 
       showToast(
         'success',
         'Pembayaran Berhasil & Kuitansi Terbit',
-        `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} telah masuk ke Buku Kas & Dompet.`
+        metodeBayar === 'transfer'
+          ? `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk laporan Syahriyah Transfer (saldo kas tunai tidak berubah).`
+          : `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk ke Dompet Tunai & Buku Kas.`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal menyimpan transaksi pembayaran.';
@@ -1864,16 +2034,31 @@ export default function KeuanganPage() {
 
     setSavingKas(true);
     try {
-      const { error } = await supabase.from('keuangan_transaksi').insert({
-        dompet: kasForm.dompet,
-        tipe: kasForm.tipe,
-        kategori: kasForm.kategori.trim() || (kasForm.tipe === 'masuk' ? 'Pemasukan Lain' : 'Pengeluaran Operasional'),
-        nominal: nom,
-        keterangan: kasForm.keterangan.trim() || '-',
-        metode_pembayaran: kasForm.metode_pembayaran,
-        petugas_id: petugasId,
-        tgl_transaksi: kasForm.tgl_transaksi,
-      });
+      let uploadedLampiranUrl = '';
+      if (kasLampiranFile) {
+        uploadedLampiranUrl = await uploadKeuanganLampiranImage(
+          kasLampiranFile,
+          kasForm.metode_pembayaran === 'transfer' ? 'bukti_tf' : 'nota'
+        );
+      }
+
+      const { error } = await insertKeuanganTransaksiResilient(
+        [
+          {
+            dompet: kasForm.dompet,
+            tipe: kasForm.tipe,
+            kategori:
+              kasForm.kategori.trim() ||
+              (kasForm.tipe === 'masuk' ? 'Pemasukan Lain' : 'Pengeluaran Operasional'),
+            nominal: nom,
+            keterangan: kasForm.keterangan.trim() || '-',
+            metode_pembayaran: kasForm.metode_pembayaran,
+            petugas_id: petugasId,
+            tgl_transaksi: kasForm.tgl_transaksi,
+          },
+        ],
+        uploadedLampiranUrl || undefined
+      );
 
       if (error) throw error;
 
@@ -1884,12 +2069,56 @@ export default function KeuanganPage() {
       await fetchAllData();
       setShowKasModal(false);
       setKasForm((prev) => ({ ...prev, nominal: '', keterangan: '' }));
-      showToast('success', 'Transaksi Kas Tercatat', `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} sebesar ${formatRupiah(nom)} berhasil disimpan.`);
+      setKasLampiranFile(null);
+      setKasLampiranPreview('');
+      showToast(
+        'success',
+        'Transaksi Kas Tercatat',
+        kasForm.metode_pembayaran === 'transfer'
+          ? `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} transfer ${formatRupiah(nom)} dicatat ke laporan Syahriyah Transfer.`
+          : `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} tunai sebesar ${formatRupiah(nom)} berhasil disimpan.`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal menyimpan transaksi kas.';
       showToast('error', 'Gagal Menyimpan Kas', msg);
     } finally {
       setSavingKas(false);
+    }
+  };
+
+  const handleQuickAttachChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const target = quickAttachTarget;
+    e.target.value = '';
+    if (!file || !target) return;
+
+    const lockKey = String(target.noKuitansi || target.txId || 'attach');
+    setUploadingLampiranId(lockKey);
+    try {
+      const url = await uploadKeuanganLampiranImage(file, target.kind);
+      const { persistedToDb } = await updateKeuanganLampiranResilient({
+        txId: target.txId,
+        noKuitansi: target.noKuitansi,
+        url,
+      });
+      setLampiranMap(readKeuanganLampiranMap());
+      await fetchAllData();
+      if (lightboxLampiran && (lightboxLampiran.txId === target.txId || (target.noKuitansi && lightboxLampiran.noKuitansi === target.noKuitansi))) {
+        setLightboxLampiran((prev) => (prev ? { ...prev, url } : null));
+      }
+      showToast(
+        'success',
+        target.kind === 'bukti_tf' ? 'Bukti Transfer Terpasang' : 'Scan Nota Terpasang',
+        persistedToDb
+          ? 'Foto lampiran tersimpan di database & siap tampil di Pusat Laporan.'
+          : 'Foto lampiran tersimpan & siap tampil di Pusat Laporan.'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal memproses gambar lampiran.';
+      showToast('error', 'Gagal Unggah Foto', msg);
+    } finally {
+      setUploadingLampiranId(null);
+      setQuickAttachTarget(null);
     }
   };
 
@@ -2000,32 +2229,8 @@ export default function KeuanganPage() {
   };
 
   // ==========================================================================
-  // TAB 5: MIGRASI DATA LAMA, KTL & SALDO AWAL 4 DOMPET
+  // TAB 5: MIGRASI DATA LAMA & KTL TRANSISI
   // ==========================================================================
-  const handleSimpanSaldoAwal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingSaldoAwal(true);
-    try {
-      const payload = {
-        id: 1,
-        saldo_awal_pendaftaran: Number(saldoAwalForm.saldo_awal_pendaftaran.replace(/\D/g, '') || 0),
-        saldo_awal_operasional: Number(saldoAwalForm.saldo_awal_operasional.replace(/\D/g, '') || 0),
-        saldo_awal_kas_pondok: Number(saldoAwalForm.saldo_awal_kas_pondok.replace(/\D/g, '') || 0),
-        saldo_awal_mda: Number(saldoAwalForm.saldo_awal_mda.replace(/\D/g, '') || 0),
-      };
-
-      const { error } = await supabase.from('pengaturan_aplikasi').upsert(payload);
-      if (error) throw error;
-
-      await fetchAllData();
-      showToast('success', 'Saldo Awal Disimpan', 'Saldo awal (Opening Balance) keempat dompet berhasil diperbarui.');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal menyimpan saldo awal.';
-      showToast('error', 'Gagal Simpan Saldo Awal', msg);
-    } finally {
-      setSavingSaldoAwal(false);
-    }
-  };
 
   const filteredMigrasiSantri = useMemo(() => {
     const q = migrasiSearch.trim().toLowerCase();
@@ -2052,25 +2257,28 @@ export default function KeuanganPage() {
   // Sinkronkan form migrasi saat memilih santri di Tab 5
   useEffect(() => {
     if (!activeMigrasiSantri) return;
-    const dets = pembayaranDetails.filter(
-      (d) => d.santri_id === activeMigrasiSantri.id && d.tahun_ajaran === tahunAjaran
-    );
-    const paidBulans = dets
-      .filter((d) => d.item_kode === 'syahriyah')
-      .map((d) => d.periode_bulan)
-      .sort();
-    if (paidBulans.length > 0) {
-      setMigrasiCutOffBulan(paidBulans[paidBulans.length - 1]);
-    } else {
-      setMigrasiCutOffBulan('BELUM_ADA');
-    }
+    const timer = setTimeout(() => {
+      const dets = pembayaranDetails.filter(
+        (d) => d.santri_id === activeMigrasiSantri.id && d.tahun_ajaran === tahunAjaran
+      );
+      const paidBulans = dets
+        .filter((d) => d.item_kode === 'syahriyah')
+        .map((d) => d.periode_bulan)
+        .sort();
+      if (paidBulans.length > 0) {
+        setMigrasiCutOffBulan(paidBulans[paidBulans.length - 1]);
+      } else {
+        setMigrasiCutOffBulan('BELUM_ADA');
+      }
 
-    const paidTahunans = dets
-      .filter((d) => d.periode_bulan === 'TAHUNAN')
-      .map((d) => d.item_kode);
-    setMigrasiTahunanChecked(paidTahunans);
-    setMigrasiKtlNominal(String(Number(activeMigrasiSantri.ktl_nominal || 0)));
-    setMigrasiKtlCatatan(activeMigrasiSantri.ktl_catatan || '');
+      const paidTahunans = dets
+        .filter((d) => d.periode_bulan === 'TAHUNAN')
+        .map((d) => d.item_kode);
+      setMigrasiTahunanChecked(paidTahunans);
+      setMigrasiKtlNominal(String(Number(activeMigrasiSantri.ktl_nominal || 0)));
+      setMigrasiKtlCatatan(activeMigrasiSantri.ktl_catatan || '');
+    }, 0);
+    return () => clearTimeout(timer);
   }, [activeMigrasiSantri, pembayaranDetails, tahunAjaran]);
 
   const handleSimpanMigrasiSatuan = async () => {
@@ -2169,26 +2377,26 @@ export default function KeuanganPage() {
     }
   };
 
-  // Download Template Excel Migrasi (Kolom terpisah per Item Tahunan + KTL)
+  // Download Template Excel Migrasi (Kolom dinamis per Item Tahunan + KTL)
   const handleDownloadTemplateMigrasi = () => {
     const activeSantris = santriList.filter(
       (s) => s.status !== 'boyong' && s.status !== 'alumni' && s.status !== 'pindah_al_burhany'
     );
 
-    const rows = activeSantris.map((s) => ({
-      NIS: s.nis,
-      Nama_Santri: s.nama_lengkap,
-      Kamar: s.kamar,
-      Lunas_Syahriyah_Sampai_YYYY_MM: '2026-10',
-      Ujian_MDA_1_YA_TIDAK: 'TIDAK',
-      Ujian_MDA_2_YA_TIDAK: 'TIDAK',
-      Raport_YA_TIDAK: 'TIDAK',
-      Kalender_YA_TIDAK: 'TIDAK',
-      Haul_YA_TIDAK: 'TIDAK',
-      Kesehatan_YA_TIDAK: 'TIDAK',
-      KTL_Nominal: Number(s.ktl_nominal || 0),
-      KTL_Catatan: s.ktl_catatan || '',
-    }));
+    const rows = activeSantris.map((s) => {
+      const base: Record<string, string | number> = {
+        NIS: s.nis,
+        Nama_Santri: s.nama_lengkap,
+        Kamar: s.kamar,
+        Lunas_Syahriyah_Sampai_YYYY_MM: '2026-10',
+      };
+      itemTahunanList.forEach((it) => {
+        base[getMigrasiColNameForItem(it.kode, it.nama_item)] = 'TIDAK';
+      });
+      base['KTL_Nominal'] = Number(s.ktl_nominal || 0);
+      base['KTL_Catatan'] = s.ktl_catatan || '';
+      return base;
+    });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -2222,15 +2430,6 @@ export default function KeuanganPage() {
         const cutoff = String(row['Lunas_Syahriyah_Sampai_YYYY_MM'] || '').trim();
         const ktlNom = Number(row['KTL_Nominal'] || 0);
         const ktlCat = String(row['KTL_Catatan'] || '').trim();
-
-        const itemColMap: Array<{ col: string; kode: string }> = [
-          { col: 'Ujian_MDA_1_YA_TIDAK', kode: 'ujian_mda_1' },
-          { col: 'Ujian_MDA_2_YA_TIDAK', kode: 'ujian_mda_2' },
-          { col: 'Raport_YA_TIDAK', kode: 'raport' },
-          { col: 'Kalender_YA_TIDAK', kode: 'kalender' },
-          { col: 'Haul_YA_TIDAK', kode: 'haul' },
-          { col: 'Kesehatan_YA_TIDAK', kode: 'kesehatan' },
-        ];
 
         // Bersihkan migrasi lama santri ini di TA aktif
         await supabase
@@ -2271,17 +2470,16 @@ export default function KeuanganPage() {
           });
         }
 
-        itemColMap.forEach(({ col, kode }) => {
-          const val = String(row[col] || '').trim().toUpperCase();
-          const it = itemTahunanList.find((x) => x.kode === kode);
-          if (val === 'YA' && it && !realSet.has(`${kode}__TAHUNAN`)) {
+        itemTahunanList.forEach((it) => {
+          const isYa = readMigrasiAnnualFlag(row, it.kode, it.nama_item);
+          if (isYa && !realSet.has(`${it.kode}__TAHUNAN`)) {
             insertBatch.push({
               santri_id: santri.id,
               tahun_ajaran: tahunAjaran,
-              item_kode: kode,
+              item_kode: it.kode,
               periode_bulan: 'TAHUNAN',
               label_item: `${it.nama_item} (Migrasi Excel)`,
-              dompet: it.dompet_tujuan || 'operasional',
+              dompet: resolveCanonicalDompetForItem(it.kode, it.dompet_tujuan),
               nominal: Number(it.nominal),
               is_migrasi: true,
               tgl_bayar: todayStr,
@@ -2334,7 +2532,7 @@ export default function KeuanganPage() {
     return (
       <div
         className={`relative bg-white text-slate-900 border-2 border-emerald-800 select-none overflow-hidden flex flex-col justify-between ${
-          isForPrint ? 'w-[210mm] h-[99mm] p-[4.5mm]' : 'w-[210mm] min-w-[210mm] h-[100mm] p-4 shadow-md rounded-sm'
+          isForPrint ? 'w-[210mm] h-[98mm] max-h-[98mm] p-[4mm]' : 'w-[210mm] min-w-[210mm] h-[100mm] p-4 shadow-md rounded-sm'
         }`}
       >
         {/* WATERMARK LOGO PONDOK DI TENGAH (TANPA TEKS SIAP AN-NUR 1) */}
@@ -2845,16 +3043,16 @@ export default function KeuanganPage() {
               <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center gap-1.5">
                 <Banknote className="w-3.5 h-3.5 text-emerald-700" />
                 <span>Tunai Bln Ini:</span>
-                <strong>{formatRupiah(walletSummary.tunaiMasukBulanIni)}</strong>
+                <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.tunaiMasukBulanIni)}</strong>
               </div>
               <div className="px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5 text-sky-700" />
-                <span>Transfer Bln Ini:</span>
-                <strong>{formatRupiah(walletSummary.transferMasukBulanIni)}</strong>
+                <span>Syahriyah Transfer Bln Ini:</span>
+                <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.transferMasukBulanIni)}</strong>
               </div>
               <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white flex items-center gap-1.5">
-                <span>Total 4 Dompet:</span>
-                <strong className="text-emerald-300">{formatRupiah(walletSummary.grandTotal)}</strong>
+                <span>Total 4 Dompet Tunai:</span>
+                <strong className="text-emerald-300 font-mono tabular-nums">{formatRupiah(walletSummary.grandTotal)}</strong>
               </div>
               <button
                 onClick={fetchAllData}
@@ -2866,62 +3064,104 @@ export default function KeuanganPage() {
             </div>
           </div>
 
-          {/* 4 KARTU DOMPET REAL-TIME */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* 1. Dompet Pendaftaran */}
-            <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3">
-              <div className="flex items-center justify-between text-sky-800">
-                <span className="text-[11px] font-bold uppercase tracking-wider">1. Dompet Pendaftaran</span>
-                <Building2 className="w-4 h-4 text-sky-600" />
+          {/* 4 KARTU DOMPET TUNAI REAL-TIME */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+            {/* 1. Dompet Pendaftaran (Biru) */}
+            <div className="rounded-xl border border-blue-700 bg-gradient-to-br from-blue-600 to-blue-800 p-2.5 sm:p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-blue-100 gap-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">1. Pendaftaran (Tunai)</span>
+                <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-200 shrink-0" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-sm sm:text-base font-extrabold text-white mt-1 tabular-nums font-mono">
                 {formatRupiah(walletSummary.totals.pendaftaran)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
-                Pemasukan PSB Reguler, VIP &amp; Custom
+              <p className="hidden sm:block text-[10.5px] text-blue-100/90 mt-0.5 truncate">
+                PSB Tunai &amp; Infaq Madin
               </p>
             </div>
 
-            {/* 2. Dompet Syahriyah & Iuran Tahunan */}
-            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3">
-              <div className="flex items-center justify-between text-emerald-800">
-                <span className="text-[11px] font-bold uppercase tracking-wider">2. Syahriyah &amp; Tahunan</span>
-                <Wallet className="w-4 h-4 text-emerald-600" />
+            {/* 2. Dompet Syahriyah & Iuran Tahunan (Hijau Emerald) */}
+            <div className="rounded-xl border border-emerald-700 bg-gradient-to-br from-emerald-600 to-emerald-800 p-2.5 sm:p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-emerald-100 gap-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">2. Syahriyah (Tunai)</span>
+                <Wallet className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-200 shrink-0" />
               </div>
-              <p className="text-base font-extrabold text-emerald-950 mt-1">
+              <p className="text-sm sm:text-base font-extrabold text-white mt-1 tabular-nums font-mono">
                 {formatRupiah(walletSummary.totals.operasional)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
-                Dompet Utama Operasional Pondok
+              <p className="hidden sm:block text-[10.5px] text-emerald-100/90 mt-0.5 truncate">
+                Bulanan, Kalender, Haul, Kesehatan, Al-Adzkar, Almamater, Kitab
               </p>
             </div>
 
-            {/* 3. Dompet Kas (Lain-lain) */}
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
-              <div className="flex items-center justify-between text-amber-800">
-                <span className="text-[11px] font-bold uppercase tracking-wider">3. Dompet Kas (Lain-lain)</span>
-                <Landmark className="w-4 h-4 text-amber-600" />
+            {/* 3. Dompet Kas Lain-lain (Kuning Amber) */}
+            <div className="rounded-xl border border-amber-600 bg-gradient-to-br from-amber-500 to-amber-700 p-2.5 sm:p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-amber-50 gap-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">3. Kas Umum (Tunai)</span>
+                <Landmark className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-100 shrink-0" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-sm sm:text-base font-extrabold text-white mt-1 tabular-nums font-mono">
                 {formatRupiah(walletSummary.totals.kas_pondok)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
-                Kotak Amal, Setoran Kantin &amp; Donasi
+              <p className="hidden sm:block text-[10.5px] text-amber-50/90 mt-0.5 truncate">
+                Kotak Amal, Setoran Kantin &amp; Donasi Tunai
               </p>
             </div>
 
-            {/* 4. Dompet MDA */}
-            <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3">
-              <div className="flex items-center justify-between text-indigo-800">
-                <span className="text-[11px] font-bold uppercase tracking-wider">4. Dompet MDA (Madin)</span>
-                <GraduationCap className="w-4 h-4 text-indigo-600" />
+            {/* 4. Dompet MDA (Ungu) */}
+            <div className="rounded-xl border border-purple-700 bg-gradient-to-br from-purple-600 to-purple-800 p-2.5 sm:p-3.5 text-white shadow-xs">
+              <div className="flex items-center justify-between text-purple-100 gap-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">4. Dompet MDA (Tunai)</span>
+                <GraduationCap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-200 shrink-0" />
               </div>
-              <p className="text-base font-extrabold text-slate-900 mt-1">
+              <p className="text-sm sm:text-base font-extrabold text-white mt-1 tabular-nums font-mono">
                 {formatRupiah(walletSummary.totals.mda)}
               </p>
-              <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+              <p className="hidden sm:block text-[10.5px] text-purple-100/90 mt-0.5 truncate">
                 Ujian MDA Sm 1 &amp; 2, Raport Madin
               </p>
+            </div>
+          </div>
+
+          {/* KARTU LAPORAN TERPISAH: SYAHRIYAH TRANSFER (TIDAK MASUK SALDO TUNAI DOMPET) */}
+          <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-sky-700 text-white shrink-0">
+                <CreditCard className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-extrabold text-slate-900 uppercase tracking-wide text-[11px]">
+                    Syahriyah Transfer
+                  </span>
+                  <span className="text-[10.5px] font-semibold text-sky-800 bg-white px-2 py-0.5 rounded-md border border-sky-200">
+                    Khusus Laporan Rekening • Terpisah dari Kas Tunai
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  Rincian Transfer Masuk: Syahriyah/Tahunan{' '}
+                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.operasional)}</strong>
+                  {' '}&bull; Pendaftaran{' '}
+                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.pendaftaran)}</strong>
+                  {' '}&bull; MDA{' '}
+                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.mda)}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 sm:text-right shrink-0 pl-9 sm:pl-0">
+              <div>
+                <span className="text-[10px] font-semibold text-slate-500 block">Transfer Bln Ini</span>
+                <span className="text-xs font-bold text-sky-900 font-mono tabular-nums">
+                  {formatRupiah(walletSummary.syahriyahTransfer.bulanIniMasuk)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] font-semibold text-slate-500 block">Akumulasi Netto Transfer</span>
+                <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums">
+                  {formatRupiah(walletSummary.syahriyahTransfer.netAllTime)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -2931,13 +3171,13 @@ export default function KeuanganPage() {
         ================================================================== */}
         <div
           ref={workspaceRef}
-          className="flex flex-col h-[calc(100vh-1.5rem)] min-h-[600px] bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden"
+          className="flex flex-col min-h-[540px] lg:h-[calc(100vh-1.5rem)] bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden"
         >
           {/* BILAH 5 TAB SUB-MENU (SELALU TERLIHAT UTUH SAAT DI-SCROLL MENTOK) */}
-          <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 overflow-x-auto">
+          <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-2.5 sm:px-3 py-2 flex items-center gap-1.5 overflow-x-auto">
             <button
               onClick={() => setActiveTab('loket')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
                 activeTab === 'loket'
                   ? 'bg-emerald-800 text-white shadow-xs'
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
@@ -2949,13 +3189,13 @@ export default function KeuanganPage() {
 
             <button
               onClick={() => setActiveTab('kuitansi')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
                 activeTab === 'kuitansi'
                   ? 'bg-emerald-800 text-white shadow-xs'
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
               }`}
             >
-              <Receipt className="w-3.5 h-3.5" />
+              <ReceiptText className="w-3.5 h-3.5" />
               2. Kuitansi 21×10 cm
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-black/15">
                 {kuitansiGroups.length}
@@ -2964,7 +3204,7 @@ export default function KeuanganPage() {
 
             <button
               onClick={() => setActiveTab('penagihan')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
                 activeTab === 'penagihan'
                   ? 'bg-emerald-800 text-white shadow-xs'
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
@@ -2981,7 +3221,7 @@ export default function KeuanganPage() {
 
             <button
               onClick={() => setActiveTab('bukukas')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
                 activeTab === 'bukukas'
                   ? 'bg-emerald-800 text-white shadow-xs'
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
@@ -2993,14 +3233,14 @@ export default function KeuanganPage() {
 
             <button
               onClick={() => setActiveTab('migrasi')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all ${
                 activeTab === 'migrasi'
                   ? 'bg-emerald-800 text-white shadow-xs'
                   : 'text-slate-600 hover:bg-white hover:text-slate-900'
               }`}
             >
               <DatabaseBackup className="w-3.5 h-3.5" />
-              5. Migrasi, KTL &amp; Saldo Awal
+              5. Migrasi &amp; KTL
             </button>
           </div>
 
@@ -3008,9 +3248,9 @@ export default function KeuanganPage() {
               KONTEN TAB 1: LOKET PEMBAYARAN SANTRI (FIT-TO-SCREEN)
           ================================================================ */}
           {activeTab === 'loket' && (
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
-              {/* PANEL KIRI: PENCARIAN & DAFTAR SANTRI (SCROLL INTERNAL) */}
-              <div className="lg:col-span-4 xl:col-span-3 border-r border-slate-200 flex flex-col min-h-0 bg-slate-50/60">
+            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 lg:overflow-hidden">
+              {/* PANEL KIRI: PENCARIAN & DAFTAR SANTRI (DESKTOP ONLY, MOBILE PAKAI PICKER MODAL) */}
+              <div className="hidden lg:flex lg:col-span-4 xl:col-span-3 border-r border-slate-200 flex-col min-h-0 bg-slate-50/60">
                 <div className="p-3 border-b border-slate-200 space-y-2 shrink-0 bg-white">
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -3105,46 +3345,76 @@ export default function KeuanganPage() {
               {/* PANEL KANAN: MATRIKS PEMBAYARAN SANTRI & FOOTER EMERALD PEKAT */}
               <div className="lg:col-span-8 xl:col-span-9 flex flex-col min-h-0 bg-white">
                 {!activeSantri ? (
-                  <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                    Pilih santri di panel sebelah kiri untuk memulai transaksi.
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-xs text-slate-400 text-center">
+                    <span>Pilih santri untuk memulai transaksi pembayaran.</span>
+                    <button
+                      type="button"
+                      onClick={() => setMobileSantriPickerOpen(true)}
+                      className="lg:hidden px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1.5"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      Pilih Santri
+                    </button>
                   </div>
                 ) : (
                   <>
                     {/* HEADER SANTRI TERPILIH (UTUH DI ATAS, TIDAK PERNAH TERPOTONG) */}
-                    <div className="shrink-0 px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-sm font-extrabold text-slate-900">
-                            {activeSantri.nama_lengkap}
-                          </h2>
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900">
-                            Kamar {activeSantri.kamar}
-                          </span>
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-800">
-                            {activeSantri.status === 'ndalem'
-                              ? 'Santri Ndalem'
-                              : isSantriVip(activeSantri)
-                              ? 'VIP / Al-Fachriyah'
-                              : 'Reguler'}
-                          </span>
+                    <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                            <h2 className="text-sm font-extrabold text-slate-900 truncate">
+                              {activeSantri.nama_lengkap}
+                            </h2>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 whitespace-nowrap">
+                              Kamar {activeSantri.kamar}
+                            </span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-800 whitespace-nowrap">
+                              {activeSantri.status === 'ndalem'
+                                ? 'Santri Ndalem'
+                                : isSantriVip(activeSantri)
+                                ? 'VIP'
+                                : 'Reguler'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setMobileSantriPickerOpen(true)}
+                            className="lg:hidden px-2.5 py-1.5 rounded-lg bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap cursor-pointer"
+                          >
+                            <Users className="w-3 h-3" />
+                            Ganti Santri
+                          </button>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
+                        <p className="text-[11px] text-slate-500 mt-1 truncate">
                           NIS: <strong>{activeSantri.nis}</strong> &bull; Wali: <strong>{getWaliDisplayName(activeSantri)}</strong>
                           {getActiveWaContact(activeSantri) && ` (${getActiveWaContact(activeSantri)?.number})`}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs">
+                      <div className="grid grid-cols-2 sm:flex items-center gap-2 text-xs shrink-0">
                         <div>
                           <label className="text-[10px] font-bold text-slate-500 block">Tahun Ajaran</label>
                           <select
                             value={tahunAjaran}
                             onChange={(e) => setTahunAjaran(e.target.value)}
-                            className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-bold text-slate-800 text-xs"
+                            className="w-full sm:w-auto px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-bold text-slate-800 text-xs"
                           >
-                            <option value="2025/2026">2025/2026</option>
-                            <option value="2026/2027">2026/2027</option>
-                            <option value="2027/2028">2027/2028</option>
+                            {(() => {
+                              const now = new Date();
+                              const activeStart = now.getMonth() + 1 >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+                              const maxStart = Math.max(activeStart + 1, 2026);
+                              const opts: string[] = [];
+                              for (let y = 2024; y <= maxStart; y += 1) {
+                                opts.push(`${y}/${y + 1}`);
+                              }
+                              if (!opts.includes(tahunAjaran)) opts.push(tahunAjaran);
+                              return opts.map((ta) => (
+                                <option key={ta} value={ta}>
+                                  {ta}
+                                </option>
+                              ));
+                            })()}
                           </select>
                         </div>
                         <div>
@@ -3153,7 +3423,7 @@ export default function KeuanganPage() {
                             type="date"
                             value={tglBayarInput}
                             onChange={(e) => setTglBayarInput(e.target.value)}
-                            className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-semibold text-slate-800 text-xs"
+                            className="w-full sm:w-auto px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-semibold text-slate-800 text-xs"
                           />
                         </div>
                       </div>
@@ -3208,9 +3478,117 @@ export default function KeuanganPage() {
                         </div>
                       )}
 
+                      {/* LOKET BIAYA PENDAFTARAN SANTRI BARU (PSB VIP / REGULER + KUOTA FREE UANG PANGKAL) */}
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2.5 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            {!activeSantriHasPsb ? (
+                              <label className="inline-flex items-center gap-2 cursor-pointer font-extrabold text-slate-900">
+                                <input
+                                  type="checkbox"
+                                  checked={bayarPsbChecked}
+                                  onChange={(e) => setBayarPsbChecked(e.target.checked)}
+                                  className="w-4 h-4 accent-emerald-700 rounded"
+                                />
+                                Biaya Pendaftaran Santri Baru (PSB)
+                              </label>
+                            ) : (
+                              <span className="font-extrabold text-emerald-800 inline-flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                                Pendaftaran PSB Sudah Lunas (Masuk Dompet Pendaftaran)
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
+                            Kuota Free Uang Pangkal: {santriList.length}/{skemaPendaftaran.kuota_gratis_uang_pangkal} Pendaftar
+                          </span>
+                        </div>
+
+                        {!activeSantriHasPsb && bayarPsbChecked && (
+                          <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="inline-flex rounded-lg bg-slate-100 p-1 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setBayarPsbPaket('reguler')}
+                                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                                    bayarPsbPaket === 'reguler'
+                                      ? 'bg-emerald-700 text-white'
+                                      : 'text-slate-700 hover:bg-white'
+                                  }`}
+                                >
+                                  Reguler
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBayarPsbPaket('vip')}
+                                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                                    bayarPsbPaket === 'vip'
+                                      ? 'bg-emerald-700 text-white'
+                                      : 'text-slate-700 hover:bg-white'
+                                  }`}
+                                >
+                                  Kamar VIP
+                                </button>
+                              </div>
+
+                              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={bayarPsbFreePangkal}
+                                  onChange={(e) => setBayarPsbFreePangkal(e.target.checked)}
+                                  className="w-3.5 h-3.5 accent-emerald-700 rounded"
+                                />
+                                Terapkan Free Uang Pangkal (Rp {skemaPendaftaran.uang_pangkal.toLocaleString('id-ID')})
+                              </label>
+                            </div>
+
+                            <div className="divide-y divide-slate-100 text-[11px]">
+                              {psbLoketPreview.items.map((item) => {
+                                const skippedSyahriyah =
+                                  item.targetDompet === 'operasional' && psbBulanPertamaSudahLunas;
+                                return (
+                                  <div key={item.label} className="py-1 flex items-center justify-between gap-2">
+                                    <span className={skippedSyahriyah ? 'text-slate-400 line-through' : 'text-slate-700'}>
+                                      {item.label}
+                                      <span className="text-[10px] text-slate-400 ml-1">
+                                        ({item.targetDompet === 'operasional' ? 'Dompet Operasional' : 'Dompet Pendaftaran'})
+                                      </span>
+                                    </span>
+                                    <span className="font-mono font-bold tabular-nums shrink-0">
+                                      {skippedSyahriyah ? (
+                                        <span className="text-slate-400">Sudah dipilih/Lunas</span>
+                                      ) : item.isFreePromo ? (
+                                        <span className="text-emerald-700">GRATIS</span>
+                                      ) : (
+                                        formatRupiah(item.nominalBayar)
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="pt-1.5 border-t border-slate-100 flex flex-wrap justify-between gap-2 text-[11px] tabular-nums">
+                              <span>
+                                Dompet Pendaftaran: <strong>{formatRupiah(psbLoketPreview.nominalDompetPendaftaran)}</strong>
+                              </span>
+                              <span>
+                                Dompet Operasional (Syahriyah Bln 1):{' '}
+                                <strong>
+                                  {psbBulanPertamaSudahLunas
+                                    ? 'Rp 0 (Lunas/Terpilih)'
+                                    : formatRupiah(psbLoketPreview.nominalSyahriyahBulanPertama)}
+                                </strong>
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* BAGIAN A: SYAHRIYAH BULANAN (12 BULAN JULI - JUNI) */}
                       <div>
-                        <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 mb-1.5">
                           <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">
                             A. Syahriyah Bulanan (12 Bulan — TA {tahunAjaran})
                           </h3>
@@ -3293,17 +3671,17 @@ export default function KeuanganPage() {
 
                       {/* BAGIAN B: IURAN TAHUNAN & KATEGORI TAMBAHAN */}
                       <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-2">
-                            B. Iuran Tahunan &amp; Ujian Madin
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 mb-1.5">
+                          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex flex-wrap items-center gap-1.5">
+                            <span>B. Iuran Tahunan &amp; Ujian Madin</span>
                             {activeSantri.status === 'ndalem' && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 normal-case">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 normal-case">
                                 Santri Ndalem: Opsional / Tidak Wajib
                               </span>
                             )}
                           </h3>
                           <span className="text-[10.5px] text-slate-500">
-                            Otomatis terpisah ke <strong>Dompet MDA</strong> &amp; <strong>Operasional</strong>
+                            Otomatis terpisah ke <strong>Syahriyah</strong>, <strong>Dompet MDA</strong> &amp; <strong>Pendaftaran</strong>
                           </span>
                         </div>
 
@@ -3313,7 +3691,9 @@ export default function KeuanganPage() {
                               (d) => d.item_kode === it.kode && d.periode_bulan === 'TAHUNAN'
                             );
                             const isChecked = selectedTahunanKodes.includes(it.kode);
-                            const isMda = it.dompet_tujuan === 'mda';
+                            const targetDompet = resolveCanonicalDompetForItem(it.kode, it.dompet_tujuan);
+                            const isMda = targetDompet === 'mda';
+                            const isPendaftaran = targetDompet === 'pendaftaran';
 
                             if (paidRec) {
                               return (
@@ -3353,7 +3733,7 @@ export default function KeuanganPage() {
                                   </div>
                                   <div className="flex items-center gap-1.5 mt-0.5">
                                     <span
-                                      className={`text-[11px] font-extrabold ${
+                                      className={`text-[11px] font-extrabold font-mono tabular-nums ${
                                         isChecked ? 'text-emerald-100' : 'text-emerald-800'
                                       }`}
                                     >
@@ -3365,10 +3745,12 @@ export default function KeuanganPage() {
                                           ? 'bg-black/20 text-white'
                                           : isMda
                                           ? 'bg-indigo-100 text-indigo-800'
+                                          : isPendaftaran
+                                          ? 'bg-sky-100 text-sky-800'
                                           : 'bg-emerald-100 text-emerald-800'
                                       }`}
                                     >
-                                      {isMda ? 'Dompet MDA' : 'Operasional'}
+                                      {isMda ? 'Dompet MDA' : isPendaftaran ? 'Pendaftaran' : 'Syahriyah'}
                                     </span>
                                   </div>
                                 </div>
@@ -3386,44 +3768,104 @@ export default function KeuanganPage() {
                       </div>
                     </div>
 
-                    {/* FOOTER BAR GRADASI HIJAU EMERALD PEKAT (TOTAL BAYAR & SIMPAN KUITANSI) */}
-                    <div className="shrink-0 px-4 py-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white border-t border-emerald-700 flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-200">
+                    {/* STRIP RINGKAS UNGGAH BUKTI TRANSFER (MUNCUL SAAT TRANSFER BANK DIPILIH) */}
+                    {metodeBayar === 'transfer' && (
+                      <div className="shrink-0 px-3 sm:px-4 py-1.5 bg-sky-50 border-t border-sky-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-bold text-sky-900 whitespace-nowrap">
+                            Masuk: Syahriyah Transfer
+                          </span>
+                          <span className="hidden sm:inline text-sky-700 truncate">
+                            (Hanya laporan bank, tidak masuk kas tunai dompet)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {loketBuktiPreview ? (
+                            <>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={loketBuktiPreview}
+                                alt="Pratinjau Bukti Transfer"
+                                className="w-7 h-7 rounded object-cover border border-sky-300 bg-white shrink-0"
+                                referrerPolicy="no-referrer"
+                              />
+                              <span className="font-semibold text-sky-900 max-w-[120px] truncate">
+                                {loketBuktiFile?.name || 'Bukti terpasang'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setLoketBuktiFile(null);
+                                  setLoketBuktiPreview('');
+                                }}
+                                className="px-2 py-0.5 rounded bg-white border border-sky-200 text-rose-700 font-bold hover:bg-rose-50 cursor-pointer"
+                              >
+                                Hapus
+                              </button>
+                            </>
+                          ) : (
+                            <label className="px-2.5 py-1 rounded-lg bg-white hover:bg-sky-100 border border-sky-300 text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap">
+                              <ImagePlus className="w-3.5 h-3.5" />
+                              + Bukti Transfer (Opsional)
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (!f) return;
+                                  setLoketBuktiFile(f);
+                                  const r = new FileReader();
+                                  r.onload = () => setLoketBuktiPreview(String(r.result || ''));
+                                  r.readAsDataURL(f);
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FOOTER BAR GRADASI HIJAU EMERALD PEKAT (RINGKAS DI HP, LENGKAP DI DESKTOP) */}
+                    <div className="shrink-0 px-3 sm:px-4 py-2 lg:py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white border-t border-emerald-700 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="hidden md:inline text-[11px] font-bold uppercase tracking-wider text-emerald-200">
                           Metode Bayar:
                         </span>
-                        <div className="inline-flex rounded-xl bg-black/30 p-1 border border-emerald-700/70">
+                        <div className="inline-flex rounded-xl bg-black/30 p-0.5 sm:p-1 border border-emerald-700/70">
                           <button
                             type="button"
                             onClick={() => setMetodeBayar('tunai')}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            className={`px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                               metodeBayar === 'tunai'
                                 ? 'bg-emerald-500 text-emerald-950 shadow-xs'
                                 : 'text-emerald-100 hover:text-white'
                             }`}
                           >
-                            Tunai (Cash)
+                            <span className="sm:hidden">Tunai</span>
+                            <span className="hidden sm:inline">Tunai (Cash)</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => setMetodeBayar('transfer')}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            className={`px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                               metodeBayar === 'transfer'
                                 ? 'bg-sky-400 text-slate-950 shadow-xs'
                                 : 'text-emerald-100 hover:text-white'
                             }`}
                           >
-                            Transfer Bank
+                            <span className="sm:hidden">Tf</span>
+                            <span className="hidden sm:inline">Transfer Bank</span>
                           </button>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 block">
-                            Total Bayar ({loketCartSummary.items.length} Item)
+                      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                        <div className="text-right min-w-0">
+                          <span className="text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider text-emerald-300 block leading-tight">
+                            Total ({loketCartSummary.items.length})
                           </span>
-                          <span className="text-lg font-extrabold text-white tracking-tight">
+                          <span className="text-sm sm:text-lg font-extrabold text-white tracking-tight tabular-nums whitespace-nowrap font-mono">
                             {formatRupiah(loketCartSummary.total)}
                           </span>
                         </div>
@@ -3432,10 +3874,19 @@ export default function KeuanganPage() {
                           type="button"
                           disabled={savingPayment || loketCartSummary.items.length === 0}
                           onClick={handleSimpanPembayaran}
-                          className="px-5 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer"
+                          className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
                         >
-                          <Receipt className="w-4 h-4" />
-                          {savingPayment ? 'Menyimpan...' : 'Simpan & Terbitkan Kuitansi'}
+                          <ReceiptText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                          <span>
+                            {savingPayment ? (
+                              'Menyimpan...'
+                            ) : (
+                              <>
+                                <span className="sm:hidden">Bayar</span>
+                                <span className="hidden sm:inline">Simpan &amp; Terbitkan Kuitansi</span>
+                              </>
+                            )}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -3449,9 +3900,9 @@ export default function KeuanganPage() {
               KONTEN TAB 2: KUITANSI 21x10 CM (PREVIEW LANGSUNG + PRINT TUNGGAL + PNG + COPY TEKS + HAPUS)
           ================================================================ */}
           {activeTab === 'kuitansi' && (
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 lg:overflow-hidden">
               {/* PANEL KIRI: RIWAYAT KUITANSI TERBIT */}
-              <div className="lg:col-span-4 border-r border-slate-200 flex flex-col min-h-0 bg-slate-50/60">
+              <div className="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col min-h-0 max-h-[280px] lg:max-h-none bg-slate-50/60">
                 <div className="p-3 border-b border-slate-200 bg-white space-y-2 shrink-0">
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -3584,6 +4035,61 @@ export default function KeuanganPage() {
                           {downloadingPng ? 'Memproses...' : 'Unduh PNG'}
                         </button>
 
+                        {(() => {
+                          const linkedTx = kasTransaksi.find(
+                            (t) => t.no_kuitansi === activeKuitansi.no_kuitansi
+                          );
+                          const existingUrl = linkedTx
+                            ? resolveTxLampiranUrl(linkedTx, lampiranMap)
+                            : resolveTxLampiranUrl(
+                                { no_kuitansi: activeKuitansi.no_kuitansi },
+                                lampiranMap
+                              );
+                          if (existingUrl) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setLightboxLampiran({
+                                    url: existingUrl,
+                                    title: `Bukti Transfer (${activeKuitansi.no_kuitansi})`,
+                                    subtitle: `${activeKuitansi.santri_nama} • ${formatRupiah(activeKuitansi.total_nominal)}`,
+                                    txId: linkedTx?.id,
+                                    noKuitansi: activeKuitansi.no_kuitansi,
+                                  })
+                                }
+                                className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Lihat Bukti TF
+                              </button>
+                            );
+                          }
+                          if (activeKuitansi.metode_pembayaran === 'transfer') {
+                            return (
+                              <button
+                                type="button"
+                                disabled={uploadingLampiranId === activeKuitansi.no_kuitansi}
+                                onClick={() => {
+                                  setQuickAttachTarget({
+                                    txId: linkedTx?.id,
+                                    noKuitansi: activeKuitansi.no_kuitansi,
+                                    kind: 'bukti_tf',
+                                  });
+                                  quickAttachInputRef.current?.click();
+                                }}
+                                className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <ImagePlus className="w-3.5 h-3.5" />
+                                {uploadingLampiranId === activeKuitansi.no_kuitansi
+                                  ? 'Mengunggah...'
+                                  : '+ Bukti TF'}
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+
                         {/* TOMBOL HAPUS TRANSAKSI (MUNCUL DI ADMIN UTAMA & BENDAHARA, NAMUN BENDAHARA MENDAPAT NOTIF PERINGATAN) */}
                         <button
                           type="button"
@@ -3602,7 +4108,7 @@ export default function KeuanganPage() {
                     </div>
 
                     {/* KONTAINER PREVIEW KUITANSI DI TENGAH AREA */}
-                    <div className="flex-1 min-h-0 overflow-auto p-6 flex items-start justify-center">
+                    <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto p-3 sm:p-6 flex items-start lg:justify-center">
                       {renderKuitansi21x10Card(activeKuitansi, false)}
                     </div>
                   </>
@@ -3615,26 +4121,26 @@ export default function KeuanganPage() {
               KONTEN TAB 3: PENAGIHAN TUNGGAKAN 2 JALUR & FILTER DINAMIS
           ================================================================ */}
           {activeTab === 'penagihan' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden">
               {/* PANEL FILTER & CHECKLIST ITEM TAHUNAN DINAMIS */}
               <div className="shrink-0 p-3.5 bg-slate-50 border-b border-slate-200 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2 flex-1">
-                    <div className="relative min-w-[210px]">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-center gap-2 flex-1">
+                    <div className="relative sm:col-span-2 lg:min-w-[220px] lg:flex-1">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
                         value={tagihanSearch}
                         onChange={(e) => setTagihanSearch(e.target.value)}
                         placeholder="Cari santri menunggak..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl"
+                        className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl"
                       />
                     </div>
 
                     <select
                       value={tagihanKamarFilter}
                       onChange={(e) => setTagihanKamarFilter(e.target.value)}
-                      className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl font-semibold"
+                      className="min-h-[38px] px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl font-semibold"
                     >
                       <option value="SEMUA">Semua Kamar</option>
                       {allKamarOptions.map((km) => (
@@ -3644,10 +4150,10 @@ export default function KeuanganPage() {
                       ))}
                     </select>
 
-                    <div className="inline-flex rounded-xl bg-white border border-slate-200 p-0.5 text-xs">
+                    <div className="sm:col-span-2 lg:col-span-auto inline-flex items-center rounded-xl bg-white border border-slate-200 p-0.5 text-xs overflow-x-auto max-w-full">
                       <button
                         onClick={() => setTagihanKategoriFilter('SEMUA')}
-                        className={`px-2.5 py-1 rounded-lg font-bold ${
+                        className={`px-2.5 py-1.5 rounded-lg font-bold whitespace-nowrap shrink-0 ${
                           tagihanKategoriFilter === 'SEMUA'
                             ? 'bg-slate-800 text-white'
                             : 'text-slate-600'
@@ -3657,7 +4163,7 @@ export default function KeuanganPage() {
                       </button>
                       <button
                         onClick={() => setTagihanKategoriFilter('WA_1_2')}
-                        className={`px-2.5 py-1 rounded-lg font-bold ${
+                        className={`px-2.5 py-1.5 rounded-lg font-bold whitespace-nowrap shrink-0 ${
                           tagihanKategoriFilter === 'WA_1_2'
                             ? 'bg-emerald-700 text-white'
                             : 'text-slate-600'
@@ -3667,7 +4173,7 @@ export default function KeuanganPage() {
                       </button>
                       <button
                         onClick={() => setTagihanKategoriFilter('SURAT_3_PLUS')}
-                        className={`px-2.5 py-1 rounded-lg font-bold ${
+                        className={`px-2.5 py-1.5 rounded-lg font-bold whitespace-nowrap shrink-0 ${
                           tagihanKategoriFilter === 'SURAT_3_PLUS'
                             ? 'bg-rose-700 text-white'
                             : 'text-slate-600'
@@ -3680,7 +4186,7 @@ export default function KeuanganPage() {
 
                   <button
                     onClick={handleCetakSuratTagihanMassal}
-                    className="px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="w-full xl:w-auto min-h-[38px] px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
                   >
                     <Printer className="w-3.5 h-3.5" />
                     Cetak Surat Tagihan Massal ({selectedTagihanSantriIds.length > 0 ? `${selectedTagihanSantriIds.length} Dipilih` : 'Semua >= 3 Bln'})
@@ -3723,45 +4229,22 @@ export default function KeuanganPage() {
                 </div>
               </div>
 
-              {/* TABEL DAFTAR TUNGGAKAN (SCROLL INTERNAL) */}
-              <div className="flex-1 min-h-0 overflow-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="sticky top-0 bg-slate-100 text-slate-700 border-b border-slate-200 z-10">
-                    <tr>
-                      <th className="p-2.5 w-8 text-center">
-                        <input
-                          type="checkbox"
-                          checked={
-                            filteredTunggakan.length > 0 &&
-                            selectedTagihanSantriIds.length === filteredTunggakan.length
-                          }
-                          onChange={(e) =>
-                            setSelectedTagihanSantriIds(
-                              e.target.checked ? filteredTunggakan.map((r) => r.santri.id) : []
-                            )
-                          }
-                        />
-                      </th>
-                      <th className="p-2.5">Santri &amp; Kamar</th>
-                      <th className="p-2.5">Rincian Tunggakan</th>
-                      <th className="p-2.5 text-right">Total Tagihan</th>
-                      <th className="p-2.5 text-center">Jalur Penagihan</th>
-                      <th className="p-2.5 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredTunggakan.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="p-10 text-center text-slate-400">
-                          Alhamdulillah, tidak ada tunggakan santri pada kriteria filter ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredTunggakan.map((row) => (
-                        <tr key={row.santri.id} className="hover:bg-slate-50/80">
-                          <td className="p-2.5 text-center">
+              {/* DAFTAR TUNGGAKAN: MOBILE CARDS + DESKTOP TABLE */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {/* MOBILE CARD VIEW PENAGIHAN */}
+                <div className="md:hidden divide-y divide-slate-100">
+                  {filteredTunggakan.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400">
+                      Alhamdulillah, tidak ada tunggakan santri pada kriteria filter ini.
+                    </div>
+                  ) : (
+                    filteredTunggakan.map((row) => (
+                      <div key={row.santri.id} className="p-4 space-y-2.5 text-xs bg-white">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 min-w-0">
                             <input
                               type="checkbox"
+                              aria-label={`Pilih ${row.santri.nama_lengkap}`}
                               checked={selectedTagihanSantriIds.includes(row.santri.id)}
                               onChange={(e) =>
                                 setSelectedTagihanSantriIds((prev) =>
@@ -3770,74 +4253,200 @@ export default function KeuanganPage() {
                                     : prev.filter((id) => id !== row.santri.id)
                                 )
                               }
+                              className="mt-0.5 w-4 h-4 accent-emerald-700 shrink-0"
                             />
-                          </td>
-                          <td className="p-2.5">
-                            <p className="font-bold text-slate-900">{row.santri.nama_lengkap}</p>
-                            <p className="text-[10.5px] text-slate-500">
-                              NIS: {row.santri.nis} &bull; Kamar <strong>{row.santri.kamar}</strong>
-                            </p>
-                          </td>
-                          <td className="p-2.5">
-                            <div className="flex flex-wrap gap-1">
-                              {row.ktlSisa > 0 && (
-                                <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px]">
-                                  KTL: {formatRupiah(row.ktlSisa)}
-                                </span>
-                              )}
-                              {row.tunggakanBulan.map((b) => (
-                                <span
-                                  key={b.periode}
-                                  className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold text-[10px]"
-                                >
-                                  {b.label}
-                                </span>
-                              ))}
-                              {row.tunggakanTahunan.map((t) => (
-                                <span
-                                  key={t.kode}
-                                  className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold text-[10px]"
-                                >
-                                  {t.label}
-                                </span>
-                              ))}
+                            <div className="min-w-0">
+                              <p className="font-bold text-sm text-slate-900 leading-snug">
+                                {row.santri.nama_lengkap}
+                              </p>
+                              <p className="text-[11px] text-slate-500 font-mono">
+                                NIS {row.santri.nis} &bull; Kamar {row.santri.kamar}
+                              </p>
                             </div>
-                          </td>
-                          <td className="p-2.5 text-right font-extrabold text-slate-900 whitespace-nowrap">
+                          </div>
+                          {row.jalur === 'SURAT_3_PLUS' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px] whitespace-nowrap shrink-0">
+                              &ge; 3 Bln
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] whitespace-nowrap shrink-0">
+                              {row.jumlahBulanNunggak} Bln WA
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-1">
+                          {row.ktlSisa > 0 && (
+                            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px]">
+                              KTL: {formatRupiah(row.ktlSisa)}
+                            </span>
+                          )}
+                          {row.tunggakanBulan.map((b) => (
+                            <span
+                              key={b.periode}
+                              className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold text-[10px]"
+                            >
+                              {b.label}
+                            </span>
+                          ))}
+                          {row.tunggakanTahunan.map((t) => (
+                            <span
+                              key={t.kode}
+                              className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold text-[10px]"
+                            >
+                              {t.label}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-0.5">
+                          <span className="text-[11px] text-slate-500">Total Tagihan</span>
+                          <span className="font-extrabold text-sm text-slate-900 tabular-nums">
                             {formatRupiah(row.totalTagihan)}
-                          </td>
-                          <td className="p-2.5 text-center">
-                            {row.jalur === 'SURAT_3_PLUS' ? (
-                              <span className="px-2 py-1 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px]">
-                                &ge; 3 Bulan (Surat Fisik)
-                              </span>
-                            ) : (
-                              <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                                {row.jumlahBulanNunggak} Bulan (Chat WA)
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-2.5 text-right whitespace-nowrap space-x-1.5">
-                            <button
-                              onClick={() => handleChatWaTagihan(row)}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <Send className="w-3 h-3" />
-                              Chat WA
-                            </button>
-                            <button
-                              onClick={() => handleCetakSuratTagihanSatuan(row)}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <Printer className="w-3 h-3" />
-                              Surat A4
-                            </button>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <button
+                            onClick={() => handleChatWaTagihan(row)}
+                            className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            Chat WA
+                          </button>
+                          <button
+                            onClick={() => handleCetakSuratTagihanSatuan(row)}
+                            className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Surat A4
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* DESKTOP TABLE VIEW PENAGIHAN */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-100 text-slate-700 border-b border-slate-200 z-10 text-[11px] uppercase tracking-wider font-bold">
+                      <tr>
+                        <th className="py-3 px-3 w-10 text-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Pilih semua santri menunggak"
+                            checked={
+                              filteredTunggakan.length > 0 &&
+                              selectedTagihanSantriIds.length === filteredTunggakan.length
+                            }
+                            onChange={(e) =>
+                              setSelectedTagihanSantriIds(
+                                e.target.checked ? filteredTunggakan.map((r) => r.santri.id) : []
+                              )
+                            }
+                          />
+                        </th>
+                        <th className="py-3 px-3 min-w-[175px]">Santri &amp; Kamar</th>
+                        <th className="py-3 px-3 min-w-[215px]">Rincian Tunggakan</th>
+                        <th className="py-3 px-3 w-32 text-right whitespace-nowrap">Total Tagihan</th>
+                        <th className="py-3 px-3 w-40 text-center whitespace-nowrap">Jalur Penagihan</th>
+                        <th className="py-3 px-3 w-[195px] text-right whitespace-nowrap">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredTunggakan.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-10 text-center text-slate-400">
+                            Alhamdulillah, tidak ada tunggakan santri pada kriteria filter ini.
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        filteredTunggakan.map((row) => (
+                          <tr key={row.santri.id} className="hover:bg-slate-50/80">
+                            <td className="py-3 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                aria-label={`Pilih ${row.santri.nama_lengkap}`}
+                                checked={selectedTagihanSantriIds.includes(row.santri.id)}
+                                onChange={(e) =>
+                                  setSelectedTagihanSantriIds((prev) =>
+                                    e.target.checked
+                                      ? [...prev, row.santri.id]
+                                      : prev.filter((id) => id !== row.santri.id)
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <p className="font-bold text-slate-900">{row.santri.nama_lengkap}</p>
+                              <p className="text-[10.5px] text-slate-500 whitespace-nowrap tabular-nums">
+                                NIS: {row.santri.nis} &bull; Kamar <strong>{row.santri.kamar}</strong>
+                              </p>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="flex flex-wrap gap-1">
+                                {row.ktlSisa > 0 && (
+                                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px] whitespace-nowrap">
+                                    KTL: {formatRupiah(row.ktlSisa)}
+                                  </span>
+                                )}
+                                {row.tunggakanBulan.map((b) => (
+                                  <span
+                                    key={b.periode}
+                                    className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold text-[10px] whitespace-nowrap"
+                                  >
+                                    {b.label}
+                                  </span>
+                                ))}
+                                {row.tunggakanTahunan.map((t) => (
+                                  <span
+                                    key={t.kode}
+                                    className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold text-[10px] whitespace-nowrap"
+                                  >
+                                    {t.label}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-right font-extrabold text-slate-900 whitespace-nowrap tabular-nums">
+                              {formatRupiah(row.totalTagihan)}
+                            </td>
+                            <td className="py-3 px-3 text-center whitespace-nowrap">
+                              {row.jalur === 'SURAT_3_PLUS' ? (
+                                <span className="inline-flex px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px] whitespace-nowrap">
+                                  &ge; 3 Bulan (Surat Fisik)
+                                </span>
+                              ) : (
+                                <span className="inline-flex px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] whitespace-nowrap">
+                                  {row.jumlahBulanNunggak} Bulan (Chat WA)
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right whitespace-nowrap">
+                              <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleChatWaTagihan(row)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                                >
+                                  <Send className="w-3 h-3" />
+                                  Chat WA
+                                </button>
+                                <button
+                                  onClick={() => handleCetakSuratTagihanSatuan(row)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                                >
+                                  <Printer className="w-3 h-3" />
+                                  Surat A4
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -3846,7 +4455,7 @@ export default function KeuanganPage() {
               KONTEN TAB 4: BUKU KAS UMUM & PENCAIRAN BISYAROH PENGURUS
           ================================================================ */}
           {activeTab === 'bukukas' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden">
               {/* BAR FILTER & TOMBOL AKSI BUKU KAS */}
               <div className="shrink-0 p-3.5 bg-slate-50 border-b border-slate-200 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3862,7 +4471,7 @@ export default function KeuanganPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => setShowBisyarohModal(true)}
-                      className="px-3 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
                     >
                       <Users className="w-3.5 h-3.5" />
                       Pencairan Bisyaroh Pengurus
@@ -3870,7 +4479,7 @@ export default function KeuanganPage() {
 
                     <button
                       onClick={() => setShowKasModal(true)}
-                      className="px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Catat Kas Masuk / Keluar
@@ -3878,7 +4487,7 @@ export default function KeuanganPage() {
 
                     <button
                       onClick={handleExportBukuKasExcel}
-                      className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                       Excel
@@ -3886,7 +4495,7 @@ export default function KeuanganPage() {
 
                     <button
                       onClick={() => triggerPrint('laporan_kas')}
-                      className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <Printer className="w-3.5 h-3.5" />
                       Print A4
@@ -3895,12 +4504,12 @@ export default function KeuanganPage() {
                 </div>
 
                 {/* FILTER & RINGKASAN ARUS KAS FILTERED */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-center gap-2 text-xs flex-1">
                     <select
                       value={kasBulanFilter}
                       onChange={(e) => setKasBulanFilter(e.target.value)}
-                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700"
+                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700"
                     >
                       <option value="SEMUA">Semua Bulan</option>
                       {Array.from(
@@ -3921,7 +4530,7 @@ export default function KeuanganPage() {
                     <select
                       value={kasDompetFilter}
                       onChange={(e) => setKasDompetFilter(e.target.value)}
-                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Semua 4 Dompet</option>
                       <option value="pendaftaran">1. Dompet Pendaftaran</option>
@@ -3933,7 +4542,7 @@ export default function KeuanganPage() {
                     <select
                       value={kasTipeFilter}
                       onChange={(e) => setKasTipeFilter(e.target.value)}
-                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Masuk &amp; Keluar</option>
                       <option value="masuk">Pemasukan Saja</option>
@@ -3943,83 +4552,81 @@ export default function KeuanganPage() {
                     <select
                       value={kasMetodeFilter}
                       onChange={(e) => setKasMetodeFilter(e.target.value)}
-                      className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Tunai &amp; Transfer</option>
                       <option value="tunai">Tunai (Cash)</option>
                       <option value="transfer">Transfer Bank</option>
                     </select>
 
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <div className="relative col-span-2 sm:col-span-2 lg:w-52">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
                         value={kasSearch}
                         onChange={(e) => setKasSearch(e.target.value)}
                         placeholder="Cari uraian / kuitansi..."
-                        className="pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs"
+                        className="w-full min-h-[36px] pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs"
                       />
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="text-emerald-800 font-bold">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums shrink-0">
+                    <span className="text-emerald-800 font-bold whitespace-nowrap">
                       Masuk: {formatRupiah(kasFilteredTotals.masuk)}
                     </span>
-                    <span className="text-rose-700 font-bold">
+                    <span className="text-rose-700 font-bold whitespace-nowrap">
                       Keluar: {formatRupiah(kasFilteredTotals.keluar)}
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold">
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold whitespace-nowrap">
                       Netto: {formatRupiah(kasFilteredTotals.selisih)}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* TABEL MUTASI BUKU KAS (SCROLL INTERNAL) */}
-              <div className="flex-1 min-h-0 overflow-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="sticky top-0 bg-slate-100 text-slate-700 border-b border-slate-200 z-10">
-                    <tr>
-                      <th className="p-2.5">Tanggal</th>
-                      <th className="p-2.5">Dompet</th>
-                      <th className="p-2.5">Kategori &amp; Keterangan</th>
-                      <th className="p-2.5 text-center">Metode</th>
-                      <th className="p-2.5 text-right">Masuk</th>
-                      <th className="p-2.5 text-right">Keluar</th>
-                      <th className="p-2.5 text-center w-14">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredKasTransaksi.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="p-10 text-center text-slate-400">
-                          Belum ada mutasi transaksi pada filter bulan/dompet ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredKasTransaksi.map((tx) => {
-                        const meta = DOMPET_META[tx.dompet] || DOMPET_META.operasional;
-                        return (
-                          <tr key={tx.id} className="hover:bg-slate-50/80">
-                            <td className="p-2.5 whitespace-nowrap">
-                              <p className="font-semibold text-slate-800">{formatTanggalIndo(tx.tgl_transaksi)}</p>
+              {/* TABEL & KARTU MUTASI BUKU KAS */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {/* MOBILE CARD VIEW BUKU KAS */}
+                <div className="md:hidden divide-y divide-slate-100">
+                  {filteredKasTransaksi.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400">
+                      Belum ada mutasi transaksi pada filter bulan/dompet ini.
+                    </div>
+                  ) : (
+                    filteredKasTransaksi.map((tx) => {
+                      const meta = DOMPET_META[tx.dompet] || DOMPET_META.operasional;
+                      const lampiranUrl = resolveTxLampiranUrl(tx, lampiranMap);
+                      const attachKind: 'bukti_tf' | 'nota' =
+                        tx.metode_pembayaran === 'transfer' ? 'bukti_tf' : 'nota';
+                      const lockKey = String(tx.no_kuitansi || tx.id);
+                      return (
+                        <div key={tx.id} className="p-4 space-y-2 text-xs bg-white">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-slate-800">
+                                {formatTanggalIndo(tx.tgl_transaksi)}
+                              </div>
                               {tx.no_kuitansi && (
                                 <span className="font-mono text-[10px] text-emerald-700 font-bold">
                                   {tx.no_kuitansi}
                                 </span>
                               )}
-                            </td>
-                            <td className="p-2.5 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${meta.badgeClass}`}>
-                                {meta.shortLabel}
-                              </span>
-                            </td>
-                            <td className="p-2.5">
-                              <p className="font-bold text-slate-900">{tx.kategori}</p>
-                              <p className="text-[11px] text-slate-500 line-clamp-1">{tx.keterangan}</p>
-                            </td>
-                            <td className="p-2.5 text-center whitespace-nowrap">
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold whitespace-nowrap ${meta.badgeClass}`}>
+                              {meta.shortLabel}
+                            </span>
+                          </div>
+
+                          <div>
+                            <p className="font-bold text-slate-900">{tx.kategori}</p>
+                            {tx.keterangan && (
+                              <p className="text-[11px] text-slate-500 mt-0.5">{tx.keterangan}</p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            <div className="flex items-center gap-2">
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                   tx.metode_pembayaran === 'transfer'
@@ -4029,153 +4636,251 @@ export default function KeuanganPage() {
                               >
                                 {tx.metode_pembayaran}
                               </span>
-                            </td>
-                            <td className="p-2.5 text-right font-extrabold text-emerald-700 whitespace-nowrap">
-                              {tx.tipe === 'masuk' ? formatRupiah(tx.nominal) : '-'}
-                            </td>
-                            <td className="p-2.5 text-right font-extrabold text-rose-700 whitespace-nowrap">
-                              {tx.tipe === 'keluar' ? formatRupiah(tx.nominal) : '-'}
-                            </td>
-                            <td className="p-2.5 text-center">
+                              <span
+                                className={`font-extrabold text-sm tabular-nums font-mono ${
+                                  tx.tipe === 'masuk' ? 'text-emerald-700' : 'text-rose-700'
+                                }`}
+                              >
+                                {tx.tipe === 'masuk' ? '+' : '-'} {formatRupiah(tx.nominal)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {lampiranUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setLightboxLampiran({
+                                      url: lampiranUrl,
+                                      title:
+                                        attachKind === 'bukti_tf'
+                                          ? 'Bukti Transfer Bank'
+                                          : 'Scan Nota Pembelian',
+                                      subtitle: `${formatTanggalIndo(tx.tgl_transaksi)} • ${tx.kategori} (${formatRupiah(tx.nominal)})`,
+                                      txId: tx.id,
+                                      noKuitansi: tx.no_kuitansi,
+                                    })
+                                  }
+                                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 font-bold inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  {attachKind === 'bukti_tf' ? 'Bukti' : 'Nota'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={uploadingLampiranId === lockKey}
+                                  onClick={() => {
+                                    setQuickAttachTarget({
+                                      txId: tx.id,
+                                      noKuitansi: tx.no_kuitansi,
+                                      kind: attachKind,
+                                    });
+                                    quickAttachInputRef.current?.click();
+                                  }}
+                                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <ImagePlus className="w-3.5 h-3.5" />
+                                  {uploadingLampiranId === lockKey
+                                    ? '...'
+                                    : attachKind === 'bukti_tf'
+                                    ? '+ Bukti'
+                                    : '+ Nota'}
+                                </button>
+                              )}
+
                               <button
                                 onClick={() => handleDeleteKasRow(tx)}
                                 title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Admin Utama)' : 'Hapus catatan kas'}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                aria-label="Hapus transaksi kas"
+                                className="min-h-[36px] min-w-[36px] p-2 rounded-lg bg-slate-50 text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-center"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* DESKTOP TABLE VIEW BUKU KAS */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-100 text-slate-700 border-b border-slate-200 z-10 text-[11px] uppercase tracking-wider font-bold">
+                      <tr>
+                        <th className="py-3 px-3 w-36 whitespace-nowrap">Tanggal</th>
+                        <th className="py-3 px-3 w-32 whitespace-nowrap">Dompet</th>
+                        <th className="py-3 px-3 min-w-[200px]">Kategori &amp; Keterangan</th>
+                        <th className="py-3 px-3 w-24 text-center whitespace-nowrap">Metode</th>
+                        <th className="py-3 px-3 w-32 text-right whitespace-nowrap">Masuk</th>
+                        <th className="py-3 px-3 w-32 text-right whitespace-nowrap">Keluar</th>
+                        <th className="py-3 px-3 w-28 text-center whitespace-nowrap">Lampiran</th>
+                        <th className="py-3 px-3 w-14 text-center whitespace-nowrap">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredKasTransaksi.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="p-10 text-center text-slate-400">
+                            Belum ada mutasi transaksi pada filter bulan/dompet ini.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredKasTransaksi.map((tx) => {
+                          const meta = DOMPET_META[tx.dompet] || DOMPET_META.operasional;
+                          const lampiranUrl = resolveTxLampiranUrl(tx, lampiranMap);
+                          const attachKind: 'bukti_tf' | 'nota' =
+                            tx.metode_pembayaran === 'transfer' ? 'bukti_tf' : 'nota';
+                          const lockKey = String(tx.no_kuitansi || tx.id);
+                          return (
+                            <tr key={tx.id} className="hover:bg-slate-50/80">
+                              <td className="py-3 px-3 whitespace-nowrap tabular-nums">
+                                <p className="font-semibold text-slate-800">{formatTanggalIndo(tx.tgl_transaksi)}</p>
+                                {tx.no_kuitansi && (
+                                  <span className="font-mono text-[10px] text-emerald-700 font-bold">
+                                    {tx.no_kuitansi}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] font-bold whitespace-nowrap ${meta.badgeClass}`}>
+                                  {meta.shortLabel}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <p className="font-bold text-slate-900">{tx.kategori}</p>
+                                <p className="text-[11px] text-slate-500 line-clamp-1">{tx.keterangan}</p>
+                              </td>
+                              <td className="py-3 px-3 text-center whitespace-nowrap">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase whitespace-nowrap ${
+                                    tx.metode_pembayaran === 'transfer'
+                                      ? 'bg-sky-100 text-sky-800'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {tx.metode_pembayaran}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right font-extrabold text-emerald-700 whitespace-nowrap tabular-nums font-mono">
+                                {tx.tipe === 'masuk' ? formatRupiah(tx.nominal) : '-'}
+                              </td>
+                              <td className="py-3 px-3 text-right font-extrabold text-rose-700 whitespace-nowrap tabular-nums font-mono">
+                                {tx.tipe === 'keluar' ? formatRupiah(tx.nominal) : '-'}
+                              </td>
+                              <td className="py-3 px-3 text-center whitespace-nowrap">
+                                {lampiranUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setLightboxLampiran({
+                                        url: lampiranUrl,
+                                        title:
+                                          attachKind === 'bukti_tf'
+                                            ? 'Bukti Transfer Bank'
+                                            : 'Scan Nota Pembelian',
+                                        subtitle: `${formatTanggalIndo(tx.tgl_transaksi)} • ${tx.kategori} (${formatRupiah(tx.nominal)})`,
+                                        txId: tx.id,
+                                        noKuitansi: tx.no_kuitansi,
+                                      })
+                                    }
+                                    className="px-2 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    {attachKind === 'bukti_tf' ? 'Lihat Bukti' : 'Lihat Nota'}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={uploadingLampiranId === lockKey}
+                                    onClick={() => {
+                                      setQuickAttachTarget({
+                                        txId: tx.id,
+                                        noKuitansi: tx.no_kuitansi,
+                                        kind: attachKind,
+                                      });
+                                      quickAttachInputRef.current?.click();
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Upload className="w-3 h-3" />
+                                    {uploadingLampiranId === lockKey
+                                      ? '...'
+                                      : attachKind === 'bukti_tf'
+                                      ? '+ Bukti TF'
+                                      : '+ Nota'}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <button
+                                  onClick={() => handleDeleteKasRow(tx)}
+                                  title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Admin Utama)' : 'Hapus catatan kas'}
+                                  aria-label="Hapus transaksi kas"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
 
           {/* ================================================================
-              KONTEN TAB 5: MIGRASI BUKU LAMA, KTL & SALDO AWAL 4 DOMPET
+              KONTEN TAB 5: MIGRASI BUKU LAMA & KTL TRANSISI
           ================================================================ */}
           {activeTab === 'migrasi' && (
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5 bg-slate-50/40">
-              {/* BAGIAN 1 & 2: SALDO AWAL 4 DOMPET + IMPORT EXCEL MIGRASI */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* 1. SALDO AWAL 4 DOMPET */}
-                <form
-                  onSubmit={handleSimpanSaldoAwal}
-                  className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 p-4 space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-extrabold text-slate-900 uppercase">
-                        1. Saldo Awal 4 Dompet (Opening Balance Transisi)
-                      </h3>
-                      <p className="text-[11px] text-slate-500">
-                        Masukkan sisa uang riil di brankas/rekening saat pertama kali mulai memakai aplikasi.
-                      </p>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={savingSaldoAwal}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      {savingSaldoAwal ? 'Menyimpan...' : 'Simpan Saldo Awal'}
-                    </button>
-                  </div>
+              {/* BAGIAN 1: IMPORT EXCEL MIGRASI & KTL MASSAL */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="max-w-2xl">
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase">
+                    1. Import Excel Migrasi &amp; KTL Massal
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Unduh template Excel dengan kolom terpisah untuk setiap item tahunan (<strong>YA / TIDAK</strong>) serta nominal <strong>KTL (Kekurangan Tahun Lalu)</strong>. Data migrasi hanya menyinkronkan tunggakan transisi pembukuan manual ke aplikasi tanpa menambah saldo kas hari ini. (Pengaturan Saldo Awal 4 Dompet tersedia di menu <strong>Pengaturan Aplikasi</strong>.)
+                  </p>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <label className="font-bold text-sky-900 block mb-1">1. Saldo Awal Pendaftaran</label>
-                      <input
-                        type="number"
-                        value={saldoAwalForm.saldo_awal_pendaftaran}
-                        onChange={(e) =>
-                          setSaldoAwalForm((p) => ({ ...p, saldo_awal_pendaftaran: e.target.value }))
-                        }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-emerald-900 block mb-1">2. Saldo Awal Syahriyah &amp; Tahunan</label>
-                      <input
-                        type="number"
-                        value={saldoAwalForm.saldo_awal_operasional}
-                        onChange={(e) =>
-                          setSaldoAwalForm((p) => ({ ...p, saldo_awal_operasional: e.target.value }))
-                        }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-amber-900 block mb-1">3. Saldo Awal Dompet Kas Lain-lain</label>
-                      <input
-                        type="number"
-                        value={saldoAwalForm.saldo_awal_kas_pondok}
-                        onChange={(e) =>
-                          setSaldoAwalForm((p) => ({ ...p, saldo_awal_kas_pondok: e.target.value }))
-                        }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-indigo-900 block mb-1">4. Saldo Awal Dompet MDA</label>
-                      <input
-                        type="number"
-                        value={saldoAwalForm.saldo_awal_mda}
-                        onChange={(e) =>
-                          setSaldoAwalForm((p) => ({ ...p, saldo_awal_mda: e.target.value }))
-                        }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      />
-                    </div>
-                  </div>
-                </form>
+                <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplateMigrasi}
+                    className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+                  >
+                    <Download className="w-4 h-4 text-emerald-700" />
+                    Download Template Excel Migrasi (.xlsx)
+                  </button>
 
-                {/* 2. MIGRASI MASSAL VIA EXCEL (.XLSX) */}
-                <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between space-y-3">
-                  <div>
-                    <h3 className="text-xs font-extrabold text-slate-900 uppercase">
-                      2. Import Excel Migrasi &amp; KTL Massal
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                      Unduh template Excel dengan kolom terpisah untuk setiap item tahunan (<strong>YA / TIDAK</strong>) serta nominal <strong>KTL (Kekurangan Tahun Lalu)</strong>. Data migrasi tidak menambah saldo kas hari ini.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={handleDownloadTemplateMigrasi}
-                      className="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 text-emerald-700" />
-                      Download Template Excel Migrasi (.xlsx)
-                    </button>
-
-                    <label className="w-full py-2.5 px-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer">
-                      <FileSpreadsheet className="w-4 h-4" />
-                      {importingMigrasi ? 'Mengimpor Data...' : 'Upload File Excel Migrasi (.xlsx)'}
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls"
-                        disabled={importingMigrasi}
-                        onChange={handleImportExcelMigrasi}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
+                  <label className="py-2.5 px-4 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    {importingMigrasi ? 'Mengimpor Data...' : 'Upload File Excel Migrasi (.xlsx)'}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      disabled={importingMigrasi}
+                      onChange={handleImportExcelMigrasi}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
               </div>
 
-              {/* BAGIAN 3: SPLIT-PANEL SETEL LUNAS MIGRASI & KTL PER SANTRI */}
+              {/* BAGIAN 2: SPLIT-PANEL SETEL LUNAS MIGRASI & KTL PER SANTRI */}
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-4 py-3 bg-slate-900 text-white flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-extrabold uppercase tracking-wide">
-                      3. Setel Lunas Buku Lama (Migrasi) &amp; KTL Per Santri
+                      2. Setel Lunas Buku Lama (Migrasi) &amp; KTL Per Santri
                     </h3>
                     <p className="text-[11px] text-slate-300">
                       Pilih santri di panel kiri untuk menandai bulan lunas buku lama atau mencatat KTL (Kekurangan Tahun Lalu).
@@ -4511,6 +5216,71 @@ export default function KeuanganPage() {
                 />
               </div>
 
+              {kasForm.metode_pembayaran === 'transfer' && (
+                <div className="px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 text-[11px] text-sky-900 font-medium">
+                  Transaksi bermetode Transfer Bank dicatat di laporan <strong>Syahriyah Transfer</strong> dan tidak mengubah saldo kas tunai 4 Dompet.
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 block">
+                  {kasForm.metode_pembayaran === 'transfer'
+                    ? 'Foto Bukti Transfer (Opsional)'
+                    : 'Scan / Foto Nota Pembelian (Opsional)'}
+                </label>
+                <p className="text-[10.5px] text-slate-500">
+                  Disarankan hasil scan/foto jelas; otomatis tampil di lampiran Pusat Laporan Keuangan.
+                </p>
+                {kasLampiranPreview ? (
+                  <div className="p-2 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={kasLampiranPreview}
+                        alt="Pratinjau Nota atau Bukti"
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 bg-white shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="text-[11px] font-semibold text-slate-700 truncate">
+                        {kasLampiranFile?.name || 'Lampiran siap disimpan'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setKasLampiranFile(null);
+                        setKasLampiranPreview('');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-rose-700 font-bold hover:bg-rose-50 cursor-pointer shrink-0"
+                    >
+                      Hapus
+                    </button>
+                  </div>
+                ) : (
+                  <label className="w-full px-3 py-2.5 rounded-xl border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold flex items-center justify-center gap-2 cursor-pointer">
+                    <ImagePlus className="w-4 h-4 text-emerald-700" />
+                    <span>
+                      {kasForm.metode_pembayaran === 'transfer'
+                        ? 'Pilih / Unggah Bukti Transfer'
+                        : 'Pilih / Unggah Scan Nota Pembelian'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        setKasLampiranFile(f);
+                        const r = new FileReader();
+                        r.onload = () => setKasLampiranPreview(String(r.result || ''));
+                        r.readAsDataURL(f);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -4669,6 +5439,195 @@ export default function KeuanganPage() {
                     {savingBisyaroh ? 'Memproses...' : 'Catat Pengeluaran Bisyaroh'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* ==================================================================
+            MODAL PILIH SANTRI KHUSUS TAMPILAN MOBILE (<LG)
+        ================================================================== */}
+        {mobileSantriPickerOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl border border-slate-200 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-900 text-white">
+                <div>
+                  <h3 className="text-sm font-bold">Pilih Santri Pembayaran</h3>
+                  <p className="text-[11px] text-emerald-200">
+                    {filteredLoketSantri.length} santri aktif tersedia
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileSantriPickerOpen(false)}
+                  aria-label="Tutup daftar santri"
+                  className="p-1.5 rounded-lg text-emerald-100 hover:bg-emerald-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3 border-b border-slate-200 space-y-2 bg-slate-50">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={loketSearch}
+                    onChange={(e) => setLoketSearch(e.target.value)}
+                    placeholder="Cari nama santri / NIS..."
+                    className="w-full pl-8 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+                <select
+                  value={loketKamarFilter}
+                  onChange={(e) => setLoketKamarFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none focus:border-emerald-600"
+                >
+                  <option value="SEMUA">
+                    Semua Kamar ({santriList.filter((s) => s.status !== 'boyong' && s.status !== 'alumni' && s.status !== 'pindah_al_burhany').length} Santri)
+                  </option>
+                  {allKamarOptions.map((km) => (
+                    <option key={km} value={km}>
+                      Kamar {km}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+                {filteredLoketSantri.length === 0 ? (
+                  <div className="text-center py-10 text-xs text-slate-400">
+                    Santri tidak ditemukan.
+                  </div>
+                ) : (
+                  filteredLoketSantri.map((s) => {
+                    const isSelected = activeSantri?.id === s.id;
+                    const vip = isSantriVip(s);
+                    const ndalem = s.status === 'ndalem';
+                    const hasKtl = Number(s.ktl_nominal || 0) > 0;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSantriId(s.id);
+                          setMobileSantriPickerOpen(false);
+                        }}
+                        className={`w-full text-left p-2.5 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs'
+                            : 'bg-white hover:bg-emerald-50/60 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-xs truncate">{s.nama_lengkap}</span>
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {s.kamar}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between mt-1 text-[10.5px]">
+                          <span className={isSelected ? 'text-emerald-200' : 'text-slate-500'}>
+                            NIS: {s.nis}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {hasKtl && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-500 text-white font-bold text-[9.5px]">
+                                KTL
+                              </span>
+                            )}
+                            <span
+                              className={`px-1.5 py-0.2 rounded font-bold text-[9.5px] ${
+                                isSelected
+                                  ? 'bg-emerald-950 text-emerald-300'
+                                  : ndalem
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : vip
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {ndalem ? 'NDALEM' : vip ? 'VIP' : 'REGULER'}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* HIDDEN INPUT UNGGAH SUSULAN BUKTI TRANSFER / NOTA */}
+        <input
+          ref={quickAttachInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleQuickAttachChange}
+          className="hidden"
+        />
+
+        {/* MODAL LIGHTBOX LIHAT FOTO BUKTI TRANSFER / SCAN NOTA PEMBELIAN */}
+        {lightboxLampiran && (
+          <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-extrabold text-slate-900 truncate">
+                    {lightboxLampiran.title}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate">{lightboxLampiran.subtitle}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLightboxLampiran(null)}
+                  aria-label="Tutup pratinjau lampiran"
+                  className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-100 flex-1 overflow-auto flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={lightboxLampiran.url}
+                  alt={lightboxLampiran.title}
+                  className="max-h-[65vh] max-w-full object-contain rounded-lg border border-slate-300 bg-white shadow-xs"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              <div className="px-4 py-3 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickAttachTarget({
+                      txId: lightboxLampiran.txId,
+                      noKuitansi: lightboxLampiran.noKuitansi,
+                      kind: lightboxLampiran.title.toLowerCase().includes('transfer')
+                        ? 'bukti_tf'
+                        : 'nota',
+                    });
+                    quickAttachInputRef.current?.click();
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Ganti Foto
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLightboxLampiran(null)}
+                  className="px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold cursor-pointer"
+                >
+                  Tutup
+                </button>
               </div>
             </div>
           </div>
