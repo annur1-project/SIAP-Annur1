@@ -20,15 +20,18 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
+  DEFAULT_PROFIL_PONDOK_PSB,
   DEFAULT_SKEMA_PENDAFTARAN,
   mergeAturanOperasional,
   readExtendedLocal,
+  type ProfilPondokPsbConfig,
   type SkemaPendaftaranConfig,
 } from '@/lib/pengaturan';
 import { formatRupiah } from '@/lib/laporan';
 import {
   calculatePsbBilling,
   compressBuktiTransfer,
+  computePromoDisplayRemaining,
   countVerifiedPsbQuota,
   fetchPsbRecords,
   generateNextNoRegistrasi,
@@ -68,12 +71,13 @@ export default function DaftarPublicPage() {
     rekening_atas_nama: PSB_PROFIL_PONDOK.rekeningOfflinePdf.atasNama,
   });
   const [skema, setSkema] = useState<SkemaPendaftaranConfig>(DEFAULT_SKEMA_PENDAFTARAN);
+  const [profilPondok, setProfilPondok] = useState<ProfilPondokPsbConfig>(DEFAULT_PROFIL_PONDOK_PSB);
   const [quotaUsed, setQuotaUsed] = useState(0);
   const [existingPsb, setExistingPsb] = useState<PsbPendaftaranRecord[]>([]);
 
   // Form Steps Data
   const [paket, setPaket] = useState<PsbPaket>('reguler');
-  const [rencanaTglMasuk, setRencanaTglMasuk] = useState('2026-07-15');
+  const [todayIso, setTodayIso] = useState('2026-11-19');
   const [setujuKetentuan, setSetujuKetentuan] = useState(false);
 
   const [namaLengkap, setNamaLengkap] = useState('');
@@ -124,6 +128,16 @@ export default function DaftarPublicPage() {
         row.aturan_operasional ?? localExt?.aturan_operasional
       );
       setSkema(mergedAturan.pendaftaran);
+      if (mergedAturan.profil_pondok) {
+        setProfilPondok(mergedAturan.profil_pondok);
+      }
+
+      const d = new Date();
+      setTodayIso(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+          d.getDate()
+        ).padStart(2, '0')}`
+      );
 
       const rekNo = String(row.rekening_nomor || localExt?.rekening_nomor || '').trim();
       setPengaturan({
@@ -154,6 +168,19 @@ export default function DaftarPublicPage() {
       clearTimeout(timer);
     };
   }, []);
+
+  const tahunPsbAktif = Number(skema.tahun_psb || 2027);
+  const tahunAjaranPsbAktif = String(skema.tahun_ajaran_psb || '2027/2028');
+  const promoSisaTampil = useMemo(
+    () =>
+      computePromoDisplayRemaining({
+        psbRecordsCount: existingPsb.length,
+        kuotaTotal: Number(skema.kuota_gratis_uang_pangkal || 100),
+        realQuotaUsed: quotaUsed,
+        promoDisplayStart: Number(skema.kuota_promo_tampil_awal || 28),
+      }),
+    [existingPsb.length, skema.kuota_gratis_uang_pangkal, skema.kuota_promo_tampil_awal, quotaUsed]
+  );
 
   const billingReguler = useMemo(
     () =>
@@ -293,7 +320,7 @@ export default function DaftarPublicPage() {
     const { records: latestRows } = await fetchPsbRecords();
     const noRegistrasi = generateNextNoRegistrasi(
       latestRows.length > 0 ? latestRows : existingPsb,
-      2026
+      tahunPsbAktif
     );
 
     const newRecord: PsbPendaftaranRecord = {
@@ -302,11 +329,11 @@ export default function DaftarPublicPage() {
           ? crypto.randomUUID()
           : `psb-${Date.now()}`,
       no_registrasi: noRegistrasi,
-      tahun_psb: 2026,
+      tahun_psb: tahunPsbAktif,
       status: 'menunggu_verifikasi',
       paket,
       kamar_rencana: '',
-      rencana_tgl_masuk: rencanaTglMasuk || '2026-07-15',
+      rencana_tgl_masuk: todayIso,
       nama_lengkap: namaLengkap.trim(),
       jk,
       tempat_lahir: tempatLahir.trim(),
@@ -361,7 +388,7 @@ export default function DaftarPublicPage() {
         `• Nama Calon Santri: ${submittedRecord.nama_lengkap}\n` +
         `• Paket: ${submittedRecord.paket.toUpperCase()}\n` +
         `• Transfer DP: ${formatRupiah(submittedRecord.dp_nominal)}\n` +
-        `• Rencana Masuk: ${submittedRecord.rencana_tgl_masuk}\n` +
+        `• Tanggal Daftar: ${submittedRecord.rencana_tgl_masuk}\n` +
         `Mohon verifikasi bukti transfer kami. Terima kasih.`
     );
 
@@ -452,7 +479,7 @@ export default function DaftarPublicPage() {
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-700 space-y-1.5">
                 <p className="font-bold text-slate-900">Berkas Fisik Wajib Dibawa Saat Kedatangan:</p>
                 <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                  {PSB_PROFIL_PONDOK.berkasFisikWajib.map((b) => (
+                  {profilPondok.berkasFisikWajib.map((b) => (
                     <li key={b}>{b}</li>
                   ))}
                 </ul>
@@ -512,19 +539,19 @@ export default function DaftarPublicPage() {
       />
 
       <main className="max-w-4xl mx-auto px-4 pt-5 space-y-5">
-        {/* Banner Hero Promo 100 Pendaftar Pertama */}
+        {/* Banner Hero Promo Kuota Free Uang Pangkal */}
         <section className="bg-gradient-to-br from-emerald-900 via-emerald-800 to-teal-800 text-white rounded-2xl p-5 sm:p-6 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1.5">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/15 text-emerald-100 text-[11px] font-bold">
                 <Sparkles className="w-3.5 h-3.5" />
-                Pendaftaran Santri Baru 1 Pintu · Tahun Ajaran 2026/2027
+                Penerimaan Santri Baru (PSB) · Tahun Ajaran {tahunAjaranPsbAktif}
               </span>
               <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
                 Formulir Pendaftaran Online &amp; Booking DP
               </h2>
               <p className="text-xs sm:text-sm text-emerald-100/90 max-w-2xl">
-                Cukup isi data esensial &amp; transfer DP minimal {formatRupiah(PSB_MIN_DP)}. Penempatan kamar ditentukan pengurus dan rincian data induk dilengkapi saat sowan kedatangan.
+                Silakan pilih paket pendaftaran, lengkapi data calon santri, dan unggah bukti transfer DP minimal {formatRupiah(PSB_MIN_DP)}.
               </p>
             </div>
 
@@ -533,23 +560,23 @@ export default function DaftarPublicPage() {
                 Kuota Free Uang Pangkal {formatRupiah(skema.uang_pangkal)}
               </p>
               <p className="text-lg sm:text-xl font-black tabular-nums mt-0.5">
-                {billingReguler.rincian.isFreeUangPangkal
-                  ? `Tersedia (${billingReguler.rincian.sisaKuotaPromo} / ${billingReguler.rincian.kuotaPromoTotal})`
+                {billingReguler.rincian.isFreeUangPangkal && promoSisaTampil > 0
+                  ? `Sisa ${promoSisaTampil} / ${billingReguler.rincian.kuotaPromoTotal} Kuota`
                   : 'Kuota Promo Penuh'}
               </p>
             </div>
           </div>
         </section>
 
-        {/* Profil Pondok & Jadwal (Dari PDF Resmi) */}
-        <PsbPondokInfoCard />
+        {/* Profil Pondok & Jadwal (Dapat Diedit di Pengaturan) */}
+        <PsbPondokInfoCard profil={profilPondok} />
 
         {/* Stepper 3 Langkah */}
         <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
           <div className="grid grid-cols-3 gap-2">
             {[
               { n: 1 as const, label: '1. Paket & Syarat' },
-              { n: 2 as const, label: '2. Data Esensial' },
+              { n: 2 as const, label: '2. Data Santri' },
               { n: 3 as const, label: '3. DP & Bukti' },
             ].map((item) => {
               const isCurrent = step === item.n;
@@ -591,7 +618,7 @@ export default function DaftarPublicPage() {
                 Langkah 1: Pilih Paket Pendaftaran
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Tidak perlu memilih nomor kamar saat daftar online; kamar spesifik akan diatur oleh Pengurus Pondok sesuai paket yang Anda pilih.
+                Pilih paket pendaftaran yang sesuai kebutuhan calon santri untuk Tahun Ajaran {tahunAjaranPsbAktif}.
               </p>
             </div>
 
@@ -673,17 +700,12 @@ export default function DaftarPublicPage() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-              <div>
-                <label htmlFor="rencana_tgl_masuk" className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Rencana Tanggal Masuk / Sowan *
-                </label>
-                <input
-                  id="rencana_tgl_masuk"
-                  type="date"
-                  value={rencanaTglMasuk}
-                  onChange={(e) => setRencanaTglMasuk(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium"
-                />
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-700">
+                <p className="font-bold text-slate-900">Tanggal Pendaftaran Tercatat Otomatis</p>
+                <p className="font-mono font-bold text-emerald-800 mt-1">{todayIso}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Siapkan berkas fisik wajib saat datang/sowan ke pondok.
+                </p>
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-700 flex items-center gap-2.5">
@@ -691,7 +713,7 @@ export default function DaftarPublicPage() {
                 <div>
                   <p className="font-bold text-slate-900">Skema Pembayaran Fleksibel</p>
                   <p className="text-[11px] text-slate-600">
-                    Booking cukup transfer DP minimal <strong>{formatRupiah(PSB_MIN_DP)}</strong>. Sisa dilunasi saat santri datang/sowan.
+                    Booking cukup transfer DP minimal <strong>{formatRupiah(PSB_MIN_DP)}</strong>. Sisa pembayaran dapat diselesaikan menyusul.
                   </p>
                 </div>
               </div>
@@ -703,10 +725,10 @@ export default function DaftarPublicPage() {
                 Ketentuan Santri &amp; Wali Santri
               </p>
               <ul className="list-disc list-inside space-y-1 text-[11px]">
-                {PSB_PROFIL_PONDOK.ketentuanWali.map((k) => (
+                {profilPondok.ketentuanWali.map((k) => (
                   <li key={k}>{k}</li>
                 ))}
-                <li>Wajib membawa berkas fisik (FC KK, KTP Ortu, Akta, Ijazah/SKL, Foto 3×4 masing-masing 2 lembar) saat kedatangan.</li>
+                <li>Wajib membawa berkas fisik ({profilPondok.berkasFisikWajib.slice(0, 5).join(', ')}) saat kedatangan.</li>
               </ul>
               <label className="flex items-start gap-2.5 pt-2 cursor-pointer select-none">
                 <input
@@ -740,10 +762,10 @@ export default function DaftarPublicPage() {
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-emerald-700" />
-                Langkah 2: Data Esensial Calon Santri &amp; Wali
+                Langkah 2: Data Calon Santri &amp; Wali
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Isi data pokok berikut agar proses cepat. Data berkas lanjutan (NIK, No. KK, Asal Sekolah) akan dilengkapi Sekretaris saat santri masuk pondok.
+                Mohon isi data calon santri dengan benar sesuai Kartu Keluarga atau Akta Kelahiran.
               </p>
             </div>
 

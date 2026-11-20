@@ -25,6 +25,7 @@ import {
   generateKodeTiket,
   getLocalTodayStr,
 } from '@/lib/sarpras';
+import { useAuth } from '@/lib/auth';
 
 export interface SarprasQuickReportModalProps {
   isOpen: boolean;
@@ -52,6 +53,7 @@ function SarprasQuickReportForm({
   existingLaporan,
   onSubmitted,
 }: SarprasQuickReportModalProps) {
+  const { pengurus } = useAuth();
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -146,7 +148,7 @@ function SarprasQuickReportForm({
         id: createSarprasId('lpr'),
         kode_tiket: generateKodeTiket(todayIso, existingLaporan),
         tanggal_lapor: todayIso,
-        pelapor_nama: 'Anonim',
+        pelapor_nama: pengurus?.nama_lengkap || 'Pengurus',
         ruangan: activeRuangan,
         inventaris_id: inventarisId || null,
         judul_kerusakan: judulKerusakan.trim(),

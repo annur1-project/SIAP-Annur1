@@ -23,10 +23,12 @@ import {
   XCircle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import {
   DEFAULT_KAMAR_MASTER,
   DEFAULT_PENGATURAN_FORM,
   DEFAULT_SKEMA_PENDAFTARAN,
+  generateNextNisForYear,
   getTahunAjaranForDate,
   mergeAturanOperasional,
   readExtendedLocal,
@@ -42,7 +44,6 @@ import {
   countVerifiedPsbQuota,
   deletePsbRecord,
   fetchPsbRecords,
-  PSB_PROFIL_PONDOK,
   PSB_STATUS_META,
   PSB_TABLE_SQL,
   savePsbRecord,
@@ -52,19 +53,16 @@ import {
   type PsbStatus,
 } from '@/lib/psb';
 
-function generateNextNis(
-  tglMasuk: string,
-  existingList: Array<{ nis?: string | null }>
-): string {
-  const yearPrefix = tglMasuk && tglMasuk.length >= 4 ? tglMasuk.slice(2, 4) : '26';
-  const maxSeq = existingList.reduce((max, s) => {
-    const numPart = parseInt(String(s.nis || '').slice(2), 10);
-    return !Number.isNaN(numPart) && numPart > max ? numPart : max;
-  }, 0);
-  return `${yearPrefix}${String(maxSeq + 1).padStart(4, '0')}`;
-}
+const REJECT_PRESET_REASONS = [
+  'Bukti transfer tidak valid / palsu',
+  'Dana belum masuk di mutasi rekening pondok',
+  'Nominal transfer tidak sesuai ketentuan DP minimal',
+];
 
 export default function PendaftaranInternalPage() {
+  const { canEditModule, pengurus } = useAuth();
+  const canEdit = canEditModule('pendaftaran');
+
   const [records, setRecords] = useState<PsbPendaftaranRecord[]>([]);
   const [santriList, setSantriList] = useState<Array<{ id: string; nis?: string | null }>>([]);
   const [loading, setLoading] = useState(true);
@@ -108,9 +106,11 @@ export default function PendaftaranInternalPage() {
   const [pelunasanMetode, setPelunasanMetode] = useState<'tunai' | 'transfer'>('tunai');
   const [pelunasanBuktiFile, setPelunasanBuktiFile] = useState<File | null>(null);
   const [pelunasanBuktiPreview, setPelunasanBuktiPreview] = useState<string>('');
-  const [selectedKamar, setSelectedKamar] = useState<string>('');
-  const [tglMasukAktual, setTglMasukAktual] = useState<string>('2026-11-18');
+  const [selectedKamar, setSelectedKamar] = useState<string>('Menunggu Penempatan');
+  const [tglMasukAktual, setTglMasukAktual] = useState<string>('2027-07-01');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkActivating, setBulkActivating] = useState(false);
 
   // Print Kuitansi Modal (21x10 cm)
   const [kuitansiPreview, setKuitansiPreview] = useState<{
@@ -155,7 +155,9 @@ export default function PendaftaranInternalPage() {
       ttd_bendahara_url: String(row.ttd_bendahara_url || ''),
     });
 
-    if (authRes.data?.user) {
+    if (pengurus?.nama_lengkap) {
+      setPetugasNama(pengurus.nama_lengkap);
+    } else if (authRes.data?.user) {
       const { data: prof } = await supabase
         .from('profiles')
         .select('nama_divisi, username')
@@ -167,7 +169,7 @@ export default function PendaftaranInternalPage() {
     }
 
     setLoading(false);
-  }, []);
+  }, [pengurus]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -202,13 +204,10 @@ export default function PendaftaranInternalPage() {
     setPelunasanBuktiFile(null);
     setPelunasanBuktiPreview('');
 
-    const defaultRoom =
-      rec.kamar_rencana ||
-      (rec.paket === 'vip'
-        ? daftarKamar.find((k) => k.toUpperCase().includes('VIP')) || daftarKamar[0] || 'Al-Fachriyah 1 (VIP)'
-        : daftarKamar.find((k) => !k.toUpperCase().includes('VIP')) || daftarKamar[0] || 'A1');
+    const defaultRoom = rec.kamar_rencana || 'Menunggu Penempatan';
     setSelectedKamar(defaultRoom);
-    setTglMasukAktual(rec.rencana_tgl_masuk || todayIso);
+    const defaultTahunPsb = Number(rec.tahun_psb || skema.tahun_psb || 2027);
+    setTglMasukAktual(`${defaultTahunPsb}-07-01`);
   };
 
   const filteredRecords = useMemo(() => {
@@ -226,6 +225,24 @@ export default function PendaftaranInternalPage() {
       );
     });
   }, [records, filterStatus, filterPaket, searchQuery]);
+
+  const eligibleBulkRecords = useMemo(
+    () =>
+      filteredRecords.filter(
+        (r) => r.status === 'dp_terverifikasi' || r.status === 'lunas_menunggu_kedatangan'
+      ),
+    [filteredRecords]
+  );
+
+  const selectedEligibleRecords = useMemo(
+    () =>
+      records.filter(
+        (r) =>
+          selectedIds.includes(r.id) &&
+          (r.status === 'dp_terverifikasi' || r.status === 'lunas_menunggu_kedatangan')
+      ),
+    [records, selectedIds]
+  );
 
   const counts = useMemo(
     () => ({
@@ -247,7 +264,7 @@ export default function PendaftaranInternalPage() {
 
   // TAHAP 2: Verifikasi DP, Kunci Kuota Promo, & Masuk Dompet Pendaftaran
   const handleVerifikasiDp = async () => {
-    if (!selected) return;
+    if (!canEdit || !selected) return;
     setSavingAction(true);
 
     const billing = calculatePsbBilling({
@@ -285,7 +302,7 @@ export default function PendaftaranInternalPage() {
       updated_at: new Date().toISOString(),
     };
 
-    // Catat ke Keuangan (Transfer -> Syahriyah Transfer, Tunai -> Dompet Pendaftaran) beserta lampiran bukti DP
+    // Catat ke Keuangan (Transfer -> Pemasukan Transfer, Tunai -> Dompet Pendaftaran) beserta lampiran bukti DP
     if (Number(dpVerifNominal) > 0) {
       await insertKeuanganTransaksiResilient(
         [
@@ -312,14 +329,14 @@ export default function PendaftaranInternalPage() {
     showToast(
       'success',
       dpVerifMetode === 'transfer'
-        ? `DP ${record.no_registrasi} terverifikasi & masuk laporan Syahriyah Transfer!`
+        ? `DP ${record.no_registrasi} terverifikasi & masuk laporan Pemasukan Transfer!`
         : `DP ${record.no_registrasi} terverifikasi & masuk Dompet Pendaftaran (Tunai)!`
     );
   };
 
   // Penyesuaian Keringanan Sebelum Pelunasan
   const handleSimpanKeringanan = async () => {
-    if (!selected) return;
+    if (!canEdit || !selected) return;
     setSavingAction(true);
     const billing = calculatePsbBilling({
       paket: selected.paket,
@@ -354,7 +371,7 @@ export default function PendaftaranInternalPage() {
 
   // TAHAP 3: Catat Pelunasan Saat Sowan / Kedatangan
   const handleCatatPelunasan = async () => {
-    if (!selected) return;
+    if (!canEdit || !selected) return;
     const bayar = Math.max(0, Number(pelunasanNominal || 0));
     if (bayar <= 0) {
       showToast('error', 'Nominal pelunasan harus lebih dari Rp0.');
@@ -445,24 +462,22 @@ export default function PendaftaranInternalPage() {
     showToast(
       'success',
       pelunasanMetode === 'transfer'
-        ? 'Pelunasan transfer dicatat ke laporan Syahriyah Transfer!'
+        ? 'Pelunasan transfer dicatat ke laporan Pemasukan Transfer!'
         : 'Pembayaran pelunasan tunai berhasil dicatat ke Dompet Keuangan!'
     );
   };
 
-  // TAHAP 4: Pengurus Menentukan Kamar & Meresmikan Jadi Santri Aktif
-  const handleResmikanSantri = async () => {
-    if (!selected) return;
-    if (!selectedKamar.trim()) {
-      showToast('error', 'Silakan tentukan kamar santri terlebih dahulu.');
-      return;
-    }
-    setSavingAction(true);
-
-    const tglMasuk = tglMasukAktual || todayIso;
-    const assignedNis = generateNextNis(tglMasuk, santriList);
+  // Helper aktivasi tunggal & massal ke tabel santri
+  const activateSinglePsbRecord = async (params: {
+    rec: PsbPendaftaranRecord;
+    kamar: string;
+    tglMasuk: string;
+    workingSantri: Array<{ id: string; nis?: string | null }>;
+  }): Promise<{ ok: boolean; errorMsg?: string; updatedRecord?: PsbPendaftaranRecord; newSantriEntry?: { id: string; nis: string } }> => {
+    const { rec, kamar, tglMasuk, workingSantri } = params;
+    const assignedNis = generateNextNisForYear(tglMasuk, workingSantri, 1);
     const isVipRoom =
-      selected.paket === 'vip' || selectedKamar.toUpperCase().includes('VIP');
+      rec.paket === 'vip' || kamar.toUpperCase().includes('VIP');
     const tarifSyahriyah = isVipRoom
       ? Number(skema.syahriyah_vip || 500000)
       : Number(skema.syahriyah_reguler || 450000);
@@ -473,27 +488,27 @@ export default function PendaftaranInternalPage() {
         {
           nis: assignedNis,
           tgl_masuk: tglMasuk,
-          nama_lengkap: selected.nama_lengkap,
-          kamar: selectedKamar,
+          nama_lengkap: rec.nama_lengkap,
+          kamar,
           tarif_syahriyah: tarifSyahriyah,
-          paket_pendaftaran: selected.paket,
-          nominal_pendaftaran: selected.total_biaya_akhir,
-          catatan_keringanan: selected.catatan_keringanan || '',
+          paket_pendaftaran: rec.paket,
+          nominal_pendaftaran: rec.total_biaya_akhir,
+          catatan_keringanan: rec.catatan_keringanan || '',
           status: 'aktif',
-          jk: selected.jk,
-          tempat_lahir: selected.tempat_lahir || null,
-          tgl_lahir: selected.tgl_lahir || null,
-          nama_ayah: selected.nama_ayah || selected.nama_wali,
-          nama_ibu: selected.nama_ibu || null,
-          no_wa_ayah: selected.no_wa_wali,
-          nama_wali: selected.nama_wali,
-          no_wa_wali: selected.no_wa_wali,
-          alamat_jalan: selected.alamat_jalan || null,
-          desa: selected.desa || null,
-          kecamatan: selected.kecamatan || null,
-          kabupaten: selected.kabupaten || null,
-          provinsi: selected.provinsi || null,
-          kode_pos: selected.kode_pos || null,
+          jk: rec.jk,
+          tempat_lahir: rec.tempat_lahir || null,
+          tgl_lahir: rec.tgl_lahir || null,
+          nama_ayah: rec.nama_ayah || rec.nama_wali,
+          nama_ibu: rec.nama_ibu || null,
+          no_wa_ayah: rec.no_wa_wali,
+          nama_wali: rec.nama_wali,
+          no_wa_wali: rec.no_wa_wali,
+          alamat_jalan: rec.alamat_jalan || null,
+          desa: rec.desa || null,
+          kecamatan: rec.kecamatan || null,
+          kabupaten: rec.kabupaten || null,
+          provinsi: rec.provinsi || null,
+          kode_pos: rec.kode_pos || null,
           unit_asrama: 'Induk Putra',
         },
       ])
@@ -501,51 +516,63 @@ export default function PendaftaranInternalPage() {
       .single();
 
     if (santriErr || !newSantri) {
-      setSavingAction(false);
-      showToast('error', 'Gagal menerbitkan data santri: ' + (santriErr?.message || 'Error DB'));
-      return;
+      return { ok: false, errorMsg: santriErr?.message || 'Error DB saat menerbitkan santri.' };
     }
 
     const santriId = String((newSantri as { id: string }).id);
-    const kuitansiRef = selected.no_kuitansi_lunas || selected.no_kuitansi_dp || `KWT-PSB-${assignedNis}`;
+    const kuitansiRef = rec.no_kuitansi_lunas || rec.no_kuitansi_dp || `KWT-PSB-${assignedNis}`;
 
-    // Tautkan transaksi keuangan DP/lunas sebelumnya ke santri_id
-    if (selected.no_kuitansi_dp) {
+    if (rec.no_kuitansi_dp) {
       await supabase
         .from('keuangan_transaksi')
         .update({ santri_id: santriId })
-        .eq('no_kuitansi', selected.no_kuitansi_dp);
+        .eq('no_kuitansi', rec.no_kuitansi_dp);
     }
-    if (selected.no_kuitansi_lunas) {
+    if (rec.no_kuitansi_lunas) {
       await supabase
         .from('keuangan_transaksi')
         .update({ santri_id: santriId })
-        .eq('no_kuitansi', selected.no_kuitansi_lunas);
+        .eq('no_kuitansi', rec.no_kuitansi_lunas);
     }
 
-    // Catat rincian Syahriyah bulan pertama pada matriks pembayaran santri
-    const periodeBulan = tglMasuk.slice(0, 7);
-    await supabase.from('pembayaran_santri_detail').insert([
-      {
-        santri_id: santriId,
-        tahun_ajaran: getTahunAjaranForDate(tglMasuk),
-        item_kode: 'syahriyah',
-        periode_bulan: periodeBulan,
-        label_item: `Syahriyah Bulan Pertama (${periodeBulan})`,
-        dompet: 'operasional',
-        nominal: tarifSyahriyah,
-        is_migrasi: false,
-        no_kuitansi: kuitansiRef,
-        metode_pembayaran: 'transfer',
-        tgl_bayar: todayIso,
-        petugas_nama: petugasNama,
-      },
-    ]);
+    // Catat rincian Syahriyah bulan pertama pada matriks hanya bila pembayaran total sudah menutup porsi Syahriyah Bulan 1
+    const billing = calculatePsbBilling({
+      paket: rec.paket,
+      jumlahPendaftarTerhitung: quotaUsed,
+      skema,
+      forceFreeUangPangkal: rec.dapat_promo_pangkal,
+      nominalKeringanan: rec.nominal_keringanan,
+      dpTerbayar: rec.dp_terbayar,
+      pelunasanTerbayar: rec.pelunasan_terbayar,
+    });
+    const totalPaid = Number(rec.dp_terbayar || 0) + Number(rec.pelunasan_terbayar || 0);
+    const thresholdSyahriyahLunas =
+      billing.rincian.nominalDompetPendaftaran + billing.rincian.nominalSyahriyahBulanPertama;
+
+    if (totalPaid >= thresholdSyahriyahLunas && billing.rincian.nominalSyahriyahBulanPertama > 0) {
+      const periodeBulan = tglMasuk.slice(0, 7);
+      await supabase.from('pembayaran_santri_detail').insert([
+        {
+          santri_id: santriId,
+          tahun_ajaran: getTahunAjaranForDate(tglMasuk),
+          item_kode: 'syahriyah',
+          periode_bulan: periodeBulan,
+          label_item: `Syahriyah Bulan Pertama (${periodeBulan})`,
+          dompet: 'operasional',
+          nominal: tarifSyahriyah,
+          is_migrasi: false,
+          no_kuitansi: kuitansiRef,
+          metode_pembayaran: rec.metode_dp === 'tunai' ? 'tunai' : 'transfer',
+          tgl_bayar: todayIso,
+          petugas_nama: petugasNama,
+        },
+      ]);
+    }
 
     const updated: PsbPendaftaranRecord = {
-      ...selected,
+      ...rec,
       status: 'diterima_aktif',
-      kamar_rencana: selectedKamar,
+      kamar_rencana: kamar,
       rencana_tgl_masuk: tglMasuk,
       santri_id: santriId,
       nis_terbit: assignedNis,
@@ -553,34 +580,129 @@ export default function PendaftaranInternalPage() {
     };
 
     const { record } = await savePsbRecord(updated);
-    setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
-    setSantriList((prev) => [...prev, { id: santriId, nis: assignedNis }]);
-    setSelected(record);
+    return {
+      ok: true,
+      updatedRecord: record,
+      newSantriEntry: { id: santriId, nis: assignedNis },
+    };
+  };
+
+  // TAHAP 3: Aktifkan Jadi Santri (Setelah DP Verified — tidak harus lunas dulu)
+  const handleResmikanSantri = async () => {
+    if (!canEdit || !selected) return;
+    const roomFinal = selectedKamar.trim() || 'Menunggu Penempatan';
+    const defaultTahunPsb = Number(selected.tahun_psb || skema.tahun_psb || 2027);
+    const tglMasuk = tglMasukAktual || `${defaultTahunPsb}-07-01`;
+
+    setSavingAction(true);
+    const res = await activateSinglePsbRecord({
+      rec: selected,
+      kamar: roomFinal,
+      tglMasuk,
+      workingSantri: santriList,
+    });
     setSavingAction(false);
+
+    if (!res.ok || !res.updatedRecord || !res.newSantriEntry) {
+      showToast('error', 'Gagal menerbitkan data santri: ' + (res.errorMsg || 'Error DB'));
+      return;
+    }
+
+    const record = res.updatedRecord;
+    const newEntry = res.newSantriEntry;
+    setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
+    setSantriList((prev) => [...prev, newEntry]);
+    setSelectedIds((prev) => prev.filter((id) => id !== record.id));
+    setSelected(record);
     showToast(
       'success',
-      `${record.nama_lengkap} resmi menjadi Santri Aktif (NIS ${assignedNis}, Kamar ${selectedKamar})!`
+      `${record.nama_lengkap} resmi menjadi Santri Aktif (NIS ${record.nis_terbit} · Kamar: ${roomFinal})!`
     );
   };
 
-  const handleTolak = async () => {
-    if (!selected) return;
+  // Centang Massal -> Aktifkan Massal (Menunggu Penempatan + NIS 27XXXX berurutan)
+  const handleBulkAktifkanMassal = async () => {
+    if (!canEdit || selectedEligibleRecords.length === 0) return;
+    setBulkActivating(true);
+    const workingSantri = [...santriList];
+    const updatedMap = new Map<string, PsbPendaftaranRecord>();
+    const newlyCreatedSantri: Array<{ id: string; nis: string }> = [];
+    let successCount = 0;
+    let firstError = '';
+
+    for (const rec of selectedEligibleRecords) {
+      const tahunPsb = Number(rec.tahun_psb || skema.tahun_psb || 2027);
+      const tglMasuk = `${tahunPsb}-07-01`;
+      const res = await activateSinglePsbRecord({
+        rec,
+        kamar: rec.kamar_rencana || 'Menunggu Penempatan',
+        tglMasuk,
+        workingSantri,
+      });
+      if (res.ok && res.updatedRecord && res.newSantriEntry) {
+        workingSantri.push(res.newSantriEntry);
+        newlyCreatedSantri.push(res.newSantriEntry);
+        updatedMap.set(res.updatedRecord.id, res.updatedRecord);
+        successCount += 1;
+      } else if (!firstError) {
+        firstError = res.errorMsg || 'Sebagian data gagal diaktifkan.';
+      }
+    }
+
+    if (updatedMap.size > 0) {
+      setRecords((prev) => prev.map((r) => updatedMap.get(r.id) || r));
+      setSantriList((prev) => [...prev, ...newlyCreatedSantri]);
+    }
+    setSelectedIds([]);
+    setBulkActivating(false);
+
+    if (successCount > 0) {
+      showToast(
+        'success',
+        `${successCount} santri berhasil diaktifkan massal (Kamar: Menunggu Penempatan). Atur kamar & lengkapi EMIS di Data Santri.`
+      );
+    } else {
+      showToast('error', `Gagal mengaktifkan massal: ${firstError}`);
+    }
+  };
+
+  const toggleSelectId = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAllEligible = () => {
+    const eligibleIds = eligibleBulkRecords.map((r) => r.id);
+    if (eligibleIds.length === 0) return;
+    const allSelected = eligibleIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !eligibleIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...eligibleIds])));
+    }
+  };
+
+  const handleTolak = async (alasanOverride?: string) => {
+    if (!canEdit || !selected) return;
     setSavingAction(true);
+    const reasonText =
+      (alasanOverride || editCatatanPengurus).trim() ||
+      'Bukti transfer tidak valid / belum ditemukan di mutasi rekening.';
     const updated: PsbPendaftaranRecord = {
       ...selected,
       status: 'ditolak',
-      catatan_pengurus:
-        editCatatanPengurus.trim() || 'Bukti transfer / data perlu diperiksa ulang bersama Admin.',
+      catatan_pengurus: reasonText,
       updated_at: new Date().toISOString(),
     };
     const { record } = await savePsbRecord(updated);
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
+    setEditCatatanPengurus(reasonText);
     setSavingAction(false);
-    showToast('success', 'Status antrean diubah menjadi Ditolak / Perlu Perbaikan.');
+    showToast('success', 'Pendaftaran ditolak. Alasan penolakan tampil ke wali di halaman /cek-daftar.');
   };
 
   const handleDeleteRecord = async (id: string) => {
+    if (!canEdit) return;
     await deletePsbRecord(id);
     setRecords((prev) => prev.filter((r) => r.id !== id));
     setConfirmDeleteId(null);
@@ -612,13 +734,13 @@ export default function PendaftaranInternalPage() {
         <div>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
             <UserPlus className="w-3.5 h-3.5" />
-            Penerimaan Santri Baru (PSB) 1 Pintu
+            Penerimaan Santri Baru (PSB) · TA {skema.tahun_ajaran_psb || '2027/2028'}
           </span>
           <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">
             Antrean Pendaftaran Online &amp; Verifikasi DP
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Verifikasi bukti transfer DP, atur keringanan bila ada, tentukan kamar, lalu resmikan menjadi Santri Aktif.
+            Verifikasi bukti transfer DP (tolak bila bukti tidak valid), lalu centang massal pendaftar terverifikasi untuk aktif menjadi Santri.
           </p>
         </div>
 
@@ -659,6 +781,8 @@ export default function PendaftaranInternalPage() {
           </button>
         </div>
       </header>
+
+      <TransparencyBanner moduleLabel="Pendaftaran Santri Baru (PSB)" isReadOnly={!canEdit} />
 
       {/* INFO JIKA TABEL psb_pendaftaran BELUM DIBUAT DI SUPABASE */}
       {tableMissing && (
@@ -757,6 +881,53 @@ export default function PendaftaranInternalPage() {
         </div>
       </div>
 
+      {/* BULK ACTION BAR CENTANG MASSAL */}
+      {canEdit && (eligibleBulkRecords.length > 0 || selectedEligibleRecords.length > 0) && (
+        <div className="bg-emerald-950 text-white border border-emerald-800 rounded-2xl p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={toggleSelectAllEligible}
+              className="min-h-[36px] px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer whitespace-nowrap"
+            >
+              {eligibleBulkRecords.length > 0 &&
+              eligibleBulkRecords.every((r) => selectedIds.includes(r.id))
+                ? 'Batalkan Semua Centang'
+                : `Pilih Semua DP Terverifikasi (${eligibleBulkRecords.length})`}
+            </button>
+            <span className="text-emerald-100">
+              Terpilih: <strong className="font-mono">{selectedEligibleRecords.length}</strong> calon santri terverifikasi DP (otomatis masuk kamar{' '}
+              <strong>Menunggu Penempatan</strong> &amp; NIS {String(skema.tahun_psb || 2027).slice(-2)}XXXX)
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {selectedEligibleRecords.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  className="min-h-[36px] px-3 py-1.5 bg-emerald-900 hover:bg-emerald-800 text-emerald-200 font-semibold rounded-xl cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkActivating}
+                  onClick={handleBulkAktifkanMassal}
+                  className="min-h-[38px] px-4 py-1.5 bg-white hover:bg-emerald-50 text-emerald-950 font-extrabold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
+                >
+                  <UserCheck className="w-4 h-4 text-emerald-700" />
+                  {bulkActivating
+                    ? 'Mengaktifkan...'
+                    : `Aktifkan Massal (${selectedEligibleRecords.length}) Jadi Santri`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* DAFTAR ANTREAN (MOBILE CARDS + DESKTOP TABLE) */}
       {filteredRecords.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-2">
@@ -774,22 +945,38 @@ export default function PendaftaranInternalPage() {
               const meta = PSB_STATUS_META[rec.status];
               const paid = Number(rec.dp_terbayar || 0) + Number(rec.pelunasan_terbayar || 0);
               const sisa = Math.max(0, Number(rec.total_biaya_akhir || 0) - paid);
+              const canBulkCheck =
+                rec.status === 'dp_terverifikasi' || rec.status === 'lunas_menunggu_kedatangan';
+              const checked = selectedIds.includes(rec.id);
               return (
                 <div
                   key={rec.id}
-                  className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs"
+                  className={`bg-white border rounded-2xl p-4 space-y-3 shadow-xs ${
+                    checked ? 'border-emerald-600 ring-1 ring-emerald-600' : 'border-slate-200'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="font-mono text-[11px] font-bold text-emerald-700">
-                        {rec.no_registrasi}
-                      </span>
-                      <h3 className="text-sm font-extrabold text-slate-900">{rec.nama_lengkap}</h3>
-                      <p className="text-[11px] text-slate-500">
-                        Wali: {rec.nama_wali} · {rec.no_wa_wali}
-                      </p>
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      {canEdit && canBulkCheck && (
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSelectId(rec.id)}
+                          aria-label={`Pilih ${rec.nama_lengkap} untuk aktivasi massal`}
+                          className="mt-1 w-4 h-4 accent-emerald-700 rounded cursor-pointer shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <span className="font-mono text-[11px] font-bold text-emerald-700">
+                          {rec.no_registrasi}
+                        </span>
+                        <h3 className="text-sm font-extrabold text-slate-900">{rec.nama_lengkap}</h3>
+                        <p className="text-[11px] text-slate-500">
+                          Wali: {rec.nama_wali} · {rec.no_wa_wali}
+                        </p>
+                      </div>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${meta.badgeClass}`}>
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border shrink-0 ${meta.badgeClass}`}>
                       {meta.shortLabel}
                     </span>
                   </div>
@@ -801,11 +988,11 @@ export default function PendaftaranInternalPage() {
                     </div>
                     <div>
                       <span className="text-slate-500 block">DP Diajukan</span>
-                      <span className="font-mono font-bold">{formatRupiah(rec.dp_nominal)}</span>
+                      <span className="font-mono font-bold tabular-nums">{formatRupiah(rec.dp_nominal)}</span>
                     </div>
                     <div>
                       <span className="text-slate-500 block">Sisa Tagihan</span>
-                      <span className="font-mono font-bold text-amber-800">{formatRupiah(sisa)}</span>
+                      <span className="font-mono font-bold text-amber-800 tabular-nums">{formatRupiah(sisa)}</span>
                     </div>
                   </div>
 
@@ -828,6 +1015,21 @@ export default function PendaftaranInternalPage() {
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                   <tr>
+                    <th className="pl-4 pr-2 py-3 w-10">
+                      {canEdit && (
+                        <input
+                          type="checkbox"
+                          disabled={eligibleBulkRecords.length === 0}
+                          checked={
+                            eligibleBulkRecords.length > 0 &&
+                            eligibleBulkRecords.every((r) => selectedIds.includes(r.id))
+                          }
+                          onChange={toggleSelectAllEligible}
+                          aria-label="Pilih semua calon santri terverifikasi DP"
+                          className="w-4 h-4 accent-emerald-700 rounded cursor-pointer disabled:opacity-40"
+                        />
+                      )}
+                    </th>
                     <th className="px-4 py-3 font-bold">No. Reg &amp; Calon Santri</th>
                     <th className="px-4 py-3 font-bold">Wali &amp; Asal</th>
                     <th className="px-4 py-3 font-bold">Paket</th>
@@ -843,8 +1045,24 @@ export default function PendaftaranInternalPage() {
                     const meta = PSB_STATUS_META[rec.status];
                     const paid = Number(rec.dp_terbayar || 0) + Number(rec.pelunasan_terbayar || 0);
                     const sisa = Math.max(0, Number(rec.total_biaya_akhir || 0) - paid);
+                    const canBulkCheck =
+                      rec.status === 'dp_terverifikasi' || rec.status === 'lunas_menunggu_kedatangan';
+                    const checked = selectedIds.includes(rec.id);
                     return (
-                      <tr key={rec.id} className="hover:bg-slate-50/70">
+                      <tr key={rec.id} className={checked ? 'bg-emerald-50/60' : 'hover:bg-slate-50/70'}>
+                        <td className="pl-4 pr-2 py-3">
+                          {canEdit && canBulkCheck ? (
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelectId(rec.id)}
+                              aria-label={`Pilih ${rec.nama_lengkap}`}
+                              className="w-4 h-4 accent-emerald-700 rounded cursor-pointer"
+                            />
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <span className="font-mono text-[11px] font-bold text-emerald-700 block">
                             {rec.no_registrasi}
@@ -852,7 +1070,7 @@ export default function PendaftaranInternalPage() {
                           <span className="font-bold text-slate-900">{rec.nama_lengkap}</span>
                           {rec.nis_terbit && (
                             <span className="text-[11px] text-slate-500 block">
-                              NIS: {rec.nis_terbit} · Kamar {rec.kamar_rencana}
+                              NIS: {rec.nis_terbit} · Kamar {rec.kamar_rencana || 'Menunggu Penempatan'}
                             </span>
                           )}
                         </td>
@@ -881,13 +1099,13 @@ export default function PendaftaranInternalPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold">
+                        <td className="px-4 py-3 text-right font-mono font-bold tabular-nums">
                           {formatRupiah(rec.total_biaya_akhir)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-emerald-700">
+                        <td className="px-4 py-3 text-right font-mono font-bold text-emerald-700 tabular-nums">
                           {formatRupiah(paid)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-amber-800">
+                        <td className="px-4 py-3 text-right font-mono font-bold text-amber-800 tabular-nums">
                           {formatRupiah(sisa)}
                         </td>
                         <td className="px-4 py-3">
@@ -964,8 +1182,8 @@ export default function PendaftaranInternalPage() {
                       .join(', ')}
                   </p>
                   <p>
-                    <span className="text-slate-500">Rencana Masuk:</span>{' '}
-                    <strong>{selected.rencana_tgl_masuk || '-'}</strong>
+                    <span className="text-slate-500">Tanggal Pendaftaran:</span>{' '}
+                    <strong>{(selected.created_at || todayIso).slice(0, 10)}</strong>
                   </p>
                   {selected.catatan_wali && (
                     <p className="text-amber-800 bg-amber-50 p-2 rounded-lg mt-1">
@@ -1047,7 +1265,7 @@ export default function PendaftaranInternalPage() {
               </div>
 
               {/* Pengaturan Keringanan & Catatan Pengurus */}
-              {selected.status !== 'diterima_aktif' && (
+              {canEdit && selected.status !== 'diterima_aktif' && (
                 <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50/70">
                   <p className="font-bold text-slate-900">
                     Keringanan Biaya &amp; Catatan Pengurus (Khusus Sisi Pengurus)
@@ -1106,7 +1324,7 @@ export default function PendaftaranInternalPage() {
               )}
 
               {/* AKSI TAHAP 2: VERIFIKASI DP */}
-              {selected.status === 'menunggu_verifikasi' && (
+              {canEdit && selected.status === 'menunggu_verifikasi' && (
                 <div className="border-2 border-emerald-200 bg-emerald-50/50 rounded-xl p-4 space-y-3">
                   <p className="font-bold text-emerald-950 flex items-center gap-1.5">
                     <Wallet className="w-4 h-4 text-emerald-700" />
@@ -1136,7 +1354,7 @@ export default function PendaftaranInternalPage() {
                         }
                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-semibold"
                       >
-                        <option value="transfer">Transfer Bank (Syahriyah Transfer)</option>
+                        <option value="transfer">Transfer Bank (Pemasukan Transfer)</option>
                         <option value="tunai">Tunai di Kantor (Dompet Pendaftaran)</option>
                       </select>
                     </div>
@@ -1151,18 +1369,36 @@ export default function PendaftaranInternalPage() {
                   </div>
                   <p className="text-[11px] text-slate-600">
                     {dpVerifMetode === 'transfer'
-                      ? 'DP Transfer tercatat di laporan Syahriyah Transfer (tidak menambah saldo kas tunai Dompet).'
+                      ? 'DP Transfer tercatat di laporan Pemasukan Transfer (tidak menambah saldo kas tunai Dompet).'
                       : 'DP Tunai langsung masuk ke saldo tunai Dompet Pendaftaran.'}
                   </p>
+                  <div className="pt-2 border-t border-emerald-200/70 space-y-1.5">
+                    <p className="text-[11px] font-bold text-rose-800">
+                      Jika bukti transfer palsu / tidak ditemukan di mutasi rekening:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {REJECT_PRESET_REASONS.map((reason) => (
+                        <button
+                          key={reason}
+                          type="button"
+                          disabled={savingAction}
+                          onClick={() => void handleTolak(reason)}
+                          className="px-2.5 py-1 rounded-lg bg-white hover:bg-rose-50 border border-rose-200 text-[11px] font-semibold text-rose-800 cursor-pointer"
+                        >
+                          Tolak: {reason}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* AKSI TAHAP 3: CATAT PELUNASAN SAAT SOWAN */}
-              {selected.status === 'dp_terverifikasi' && (
+              {/* AKSI OPSIONAL: CATAT PELUNASAN BILA WALI SUDAH MEMBAYAR SISA */}
+              {canEdit && selected.status === 'dp_terverifikasi' && (
                 <div className="border border-sky-200 bg-sky-50/60 rounded-xl p-4 space-y-3">
                   <p className="font-bold text-sky-950 flex items-center gap-1.5">
                     <Wallet className="w-4 h-4 text-sky-700" />
-                    Tahap 3: Catat Pelunasan Saat Sowan / Kedatangan
+                    Pelunasan Sisa Biaya (Opsional — bisa menyusul di Keuangan setelah jadi Santri)
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                     <div>
@@ -1187,7 +1423,7 @@ export default function PendaftaranInternalPage() {
                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-semibold"
                       >
                         <option value="tunai">Tunai di Kantor (Dompet Tunai)</option>
-                        <option value="transfer">Transfer Bank (Syahriyah Transfer)</option>
+                        <option value="transfer">Transfer Bank (Pemasukan Transfer)</option>
                       </select>
                     </div>
                     <button
@@ -1203,7 +1439,7 @@ export default function PendaftaranInternalPage() {
                   {pelunasanMetode === 'transfer' && (
                     <div className="bg-white border border-sky-200 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                       <span className="text-sky-900 font-semibold">
-                        Masuk ke laporan Syahriyah Transfer • Unggah Bukti TF (Opsional):
+                        Masuk ke laporan Pemasukan Transfer • Unggah Bukti TF (Opsional):
                       </span>
                       {pelunasanBuktiPreview ? (
                         <div className="flex items-center gap-2">
@@ -1249,24 +1485,28 @@ export default function PendaftaranInternalPage() {
                 </div>
               )}
 
-              {/* AKSI TAHAP 4: TENTUKAN KAMAR & RESMIKAN SANTRI AKTIF */}
-              {(selected.status === 'dp_terverifikasi' ||
-                selected.status === 'lunas_menunggu_kedatangan') && (
+              {/* AKSI TAHAP 3: AKTIFKAN JADI SANTRI (SETELAH DP TERVERIFIKASI) */}
+              {canEdit &&
+                (selected.status === 'dp_terverifikasi' ||
+                  selected.status === 'lunas_menunggu_kedatangan') && (
                 <div className="border-2 border-indigo-200 bg-indigo-50/60 rounded-xl p-4 space-y-3">
                   <p className="font-bold text-indigo-950 flex items-center gap-1.5">
                     <BedDouble className="w-4 h-4 text-indigo-700" />
-                    Tahap 4: Penentuan Kamar &amp; Peresmian Menjadi Santri Aktif
+                    Tahap 3: Aktifkan Menjadi Santri (Penempatan Kamar diatur di Data Santri)
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Pilih Kamar (Oleh Pengurus) *
+                        Status Kamar Awal
                       </label>
                       <select
                         value={selectedKamar}
                         onChange={(e) => setSelectedKamar(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-semibold"
                       >
+                        <option value="Menunggu Penempatan">
+                          Belum Ditentukan (Menunggu Penempatan)
+                        </option>
                         {daftarKamar.map((km) => (
                           <option key={km} value={km}>
                             {km}
@@ -1276,7 +1516,7 @@ export default function PendaftaranInternalPage() {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Tanggal Masuk Resmi *
+                        Tanggal Masuk Resmi (NIS {tglMasukAktual.slice(2, 4) || '27'}XXXX) *
                       </label>
                       <input
                         type="date"
@@ -1292,7 +1532,7 @@ export default function PendaftaranInternalPage() {
                       className="min-h-[40px] px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <UserCheck className="w-4 h-4" />
-                      Resmikan Jadi Santri
+                      Aktifkan Jadi Santri
                     </button>
                   </div>
                 </div>
@@ -1301,35 +1541,36 @@ export default function PendaftaranInternalPage() {
               {/* Footer Modal: Tolak / Hapus */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
                 <div className="flex items-center gap-2">
-                  {selected.status === 'menunggu_verifikasi' && (
+                  {canEdit && selected.status === 'menunggu_verifikasi' && (
                     <button
                       type="button"
                       disabled={savingAction}
-                      onClick={handleTolak}
+                      onClick={() => void handleTolak()}
                       className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                     >
                       <XCircle className="w-3.5 h-3.5" />
-                      Tolak / Minta Perbaikan
+                      Tolak Bukti TF
                     </button>
                   )}
-                  {confirmDeleteId === selected.id ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteRecord(selected.id)}
-                      className="px-3 py-2 bg-rose-700 text-white font-bold rounded-lg cursor-pointer"
-                    >
-                      Konfirmasi Hapus Antrean
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteId(selected.id)}
-                      className="px-3 py-2 text-slate-500 hover:text-rose-700 font-semibold inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Hapus
-                    </button>
-                  )}
+                  {canEdit &&
+                    (confirmDeleteId === selected.id ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteRecord(selected.id)}
+                        className="px-3 py-2 bg-rose-700 text-white font-bold rounded-lg cursor-pointer"
+                      >
+                        Konfirmasi Hapus Antrean
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(selected.id)}
+                        className="px-3 py-2 text-slate-500 hover:text-rose-700 font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Hapus
+                      </button>
+                    ))}
                 </div>
 
                 <button

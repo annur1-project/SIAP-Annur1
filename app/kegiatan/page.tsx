@@ -33,6 +33,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import KegiatanAgendaModal from '@/components/KegiatanAgendaModal';
 import KegiatanFormatModal from '@/components/KegiatanFormatModal';
 import {
@@ -111,6 +112,9 @@ const SLOT_STATUS_META: Record<StatusSlotPengisi, { label: string; cls: string }
 };
 
 export default function KegiatanPage() {
+  const { canEditModule } = useAuth();
+  const canEdit = canEditModule('kegiatan');
+
   const [mainTab, setMainTab] = useState<MainTab>('agenda');
   const [detailTab, setDetailTab] = useState<DetailTab>('pengisi');
   const [todayStr, setTodayStr] = useState<string>('');
@@ -354,6 +358,7 @@ export default function KegiatanPage() {
 
   // Save Agenda (create or edit metadata)
   const handleSaveAgenda = async (payload: KegiatanAgendaItem, isEdit: boolean) => {
+    if (!canEdit) return;
     const saved = await saveKegiatanAgendaRow(payload, isEdit);
     setAgendas((prev) =>
       isEdit ? prev.map((a) => (a.id === saved.id ? saved : a)) : [saved, ...prev]
@@ -369,7 +374,7 @@ export default function KegiatanPage() {
 
   // Save Detail Edits (Pengisi, Rundown, Panitia, Notulensi)
   const handleSaveDetailDraft = async (override?: Partial<KegiatanAgendaItem>) => {
-    if (!selectedAgenda) return;
+    if (!selectedAgenda || !canEdit) return;
     setSavingDetail(true);
     try {
       const reindexedPengisi = draftPengisi.map((s, idx) => ({
@@ -397,12 +402,13 @@ export default function KegiatanPage() {
   };
 
   const handleQuickStatusChange = async (newStatus: StatusKegiatan) => {
-    if (!selectedAgenda) return;
+    if (!selectedAgenda || !canEdit) return;
     await handleSaveDetailDraft({ status: newStatus });
   };
 
   // Pengisi Slot Actions
   const handleAddPengisiSlot = () => {
+    if (!canEdit) return;
     setDraftPengisi((prev) => [
       ...prev,
       {
@@ -418,6 +424,7 @@ export default function KegiatanPage() {
   };
 
   const handleUpdatePengisi = (id: string, patch: Partial<KegiatanPengisiSlot>) => {
+    if (!canEdit) return;
     setDraftPengisi((prev) =>
       prev.map((s) => {
         if (s.id !== id) return s;
@@ -437,6 +444,7 @@ export default function KegiatanPage() {
   };
 
   const handleCycleSlotStatus = (id: string) => {
+    if (!canEdit) return;
     setDraftPengisi((prev) =>
       prev.map((s) => {
         if (s.id !== id) return s;
@@ -449,6 +457,7 @@ export default function KegiatanPage() {
   };
 
   const handleMovePengisi = (index: number, dir: -1 | 1) => {
+    if (!canEdit) return;
     const target = index + dir;
     if (target < 0 || target >= draftPengisi.length) return;
     const copy = [...draftPengisi];
@@ -460,6 +469,7 @@ export default function KegiatanPage() {
   };
 
   const handleDeletePengisi = (id: string) => {
+    if (!canEdit) return;
     setDraftPengisi((prev) =>
       prev.filter((s) => s.id !== id).map((s, idx) => ({ ...s, urutan: idx + 1 }))
     );
@@ -467,6 +477,7 @@ export default function KegiatanPage() {
   };
 
   const handleMarkAllPengisiSiap = () => {
+    if (!canEdit) return;
     setDraftPengisi((prev) =>
       prev.map((s) =>
         s.petugas_nama.trim().length > 0 && s.status === 'belum'
@@ -479,6 +490,7 @@ export default function KegiatanPage() {
 
   // Rundown Actions
   const handleAddRundown = () => {
+    if (!canEdit) return;
     const last = draftRundown[draftRundown.length - 1];
     setDraftRundown((prev) => [
       ...prev,
@@ -496,7 +508,7 @@ export default function KegiatanPage() {
   };
 
   const handleGenerateRundownFromPengisi = () => {
-    if (!selectedAgenda || draftPengisi.length === 0) return;
+    if (!canEdit || !selectedAgenda || draftPengisi.length === 0) return;
     const baseStart = selectedAgenda.jam_mulai || '20:00';
     const generated: KegiatanRundownItem[] = draftPengisi.map((s) => ({
       id: createKegiatanId('rnd'),
@@ -513,11 +525,13 @@ export default function KegiatanPage() {
   };
 
   const handleUpdateRundown = (id: string, patch: Partial<KegiatanRundownItem>) => {
+    if (!canEdit) return;
     setDraftRundown((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     setDraftDirty(true);
   };
 
   const handleMoveRundown = (index: number, dir: -1 | 1) => {
+    if (!canEdit) return;
     const target = index + dir;
     if (target < 0 || target >= draftRundown.length) return;
     const copy = [...draftRundown];
@@ -529,12 +543,14 @@ export default function KegiatanPage() {
   };
 
   const handleDeleteRundown = (id: string) => {
+    if (!canEdit) return;
     setDraftRundown((prev) => prev.filter((r) => r.id !== id));
     setDraftDirty(true);
   };
 
   // Panitia Actions (Event Besar)
   const handleAddPanitia = () => {
+    if (!canEdit) return;
     setDraftPanitia((prev) => [
       ...prev,
       {
@@ -549,6 +565,7 @@ export default function KegiatanPage() {
   };
 
   const handleUpdatePanitia = (id: string, patch: Partial<KegiatanPanitiaItem>) => {
+    if (!canEdit) return;
     setDraftPanitia((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
@@ -566,13 +583,14 @@ export default function KegiatanPage() {
   };
 
   const handleDeletePanitia = (id: string) => {
+    if (!canEdit) return;
     setDraftPanitia((prev) => prev.filter((p) => p.id !== id));
     setDraftDirty(true);
   };
 
   // Documentation Photo Upload
   const handleUploadFotoDokumentasi = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedAgenda) return;
+    if (!canEdit || !selectedAgenda) return;
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (files.length === 0) return;
@@ -607,7 +625,7 @@ export default function KegiatanPage() {
   };
 
   const handleDeleteFotoDokumentasi = async (urlToRemove: string) => {
-    if (!selectedAgenda) return;
+    if (!canEdit || !selectedAgenda) return;
     await removeKegiatanStoragePhotos([urlToRemove]);
     const nextUrls = (selectedAgenda.dokumentasi_urls || []).filter((u) => u !== urlToRemove);
     await handleSaveDetailDraft({ dokumentasi_urls: nextUrls });
@@ -615,7 +633,7 @@ export default function KegiatanPage() {
 
   // Duplicate Weekly Action
   const handleConfirmDuplicate = async () => {
-    if (!duplicateModal) return;
+    if (!canEdit || !duplicateModal) return;
     const { item, targetDate, clearPengisi } = duplicateModal;
     const nowIso = new Date().toISOString();
     const clonedPengisi: KegiatanPengisiSlot[] = item.pengisi_list.map((s) => ({
@@ -665,6 +683,7 @@ export default function KegiatanPage() {
 
   // Format Templates Save & Duplicate
   const handleSaveFormat = async (template: KegiatanFormatTemplate, isEdit: boolean) => {
+    if (!canEdit) return;
     const saved = await saveKegiatanFormatRow(template, isEdit);
     setFormats((prev) =>
       isEdit ? prev.map((f) => (f.id === saved.id ? saved : f)) : [saved, ...prev]
@@ -677,6 +696,7 @@ export default function KegiatanPage() {
   };
 
   const handleDuplicateFormat = async (fmt: KegiatanFormatTemplate) => {
+    if (!canEdit) return;
     const copy: KegiatanFormatTemplate = {
       ...fmt,
       id: createKegiatanId('fmt'),
@@ -690,7 +710,7 @@ export default function KegiatanPage() {
 
   // Confirm Delete (Agenda or Format)
   const handleExecuteDelete = async () => {
-    if (!deleteConfirm) return;
+    if (!canEdit || !deleteConfirm) return;
     if (deleteConfirm.kind === 'agenda' && deleteConfirm.itemAgenda) {
       await deleteKegiatanAgendaRow(deleteConfirm.itemAgenda);
       const remaining = agendas.filter((a) => a.id !== deleteConfirm.id);
@@ -862,16 +882,20 @@ export default function KegiatanPage() {
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
               Export Excel
             </button>
-            <button
-              type="button"
-              onClick={() => setAgendaModal({ open: true, editing: null })}
-              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              Jadwalkan Kegiatan
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setAgendaModal({ open: true, editing: null })}
+                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                Jadwalkan Kegiatan
+              </button>
+            )}
           </div>
         </div>
+
+        <TransparencyBanner moduleLabel="Jadwal & Pengisi Kegiatan" isReadOnly={!canEdit} />
 
         {/* 4 SUMMARY KPI CARDS */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -1014,22 +1038,24 @@ export default function KegiatanPage() {
                     Tawasul, Fashl 1–10, Doa) atau buat jadwal Event Hari Besar.
                   </p>
                 </div>
-                <div className="flex flex-wrap justify-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAgendaModal({
-                        open: true,
-                        editing: null,
-                        presetFormatId: 'fmt-burdah-12',
-                      })
-                    }
-                    className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Buat Jadwal Kegiatan Pertama
-                  </button>
-                </div>
+                {canEdit && (
+                  <div className="flex flex-wrap justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAgendaModal({
+                          open: true,
+                          editing: null,
+                          presetFormatId: 'fmt-burdah-12',
+                        })
+                      }
+                      className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Buat Jadwal Kegiatan Pertama
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -1128,50 +1154,52 @@ export default function KegiatanPage() {
                             </div>
                           </div>
 
-                          <div
-                            className="flex items-center gap-1 shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              title="Duplikat ke pekan berikutnya"
-                              onClick={() =>
-                                setDuplicateModal({
-                                  item,
-                                  targetDate: addDaysIso(item.tanggal, 7),
-                                  clearPengisi: true,
-                                })
-                              }
-                              className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-emerald-700"
+                          {canEdit && (
+                            <div
+                              className="flex items-center gap-1 shrink-0"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Edit info kegiatan"
-                              onClick={() =>
-                                setAgendaModal({ open: true, editing: item })
-                              }
-                              className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Hapus kegiatan"
-                              onClick={() =>
-                                setDeleteConfirm({
-                                  kind: 'agenda',
-                                  id: item.id,
-                                  label: item.judul,
-                                  itemAgenda: item,
-                                })
-                              }
-                              className="p-2 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                              <button
+                                type="button"
+                                title="Duplikat ke pekan berikutnya"
+                                onClick={() =>
+                                  setDuplicateModal({
+                                    item,
+                                    targetDate: addDaysIso(item.tanggal, 7),
+                                    clearPengisi: true,
+                                  })
+                                }
+                                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-emerald-700"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Edit info kegiatan"
+                                onClick={() =>
+                                  setAgendaModal({ open: true, editing: item })
+                                }
+                                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Hapus kegiatan"
+                                onClick={() =>
+                                  setDeleteConfirm({
+                                    kind: 'agenda',
+                                    id: item.id,
+                                    label: item.judul,
+                                    itemAgenda: item,
+                                  })
+                                }
+                                className="p-2 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1217,18 +1245,28 @@ export default function KegiatanPage() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <select
-                              value={selectedAgenda.status}
-                              onChange={(e) =>
-                                handleQuickStatusChange(e.target.value as StatusKegiatan)
-                              }
-                              className="min-h-[36px] px-2.5 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-800"
-                            >
-                              <option value="terjadwal">Status: Terjadwal</option>
-                              <option value="berlangsung">Status: Berlangsung</option>
-                              <option value="selesai">Status: Selesai</option>
-                              <option value="ditunda">Status: Ditunda</option>
-                            </select>
+                            {canEdit ? (
+                              <select
+                                value={selectedAgenda.status}
+                                onChange={(e) =>
+                                  handleQuickStatusChange(e.target.value as StatusKegiatan)
+                                }
+                                className="min-h-[36px] px-2.5 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-800"
+                              >
+                                <option value="terjadwal">Status: Terjadwal</option>
+                                <option value="berlangsung">Status: Berlangsung</option>
+                                <option value="selesai">Status: Selesai</option>
+                                <option value="ditunda">Status: Ditunda</option>
+                              </select>
+                            ) : (
+                              <span
+                                className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                                  STATUS_KEGIATAN_META[selectedAgenda.status].badge
+                                }`}
+                              >
+                                Status: {STATUS_KEGIATAN_META[selectedAgenda.status].label}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -1272,16 +1310,18 @@ export default function KegiatanPage() {
                               <Printer className="w-3.5 h-3.5 text-slate-600" />
                               Cetak Jadwal
                             </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setAgendaModal({ open: true, editing: selectedAgenda })
-                              }
-                              className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              Edit Info
-                            </button>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAgendaModal({ open: true, editing: selectedAgenda })
+                                }
+                                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                Edit Info
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1354,25 +1394,29 @@ export default function KegiatanPage() {
                         <div className="p-5 space-y-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-xs text-slate-600">
-                              Isi nama santri atau pengurus pada setiap slot. Klik status untuk menandai kesiapan.
+                              {canEdit
+                                ? 'Isi nama santri atau pengurus pada setiap slot. Klik status untuk menandai kesiapan.'
+                                : 'Daftar pengisi acara pada setiap slot kegiatan (Mode Transparansi).'}
                             </div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={handleMarkAllPengisiSiap}
-                                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
-                              >
-                                Tandai Terisi = Siap
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleAddPengisiSlot}
-                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                Tambah Slot
-                              </button>
-                            </div>
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={handleMarkAllPengisiSiap}
+                                  className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+                                >
+                                  Tandai Terisi = Siap
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleAddPengisiSlot}
+                                  className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Tambah Slot
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {draftPengisi.length === 0 ? (
@@ -1380,14 +1424,16 @@ export default function KegiatanPage() {
                               <p className="text-xs text-slate-600">
                                 Belum ada slot pengisi pada kegiatan ini.
                               </p>
-                              <button
-                                type="button"
-                                onClick={handleAddPengisiSlot}
-                                className="min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                Tambah Slot Pengisi
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={handleAddPengisiSlot}
+                                  className="min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Tambah Slot Pengisi
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden">
@@ -1404,18 +1450,20 @@ export default function KegiatanPage() {
                                       </span>
                                       <input
                                         type="text"
+                                        readOnly={!canEdit}
                                         value={slot.peran}
                                         onChange={(e) =>
                                           handleUpdatePengisi(slot.id, { peran: e.target.value })
                                         }
                                         placeholder="Bagian / Fashl"
-                                        className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                        className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-50"
                                       />
                                     </div>
 
                                     <div className="sm:col-span-4">
                                       <input
                                         type="text"
+                                        readOnly={!canEdit}
                                         list="kegiatan-personel-detail"
                                         value={slot.petugas_nama}
                                         onChange={(e) =>
@@ -1424,53 +1472,59 @@ export default function KegiatanPage() {
                                           })
                                         }
                                         placeholder="Pilih / ketik nama pengisi..."
-                                        className="w-full min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                        className="w-full min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-50"
                                       />
                                     </div>
 
                                     <div className="sm:col-span-4 flex items-center justify-between sm:justify-end gap-1.5">
                                       <input
                                         type="text"
+                                        readOnly={!canEdit}
                                         value={slot.catatan}
                                         onChange={(e) =>
                                           handleUpdatePengisi(slot.id, { catatan: e.target.value })
                                         }
                                         placeholder="Ket."
-                                        className="w-24 sm:flex-1 min-w-0 min-h-[36px] px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                        className="w-24 sm:flex-1 min-w-0 min-h-[36px] px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-50"
                                       />
                                       <button
                                         type="button"
+                                        disabled={!canEdit}
                                         onClick={() => handleCycleSlotStatus(slot.id)}
-                                        className={`min-h-[36px] px-2.5 py-1 rounded-lg border text-[11px] font-bold whitespace-nowrap shrink-0 ${slotMeta.cls}`}
+                                        className={`min-h-[36px] px-2.5 py-1 rounded-lg border text-[11px] font-bold whitespace-nowrap shrink-0 disabled:cursor-default ${slotMeta.cls}`}
                                       >
                                         {slotMeta.label}
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMovePengisi(idx, -1)}
-                                        disabled={idx === 0}
-                                        aria-label="Naikkan"
-                                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
-                                      >
-                                        <ArrowUp className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMovePengisi(idx, 1)}
-                                        disabled={idx === draftPengisi.length - 1}
-                                        aria-label="Turunkan"
-                                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
-                                      >
-                                        <ArrowDown className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeletePengisi(slot.id)}
-                                        aria-label="Hapus slot"
-                                        className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
+                                      {canEdit && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMovePengisi(idx, -1)}
+                                            disabled={idx === 0}
+                                            aria-label="Naikkan"
+                                            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                          >
+                                            <ArrowUp className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMovePengisi(idx, 1)}
+                                            disabled={idx === draftPengisi.length - 1}
+                                            aria-label="Turunkan"
+                                            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                          >
+                                            <ArrowDown className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeletePengisi(slot.id)}
+                                            aria-label="Hapus slot"
+                                            className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 );
@@ -1478,22 +1532,24 @@ export default function KegiatanPage() {
                             </div>
                           )}
 
-                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                            <span className="text-xs text-slate-500">
-                              {draftDirty
-                                ? 'Ada perubahan yang belum disimpan.'
-                                : 'Semua perubahan rincian pengisi sudah tersimpan.'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveDetailDraft()}
-                              disabled={savingDetail}
-                              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
-                            >
-                              <Save className="w-3.5 h-3.5" />
-                              {savingDetail ? 'Menyimpan...' : 'Simpan Rincian Pengisi'}
-                            </button>
-                          </div>
+                          {canEdit && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                              <span className="text-xs text-slate-500">
+                                {draftDirty
+                                  ? 'Ada perubahan yang belum disimpan.'
+                                  : 'Semua perubahan rincian pengisi sudah tersimpan.'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDetailDraft()}
+                                disabled={savingDetail}
+                                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                {savingDetail ? 'Menyimpan...' : 'Simpan Rincian Pengisi'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1504,26 +1560,28 @@ export default function KegiatanPage() {
                             <span className="text-xs text-slate-600">
                               Susunan waktu dan sesi acara dari pembukaan hingga selesai.
                             </span>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {draftPengisi.length > 0 && (
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {draftPengisi.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={handleGenerateRundownFromPengisi}
+                                    className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                    Tarik dari Slot Pengisi
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={handleGenerateRundownFromPengisi}
-                                  className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                                  onClick={handleAddRundown}
+                                  className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
                                 >
-                                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                                  Tarik dari Slot Pengisi
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Tambah Sesi
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={handleAddRundown}
-                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                Tambah Sesi
-                              </button>
-                            </div>
+                              </div>
+                            )}
                           </div>
 
                           {draftRundown.length === 0 ? (
@@ -1531,14 +1589,16 @@ export default function KegiatanPage() {
                               <p className="text-xs text-slate-600">
                                 Belum ada rundown acara tercatat.
                               </p>
-                              <button
-                                type="button"
-                                onClick={handleAddRundown}
-                                className="min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                Tambah Sesi Pertama
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={handleAddRundown}
+                                  className="min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Tambah Sesi Pertama
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <div className="space-y-2.5">
@@ -1553,88 +1613,96 @@ export default function KegiatanPage() {
                                     </span>
                                     <input
                                       type="time"
+                                      readOnly={!canEdit}
                                       value={row.jam_mulai}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { jam_mulai: e.target.value })
                                       }
-                                      className="min-h-[36px] px-2 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg bg-white"
+                                      className="min-h-[36px] px-2 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
                                     <span className="text-xs text-slate-400">s/d</span>
                                     <input
                                       type="time"
+                                      readOnly={!canEdit}
                                       value={row.jam_selesai}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { jam_selesai: e.target.value })
                                       }
-                                      className="min-h-[36px] px-2 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg bg-white"
+                                      className="min-h-[36px] px-2 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
                                     <input
                                       type="text"
+                                      readOnly={!canEdit}
                                       value={row.sesi}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { sesi: e.target.value })
                                       }
                                       placeholder="Nama sesi / agenda"
-                                      className="flex-1 min-w-[160px] min-h-[36px] px-2.5 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white"
+                                      className="flex-1 min-w-[160px] min-h-[36px] px-2.5 py-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMoveRundown(idx, -1)}
-                                        disabled={idx === 0}
-                                        aria-label="Naikkan sesi"
-                                        className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 disabled:opacity-30"
-                                      >
-                                        <ArrowUp className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMoveRundown(idx, 1)}
-                                        disabled={idx === draftRundown.length - 1}
-                                        aria-label="Turunkan sesi"
-                                        className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 disabled:opacity-30"
-                                      >
-                                        <ArrowDown className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteRundown(row.id)}
-                                        aria-label="Hapus sesi"
-                                        className="p-1.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
+                                    {canEdit && (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveRundown(idx, -1)}
+                                          disabled={idx === 0}
+                                          aria-label="Naikkan sesi"
+                                          className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                        >
+                                          <ArrowUp className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveRundown(idx, 1)}
+                                          disabled={idx === draftRundown.length - 1}
+                                          aria-label="Turunkan sesi"
+                                          className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                        >
+                                          <ArrowDown className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteRundown(row.id)}
+                                          aria-label="Hapus sesi"
+                                          className="p-1.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
 
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <input
                                       type="text"
+                                      readOnly={!canEdit}
                                       list="kegiatan-personel-detail"
                                       value={row.pj}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { pj: e.target.value })
                                       }
                                       placeholder="Penanggung jawab sesi"
-                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
                                     <input
                                       type="text"
+                                      readOnly={!canEdit}
                                       value={row.lokasi}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { lokasi: e.target.value })
                                       }
                                       placeholder="Lokasi sesi"
-                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
                                     <input
                                       type="text"
+                                      readOnly={!canEdit}
                                       value={row.keterangan}
                                       onChange={(e) =>
                                         handleUpdateRundown(row.id, { keterangan: e.target.value })
                                       }
                                       placeholder="Keterangan / perlengkapan"
-                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
                                     />
                                   </div>
                                 </div>
@@ -1642,22 +1710,24 @@ export default function KegiatanPage() {
                             </div>
                           )}
 
-                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                            <span className="text-xs text-slate-500">
-                              {draftDirty
-                                ? 'Ada perubahan rundown yang belum disimpan.'
-                                : 'Semua perubahan rundown tersimpan.'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveDetailDraft()}
-                              disabled={savingDetail}
-                              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
-                            >
-                              <Save className="w-3.5 h-3.5" />
-                              {savingDetail ? 'Menyimpan...' : 'Simpan Rundown'}
-                            </button>
-                          </div>
+                          {canEdit && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                              <span className="text-xs text-slate-500">
+                                {draftDirty
+                                  ? 'Ada perubahan rundown yang belum disimpan.'
+                                  : 'Semua perubahan rundown tersimpan.'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDetailDraft()}
+                                disabled={savingDetail}
+                                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                {savingDetail ? 'Menyimpan...' : 'Simpan Rundown'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1668,28 +1738,30 @@ export default function KegiatanPage() {
                             <span className="text-xs text-slate-600">
                               Struktur kepanitiaan khusus acara hari besar pondok.
                             </span>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {draftPanitia.length === 0 && (
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {draftPanitia.length === 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDraftPanitia(instantiatePanitiaPreset());
+                                      setDraftDirty(true);
+                                    }}
+                                    className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    Muat Jabatan Standar
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setDraftPanitia(instantiatePanitiaPreset());
-                                    setDraftDirty(true);
-                                  }}
-                                  className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  onClick={handleAddPanitia}
+                                  className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1"
                                 >
-                                  Muat Jabatan Standar
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Tambah Jabatan
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={handleAddPanitia}
-                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                Tambah Jabatan
-                              </button>
-                            </div>
+                              </div>
+                            )}
                           </div>
 
                           <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden">
@@ -1701,76 +1773,84 @@ export default function KegiatanPage() {
                                 <div className="sm:col-span-3">
                                   <input
                                     type="text"
+                                    readOnly={!canEdit}
                                     value={p.jabatan}
                                     onChange={(e) =>
                                       handleUpdatePanitia(p.id, { jabatan: e.target.value })
                                     }
                                     placeholder="Jabatan / Seksi"
-                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg"
+                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg read-only:bg-slate-50"
                                   />
                                 </div>
                                 <div className="sm:col-span-3">
                                   <input
                                     type="text"
+                                    readOnly={!canEdit}
                                     list="kegiatan-personel-detail"
                                     value={p.nama}
                                     onChange={(e) =>
                                       handleUpdatePanitia(p.id, { nama: e.target.value })
                                     }
                                     placeholder="Nama panitia"
-                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg"
+                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg read-only:bg-slate-50"
                                   />
                                 </div>
                                 <div className="sm:col-span-2">
                                   <input
                                     type="text"
+                                    readOnly={!canEdit}
                                     value={p.no_wa}
                                     onChange={(e) =>
                                       handleUpdatePanitia(p.id, { no_wa: e.target.value })
                                     }
                                     placeholder="No. WA"
-                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg"
+                                    className="w-full min-h-[36px] px-2.5 py-1 text-xs font-mono tabular-nums border border-slate-200 rounded-lg read-only:bg-slate-50"
                                   />
                                 </div>
                                 <div className="sm:col-span-4 flex items-center gap-1.5">
                                   <input
                                     type="text"
+                                    readOnly={!canEdit}
                                     value={p.tugas}
                                     onChange={(e) =>
                                       handleUpdatePanitia(p.id, { tugas: e.target.value })
                                     }
                                     placeholder="Tugas singkat"
-                                    className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg"
+                                    className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg read-only:bg-slate-50"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeletePanitia(p.id)}
-                                    aria-label="Hapus jabatan"
-                                    className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 shrink-0"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePanitia(p.id)}
+                                      aria-label="Hapus jabatan"
+                                      className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 shrink-0"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             ))}
                           </div>
 
-                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                            <span className="text-xs text-slate-500">
-                              {draftDirty
-                                ? 'Ada perubahan kepanitiaan yang belum disimpan.'
-                                : 'Susunan panitia sudah tersimpan.'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveDetailDraft()}
-                              disabled={savingDetail}
-                              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
-                            >
-                              <Save className="w-3.5 h-3.5" />
-                              {savingDetail ? 'Menyimpan...' : 'Simpan Susunan Panitia'}
-                            </button>
-                          </div>
+                          {canEdit && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                              <span className="text-xs text-slate-500">
+                                {draftDirty
+                                  ? 'Ada perubahan kepanitiaan yang belum disimpan.'
+                                  : 'Susunan panitia sudah tersimpan.'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDetailDraft()}
+                                disabled={savingDetail}
+                                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                {savingDetail ? 'Menyimpan...' : 'Simpan Susunan Panitia'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1787,38 +1867,40 @@ export default function KegiatanPage() {
                               </p>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2">
-                              {selectedAgenda.status !== 'selesai' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickStatusChange('selesai')}
-                                  className="min-h-[38px] px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  Tandai Kegiatan Selesai
-                                </button>
-                              )}
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {selectedAgenda.status !== 'selesai' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleQuickStatusChange('selesai')}
+                                    className="min-h-[38px] px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Tandai Kegiatan Selesai
+                                  </button>
+                                )}
 
-                              {(selectedAgenda.dokumentasi_urls || []).length <
-                                MAX_DOKUMENTASI_FOTO && (
-                                <label className="min-h-[38px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
-                                  {uploadingPhoto ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Camera className="w-3.5 h-3.5" />
-                                  )}
-                                  {uploadingPhoto ? 'Mengunggah...' : 'Unggah Foto'}
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    multiple
-                                    disabled={uploadingPhoto}
-                                    onChange={handleUploadFotoDokumentasi}
-                                    className="hidden"
-                                  />
-                                </label>
-                              )}
-                            </div>
+                                {(selectedAgenda.dokumentasi_urls || []).length <
+                                  MAX_DOKUMENTASI_FOTO && (
+                                  <label className="min-h-[38px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                                    {uploadingPhoto ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Camera className="w-3.5 h-3.5" />
+                                    )}
+                                    {uploadingPhoto ? 'Mengunggah...' : 'Unggah Foto'}
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      disabled={uploadingPhoto}
+                                      onChange={handleUploadFotoDokumentasi}
+                                      className="hidden"
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           {(selectedAgenda.dokumentasi_urls || []).length === 0 ? (
@@ -1827,9 +1909,11 @@ export default function KegiatanPage() {
                               <p className="text-xs text-slate-600 font-medium">
                                 Belum ada foto dokumentasi untuk kegiatan ini.
                               </p>
-                              <p className="text-[11px] text-slate-500">
-                                Klik tombol Unggah Foto untuk melampirkan dokumentasi acara.
-                              </p>
+                              {canEdit && (
+                                <p className="text-[11px] text-slate-500">
+                                  Klik tombol Unggah Foto untuk melampirkan dokumentasi acara.
+                                </p>
+                              )}
                             </div>
                           ) : (
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1851,14 +1935,16 @@ export default function KegiatanPage() {
                                     }
                                     className="w-full h-full object-cover cursor-pointer"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteFotoDokumentasi(url)}
-                                    aria-label="Hapus foto dokumentasi"
-                                    className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-slate-900/75 text-white hover:bg-rose-600 transition-colors"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteFotoDokumentasi(url)}
+                                      aria-label="Hapus foto dokumentasi"
+                                      className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-slate-900/75 text-white hover:bg-rose-600 transition-colors"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -1870,25 +1956,32 @@ export default function KegiatanPage() {
                             </label>
                             <textarea
                               rows={4}
+                              readOnly={!canEdit}
                               value={draftNotulensi}
                               onChange={(e) => {
                                 setDraftNotulensi(e.target.value);
                                 setDraftDirty(true);
                               }}
-                              placeholder="Catat ringkasan jalannya acara, estimasi kehadiran santri/tamu, pesan pengasuh, atau evaluasi untuk kegiatan berikutnya..."
-                              className="w-full p-3 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              placeholder={
+                                canEdit
+                                  ? 'Catat ringkasan jalannya acara, estimasi kehadiran santri/tamu, pesan pengasuh, atau evaluasi untuk kegiatan berikutnya...'
+                                  : 'Belum ada catatan notulensi.'
+                              }
+                              className="w-full p-3 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-50"
                             />
-                            <div className="flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => handleSaveDetailDraft()}
-                                disabled={savingDetail}
-                                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                {savingDetail ? 'Menyimpan...' : 'Simpan Dokumentasi & Notulensi'}
-                              </button>
-                            </div>
+                            {canEdit && (
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDetailDraft()}
+                                  disabled={savingDetail}
+                                  className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                                >
+                                  <Save className="w-3.5 h-3.5" />
+                                  {savingDetail ? 'Menyimpan...' : 'Simpan Dokumentasi & Notulensi'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1912,14 +2005,16 @@ export default function KegiatanPage() {
                   Atur jumlah dan urutan slot pengisi untuk tiap jenis kegiatan (contoh: Burdah dengan 1 Tawasul, 10 Fashl, dan Doa = 12 slot).
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setFormatModal({ open: true, editing: null })}
-                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                Buat Format Baru
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setFormatModal({ open: true, editing: null })}
+                  className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  Buat Format Baru
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1972,55 +2067,57 @@ export default function KegiatanPage() {
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-100 pt-3 flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAgendaModal({
-                            open: true,
-                            editing: null,
-                            presetFormatId: fmt.id,
-                          })
-                        }
-                        className="min-h-[36px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
-                      >
-                        <CalendarPlus className="w-3.5 h-3.5" />
-                        Jadwalkan
-                      </button>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicateFormat(fmt)}
-                          title="Duplikat format"
-                          className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFormatModal({ open: true, editing: fmt })}
-                          title="Ubah urutan & slot"
-                          className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
+                    {canEdit && (
+                      <div className="border-t border-slate-100 pt-3 flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() =>
-                            setDeleteConfirm({
-                              kind: 'format',
-                              id: fmt.id,
-                              label: fmt.nama_format,
+                            setAgendaModal({
+                              open: true,
+                              editing: null,
+                              presetFormatId: fmt.id,
                             })
                           }
-                          title="Hapus format"
-                          className="p-2 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                          className="min-h-[36px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <CalendarPlus className="w-3.5 h-3.5" />
+                          Jadwalkan
                         </button>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateFormat(fmt)}
+                            title="Duplikat format"
+                            className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormatModal({ open: true, editing: fmt })}
+                            title="Ubah urutan & slot"
+                            className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteConfirm({
+                                kind: 'format',
+                                id: fmt.id,
+                                label: fmt.nama_format,
+                              })
+                            }
+                            title="Hapus format"
+                            className="p-2 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}

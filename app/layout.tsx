@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import { Suspense } from 'react';
 import {
   DM_Sans,
   JetBrains_Mono,
@@ -9,8 +8,9 @@ import {
 } from 'next/font/google';
 import './globals.css';
 import Navbar from '@/components/Navbar';
-import SupabaseEnvScript from '@/components/SupabaseEnvScript';
 import ThemeProvider from '@/components/ThemeProvider';
+import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
+import { AuthProvider } from '@/lib/auth';
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -41,13 +41,23 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#064e3b',
+  themeColor: '#065f46',
 };
 
 export const metadata: Metadata = {
-  title: 'e-Pondok An-Nur 1 Bululawang',
-  description: 'Sistem Informasi Administrasi & Keuangan Pondok Pesantren An-Nur 1',
-  manifest: '/manifest.json',
+  title: 'e-annursatu — Sistem Informasi Pondok Pesantren An-Nur 1',
+  description:
+    'Sistem Informasi Administrasi & Layanan Digital Pondok Pesantren An-Nur 1 Bululawang',
+  applicationName: 'e-annursatu',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'e-annursatu',
+  },
+  icons: {
+    icon: '/icon.png',
+    apple: '/apple-icon.png',
+  },
 };
 
 export default function RootLayout({
@@ -61,11 +71,11 @@ export default function RootLayout({
       className={`${plusJakarta.variable} ${dmSans.variable} ${manrope.variable} ${lora.variable} ${jetbrainsMono.variable}`}
     >
       <body className="antialiased">
-        <Suspense fallback={null}>
-          <SupabaseEnvScript />
-        </Suspense>
         <ThemeProvider />
-        <Navbar>{children}</Navbar>
+        <ServiceWorkerRegister />
+        <AuthProvider>
+          <Navbar>{children}</Navbar>
+        </AuthProvider>
       </body>
     </html>
   );

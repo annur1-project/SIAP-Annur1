@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
-    "build": "NODE_ENV=production next build",
-    "start": "NODE_ENV=production next start",
+    "build": "NODE_ENV=production next build && mkdir -p .next/standalone/public .next/standalone/.next/static && cp -r public/. .next/standalone/public/ && cp -r .next/static/. .next/standalone/.next/static/",
+    "start": "NODE_ENV=production sh -c 'if [ -f .next/standalone/server.js ]; then exec node .next/standalone/server.js; else exec node server.js; fi'",
     "lint": "eslint"
   },
   "dependencies": {

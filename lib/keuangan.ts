@@ -171,9 +171,9 @@ export function normalizeDompetKey(raw?: string | null): DompetType {
 }
 
 /**
- * Hitung saldo 4 Kartu Dompet (khusus TUNAI) & kartu laporan terpisah `Syahriyah Transfer`.
+ * Hitung saldo 4 Kartu Dompet (khusus TUNAI) & kartu laporan terpisah `Pemasukan Transfer`.
  * Seluruh pemasukan bermetode `transfer` tidak ditambahkan ke 4 kartu dompet tunai
- * dan hanya dirangkum dalam `syahriyahTransfer`.
+ * dan hanya dirangkum dalam `syahriyahTransfer` (Pemasukan Transfer).
  */
 export function computeWalletAndTransferSummary(
   transaksiList: WalletTxLike[],
@@ -552,5 +552,5 @@ WHERE m.kode IN ('al_adzkar', 'almamater', 'kitab_madin', 'infaq_madin')
     SELECT 1 FROM master_pembayaran_riwayat r WHERE r.item_id = m.id
   );
 
--- 3. Pastikan tabel PSB 1 Pintu tersedia
+-- 3. Pastikan tabel PSB tersedia
 ${PSB_TABLE_SQL}`;

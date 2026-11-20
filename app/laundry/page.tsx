@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import { addDaysIso } from '@/lib/dapur';
 import {
   type HariLaundryKey,
@@ -61,6 +62,9 @@ interface QuickInputDraft {
 }
 
 export default function LaundryPage() {
+  const { canEditModule } = useAuth();
+  const canEdit = canEditModule('laundry');
+
   const [activeTab, setActiveTab] = useState<MainTab>('harian');
   const [todayStr, setTodayStr] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -243,7 +247,7 @@ export default function LaundryPage() {
 
   // Catat setoran kamar terjadwal
   const handleSaveScheduledRoom = async (kamar: string) => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     const draft = quickDrafts[kamar] || { jumlah: '', catatan: '' };
     const qty = parseInt(draft.jumlah, 10);
     if (Number.isNaN(qty) || qty <= 0) {
@@ -284,7 +288,7 @@ export default function LaundryPage() {
   // Tambah kamar susulan
   const handleAddSusulan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     const kamar = susulanKamar.trim();
     const qty = parseInt(susulanJumlah, 10);
     if (!kamar) {
@@ -325,6 +329,7 @@ export default function LaundryPage() {
 
   // Update status Masuk <-> Selesai
   const handleToggleStatus = async (item: LaundryCatatanItem) => {
+    if (!canEdit) return;
     const nextStatus: StatusLaundry = item.status === 'selesai' ? 'masuk' : 'selesai';
     const updated: LaundryCatatanItem = {
       ...item,
@@ -350,6 +355,7 @@ export default function LaundryPage() {
 
   // Simpan perubahan jumlah potong / catatan baris existing
   const handleUpdateExistingRow = async (item: LaundryCatatanItem) => {
+    if (!canEdit) return;
     const draft = editQtyDrafts[item.id];
     if (!draft) return;
     const qty = parseInt(draft.jumlah, 10);
@@ -375,6 +381,7 @@ export default function LaundryPage() {
 
   // Tandai semua selesai hari ini
   const handleMarkAllDoneToday = async () => {
+    if (!canEdit) return;
     const pending = dailyRecords.filter((r) => r.status === 'masuk');
     if (pending.length === 0) return;
     const nowHm = getCurrentHmLocal();
@@ -396,7 +403,7 @@ export default function LaundryPage() {
 
   // Hapus catatan
   const handleConfirmDelete = async () => {
-    if (!deleteConfirm) return;
+    if (!canEdit || !deleteConfirm) return;
     await deleteLaundryCatatanRow(deleteConfirm.id);
     setCatatanList((prev) => prev.filter((r) => r.id !== deleteConfirm.id));
     pushToast('info', 'Catatan Dihapus', `Setoran Kamar ${deleteConfirm.kamar} telah dihapus.`);
@@ -405,6 +412,7 @@ export default function LaundryPage() {
 
   // Modal Atur Jadwal Giliran Kamar
   const openEditJadwalModal = (row: LaundryJadwalKamar) => {
+    if (!canEdit) return;
     setEditingJadwalDay(row);
     setModalKamarSelection([...row.kamar_list]);
     setCustomKamarName('');
@@ -429,7 +437,7 @@ export default function LaundryPage() {
   };
 
   const handleSaveJadwalModal = async () => {
-    if (!editingJadwalDay) return;
+    if (!canEdit || !editingJadwalDay) return;
     const updated: LaundryJadwalKamar = {
       ...editingJadwalDay,
       kamar_list: modalKamarSelection,
@@ -523,7 +531,7 @@ export default function LaundryPage() {
       pushToast('info', 'Belum Ada Data', 'Tidak ada data laporan pada filter terpilih.');
       return;
     }
-    const header = `*REKAP LAPORAN SIE LAUNDRY e-PONDOK AN-NUR 1*\nPeriode: ${
+    const header = `*REKAP LAPORAN SIE LAUNDRY e-annursatu AN-NUR 1*\nPeriode: ${
       reportMonth || 'Semua Bulan'
     }${reportHariFilter !== 'semua' ? ` · Hari ${HARI_LABEL_MAP[reportHariFilter]}` : ''}\nTotal: ${
       reportAggregate.totalHari
@@ -658,6 +666,8 @@ export default function LaundryPage() {
             </button>
           </div>
         </div>
+
+        <TransparencyBanner moduleLabel="Layanan Laundry Santri" isReadOnly={!canEdit} />
 
         {/* 4 SUMMARY KPI CARDS */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -803,7 +813,7 @@ export default function LaundryPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {dailyRecords.some((r) => r.status === 'masuk') && (
+                {canEdit && dailyRecords.some((r) => r.status === 'masuk') && (
                   <button
                     type="button"
                     onClick={handleMarkAllDoneToday}
@@ -849,13 +859,15 @@ export default function LaundryPage() {
                   >
                     Lanjut ke Hari Sabtu
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setOverrideFridayInput(true)}
-                    className="min-h-[40px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl"
-                  >
-                    Catat Setoran Susulan / Darurat
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setOverrideFridayInput(true)}
+                      className="min-h-[40px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl"
+                    >
+                      Catat Setoran Susulan / Darurat
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -870,16 +882,20 @@ export default function LaundryPage() {
                           {scheduledRoomsForDay.length} Kamar)
                         </h2>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Masukkan jumlah potong (pcs) per kamar lalu klik Catat Masuk, atau ubah status ke Selesai jika sudah beres.
+                          {canEdit
+                            ? 'Masukkan jumlah potong (pcs) per kamar lalu klik Catat Masuk, atau ubah status ke Selesai jika sudah beres.'
+                            : 'Rekap setoran laundry kamar sesuai jadwal giliran hari ini (Mode Transparansi).'}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('jadwal')}
-                        className="text-xs font-semibold text-emerald-700 hover:underline whitespace-nowrap"
-                      >
-                        Ubah Giliran Kamar
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('jadwal')}
+                          className="text-xs font-semibold text-emerald-700 hover:underline whitespace-nowrap"
+                        >
+                          Ubah Giliran Kamar
+                        </button>
+                      )}
                     </div>
 
                     {scheduledRoomsForDay.length === 0 ? (
@@ -913,44 +929,50 @@ export default function LaundryPage() {
                                   </span>
                                 </div>
 
-                                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 justify-end">
-                                  <div className="flex items-center gap-1.5">
+                                {canEdit ? (
+                                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 justify-end">
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={draft.jumlah}
+                                        onChange={(e) =>
+                                          setQuickDrafts((prev) => ({
+                                            ...prev,
+                                            [kamar]: { ...draft, jumlah: e.target.value },
+                                          }))
+                                        }
+                                        placeholder="0"
+                                        className="w-24 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                      />
+                                      <span className="text-xs font-semibold text-slate-500">pcs</span>
+                                    </div>
                                     <input
-                                      type="number"
-                                      min={1}
-                                      value={draft.jumlah}
+                                      type="text"
+                                      value={draft.catatan}
                                       onChange={(e) =>
                                         setQuickDrafts((prev) => ({
                                           ...prev,
-                                          [kamar]: { ...draft, jumlah: e.target.value },
+                                          [kamar]: { ...draft, catatan: e.target.value },
                                         }))
                                       }
-                                      placeholder="0"
-                                      className="w-24 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                      placeholder="Catatan singkat (opsional)"
+                                      className="flex-1 min-w-[140px] sm:max-w-xs min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
-                                    <span className="text-xs font-semibold text-slate-500">pcs</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveScheduledRoom(kamar)}
+                                      disabled={savingId === `new-${kamar}`}
+                                      className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl whitespace-nowrap shrink-0"
+                                    >
+                                      {savingId === `new-${kamar}` ? 'Menyimpan...' : 'Catat Masuk'}
+                                    </button>
                                   </div>
-                                  <input
-                                    type="text"
-                                    value={draft.catatan}
-                                    onChange={(e) =>
-                                      setQuickDrafts((prev) => ({
-                                        ...prev,
-                                        [kamar]: { ...draft, catatan: e.target.value },
-                                      }))
-                                    }
-                                    placeholder="Catatan singkat (opsional)"
-                                    className="flex-1 min-w-[140px] sm:max-w-xs min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveScheduledRoom(kamar)}
-                                    disabled={savingId === `new-${kamar}`}
-                                    className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl whitespace-nowrap shrink-0"
-                                  >
-                                    {savingId === `new-${kamar}` ? 'Menyimpan...' : 'Catat Masuk'}
-                                  </button>
-                                </div>
+                                ) : (
+                                  <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 text-xs font-medium self-start sm:self-auto">
+                                    Belum setor
+                                  </span>
+                                )}
                               </div>
                             );
                           }
@@ -994,73 +1016,84 @@ export default function LaundryPage() {
                                 </div>
                               </div>
 
-                              <div className="flex flex-wrap items-center gap-2 justify-end">
-                                <div className="flex items-center gap-1.5">
+                              {canEdit ? (
+                                <div className="flex flex-wrap items-center gap-2 justify-end">
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={editDraft?.jumlah ?? String(existing.jumlah_potong)}
+                                      onChange={(e) =>
+                                        setEditQtyDrafts((prev) => ({
+                                          ...prev,
+                                          [existing.id]: {
+                                            jumlah: e.target.value,
+                                            catatan: editDraft?.catatan ?? existing.catatan,
+                                          },
+                                        }))
+                                      }
+                                      className="w-20 min-h-[38px] px-2.5 py-1 text-xs font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl bg-white"
+                                    />
+                                    <span className="text-xs font-semibold text-slate-600">pcs</span>
+                                  </div>
                                   <input
-                                    type="number"
-                                    min={1}
-                                    value={editDraft?.jumlah ?? String(existing.jumlah_potong)}
+                                    type="text"
+                                    value={editDraft?.catatan ?? existing.catatan}
                                     onChange={(e) =>
                                       setEditQtyDrafts((prev) => ({
                                         ...prev,
                                         [existing.id]: {
-                                          jumlah: e.target.value,
-                                          catatan: editDraft?.catatan ?? existing.catatan,
+                                          jumlah: editDraft?.jumlah ?? String(existing.jumlah_potong),
+                                          catatan: e.target.value,
                                         },
                                       }))
                                     }
-                                    className="w-20 min-h-[38px] px-2.5 py-1 text-xs font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl bg-white"
+                                    placeholder="Catatan..."
+                                    className="w-36 sm:w-44 min-h-[38px] px-2.5 py-1 text-xs border border-slate-200 rounded-xl bg-white"
                                   />
-                                  <span className="text-xs font-semibold text-slate-600">pcs</span>
-                                </div>
-                                <input
-                                  type="text"
-                                  value={editDraft?.catatan ?? existing.catatan}
-                                  onChange={(e) =>
-                                    setEditQtyDrafts((prev) => ({
-                                      ...prev,
-                                      [existing.id]: {
-                                        jumlah: editDraft?.jumlah ?? String(existing.jumlah_potong),
-                                        catatan: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  placeholder="Catatan..."
-                                  className="w-36 sm:w-44 min-h-[38px] px-2.5 py-1 text-xs border border-slate-200 rounded-xl bg-white"
-                                />
-                                {isChanged && (
+                                  {isChanged && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateExistingRow(existing)}
+                                      disabled={savingId === existing.id}
+                                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold whitespace-nowrap"
+                                    >
+                                      Simpan
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
-                                    onClick={() => handleUpdateExistingRow(existing)}
+                                    onClick={() => handleToggleStatus(existing)}
                                     disabled={savingId === existing.id}
-                                    className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold whitespace-nowrap"
+                                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-colors ${
+                                      existing.status === 'selesai'
+                                        ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                        : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                                    }`}
                                   >
-                                    Simpan
+                                    {existing.status === 'selesai'
+                                      ? 'Ubah ke Masuk'
+                                      : 'Tandai Selesai'}
                                   </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleStatus(existing)}
-                                  disabled={savingId === existing.id}
-                                  className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-colors ${
-                                    existing.status === 'selesai'
-                                      ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
-                                  }`}
-                                >
-                                  {existing.status === 'selesai'
-                                    ? 'Ubah ke Masuk'
-                                    : 'Tandai Selesai'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteConfirm(existing)}
-                                  aria-label="Hapus catatan"
-                                  className="min-h-[38px] min-w-[38px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirm(existing)}
+                                    aria-label="Hapus catatan"
+                                    className="min-h-[38px] min-w-[38px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                                  <span className="font-mono font-bold tabular-nums px-2.5 py-1 rounded-lg bg-white border border-slate-200">
+                                    {existing.jumlah_potong} pcs
+                                  </span>
+                                  {existing.catatan && (
+                                    <span className="text-slate-500">({existing.catatan})</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1081,70 +1114,72 @@ export default function LaundryPage() {
                   </div>
 
                   {/* Form Tambah Susulan */}
-                  <form
-                    onSubmit={handleAddSusulan}
-                    className="p-4 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end gap-2.5"
-                  >
-                    <div className="sm:w-52">
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Pilih Kamar
-                      </label>
-                      <select
-                        value={susulanKamar}
-                        onChange={(e) => setSusulanKamar(e.target.value)}
-                        className="w-full min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium"
-                      >
-                        {susulanKamarChoices.map((k) => (
-                          <option key={k} value={k}>
-                            Kamar {k}
-                          </option>
-                        ))}
-                        {kamarOptions
-                          .filter((k) => !susulanKamarChoices.includes(k))
-                          .map((k) => (
+                  {canEdit && (
+                    <form
+                      onSubmit={handleAddSusulan}
+                      className="p-4 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end gap-2.5"
+                    >
+                      <div className="sm:w-52">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Pilih Kamar
+                        </label>
+                        <select
+                          value={susulanKamar}
+                          onChange={(e) => setSusulanKamar(e.target.value)}
+                          className="w-full min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                        >
+                          {susulanKamarChoices.map((k) => (
                             <option key={k} value={k}>
-                              Kamar {k} (Giliran hari ini)
+                              Kamar {k}
                             </option>
                           ))}
-                      </select>
-                    </div>
+                          {kamarOptions
+                            .filter((k) => !susulanKamarChoices.includes(k))
+                            .map((k) => (
+                              <option key={k} value={k}>
+                                Kamar {k} (Giliran hari ini)
+                              </option>
+                            ))}
+                        </select>
+                      </div>
 
-                    <div className="sm:w-32">
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Jumlah (Potong)
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={susulanJumlah}
-                        onChange={(e) => setSusulanJumlah(e.target.value)}
-                        placeholder="Contoh: 18"
-                        className="w-full min-h-[40px] px-3 py-1.5 text-xs font-mono font-bold tabular-nums border border-slate-200 rounded-xl bg-white"
-                      />
-                    </div>
+                      <div className="sm:w-32">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Jumlah (Potong)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={susulanJumlah}
+                          onChange={(e) => setSusulanJumlah(e.target.value)}
+                          placeholder="Contoh: 18"
+                          className="w-full min-h-[40px] px-3 py-1.5 text-xs font-mono font-bold tabular-nums border border-slate-200 rounded-xl bg-white"
+                        />
+                      </div>
 
-                    <div className="flex-1 min-w-0">
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Catatan (Opsional)
-                      </label>
-                      <input
-                        type="text"
-                        value={susulanCatatan}
-                        onChange={(e) => setSusulanCatatan(e.target.value)}
-                        placeholder="Misal: titipan telat dari hari kemarin"
-                        className="w-full min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white"
-                      />
-                    </div>
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Catatan (Opsional)
+                        </label>
+                        <input
+                          type="text"
+                          value={susulanCatatan}
+                          onChange={(e) => setSusulanCatatan(e.target.value)}
+                          placeholder="Misal: titipan telat dari hari kemarin"
+                          className="w-full min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white"
+                        />
+                      </div>
 
-                    <button
-                      type="submit"
-                      disabled={savingId === 'add-susulan'}
-                      className="min-h-[40px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Tambah Susulan
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        disabled={savingId === 'add-susulan'}
+                        className="min-h-[40px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Tambah Susulan
+                      </button>
+                    </form>
+                  )}
 
                   {susulanRecordsToday.length === 0 ? (
                     <div className="p-5 text-center text-xs text-slate-500">
@@ -1188,63 +1223,74 @@ export default function LaundryPage() {
                               </div>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2 justify-end">
-                              <div className="flex items-center gap-1.5">
+                            {canEdit ? (
+                              <div className="flex flex-wrap items-center gap-2 justify-end">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={editDraft.jumlah}
+                                    onChange={(e) =>
+                                      setEditQtyDrafts((prev) => ({
+                                        ...prev,
+                                        [item.id]: { ...editDraft, jumlah: e.target.value },
+                                      }))
+                                    }
+                                    className="w-20 min-h-[38px] px-2.5 py-1 text-xs font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl"
+                                  />
+                                  <span className="text-xs font-semibold text-slate-600">pcs</span>
+                                </div>
                                 <input
-                                  type="number"
-                                  min={1}
-                                  value={editDraft.jumlah}
+                                  type="text"
+                                  value={editDraft.catatan}
                                   onChange={(e) =>
                                     setEditQtyDrafts((prev) => ({
                                       ...prev,
-                                      [item.id]: { ...editDraft, jumlah: e.target.value },
+                                      [item.id]: { ...editDraft, catatan: e.target.value },
                                     }))
                                   }
-                                  className="w-20 min-h-[38px] px-2.5 py-1 text-xs font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl"
+                                  placeholder="Catatan..."
+                                  className="w-36 sm:w-44 min-h-[38px] px-2.5 py-1 text-xs border border-slate-200 rounded-xl"
                                 />
-                                <span className="text-xs font-semibold text-slate-600">pcs</span>
-                              </div>
-                              <input
-                                type="text"
-                                value={editDraft.catatan}
-                                onChange={(e) =>
-                                  setEditQtyDrafts((prev) => ({
-                                    ...prev,
-                                    [item.id]: { ...editDraft, catatan: e.target.value },
-                                  }))
-                                }
-                                placeholder="Catatan..."
-                                className="w-36 sm:w-44 min-h-[38px] px-2.5 py-1 text-xs border border-slate-200 rounded-xl"
-                              />
-                              {isChanged && (
+                                {isChanged && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateExistingRow(item)}
+                                    className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold"
+                                  >
+                                    Simpan
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => handleUpdateExistingRow(item)}
-                                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold"
+                                  onClick={() => handleToggleStatus(item)}
+                                  className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap ${
+                                    item.status === 'selesai'
+                                      ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                                  }`}
                                 >
-                                  Simpan
+                                  {item.status === 'selesai' ? 'Ubah ke Masuk' : 'Tandai Selesai'}
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => handleToggleStatus(item)}
-                                className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap ${
-                                  item.status === 'selesai'
-                                    ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                    : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
-                                }`}
-                              >
-                                {item.status === 'selesai' ? 'Ubah ke Masuk' : 'Tandai Selesai'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDeleteConfirm(item)}
-                                aria-label="Hapus catatan"
-                                className="min-h-[38px] min-w-[38px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirm(item)}
+                                  aria-label="Hapus catatan"
+                                  className="min-h-[38px] min-w-[38px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                                <span className="font-mono font-bold tabular-nums px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200">
+                                  {item.jumlah_potong} pcs
+                                </span>
+                                {item.catatan && (
+                                  <span className="text-slate-500">({item.catatan})</span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1319,14 +1365,16 @@ export default function LaundryPage() {
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => openEditJadwalModal(row)}
-                      className="min-h-[38px] w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-800 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <Settings2 className="w-3.5 h-3.5" />
-                      Atur Kamar Hari {hari.label}
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => openEditJadwalModal(row)}
+                        className="min-h-[38px] w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-800 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                        Atur Kamar Hari {hari.label}
+                      </button>
+                    )}
                   </div>
                 );
               })}

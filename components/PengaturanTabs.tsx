@@ -31,18 +31,21 @@ import {
   addKamarItem,
   computeTotalSaldoAwal,
   DEFAULT_KAMAR_MASTER,
+  DEFAULT_PROFIL_PONDOK_PSB,
   DEFAULT_SKEMA_PENDAFTARAN,
   DEFAULT_TEMA_APLIKASI,
   FONT_OPTIONS,
   getTarifAktifFromRiwayat,
   hitungRincianPendaftaran,
   isKeamananThresholdValid,
+  mergeProfilPondokPsb,
   moveKamarItem,
   NAMA_DOMPET_MAP,
   removeKamarItem,
   THEME_PRESETS,
   type MasterPembayaranItem,
   type PengaturanFormState,
+  type ProfilPondokPsbConfig,
   type SkemaPendaftaranConfig,
   type TarifRiwayatItem,
   type TemaAplikasiConfig,
@@ -1034,7 +1037,69 @@ export function KeuanganTarifTab({
             />
           </div>
 
-          <div className="flex items-end pb-2">
+          <div>
+            <label htmlFor="psb_tahun_psb" className="font-semibold text-slate-700 block mb-1.5">
+              Tahun PSB (Prefix Reg &amp; NIS)
+            </label>
+            <input
+              id="psb_tahun_psb"
+              type="number"
+              min={2025}
+              max={2099}
+              disabled={!canManageFinance}
+              value={psb.tahun_psb ?? 2027}
+              onChange={(e) =>
+                onUpdatePendaftaran((prev) => ({
+                  ...prev,
+                  tahun_psb: Number(e.target.value || 2027),
+                }))
+              }
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="psb_tahun_ajaran" className="font-semibold text-slate-700 block mb-1.5">
+              Tahun Ajaran PSB Publik
+            </label>
+            <input
+              id="psb_tahun_ajaran"
+              type="text"
+              disabled={!canManageFinance}
+              value={psb.tahun_ajaran_psb ?? '2027/2028'}
+              onChange={(e) =>
+                onUpdatePendaftaran((prev) => ({
+                  ...prev,
+                  tahun_ajaran_psb: e.target.value,
+                }))
+              }
+              placeholder="2027/2028"
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="psb_kuota_promo_tampil" className="font-semibold text-slate-700 block mb-1.5">
+              Tampilan Sisa Kuota Promo Awal
+            </label>
+            <input
+              id="psb_kuota_promo_tampil"
+              type="number"
+              min={1}
+              max={100}
+              disabled={!canManageFinance}
+              value={psb.kuota_promo_tampil_awal ?? 28}
+              onChange={(e) =>
+                onUpdatePendaftaran((prev) => ({
+                  ...prev,
+                  kuota_promo_tampil_awal: Number(e.target.value || 28),
+                }))
+              }
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums"
+            />
+          </div>
+
+          <div className="flex items-end pb-2 sm:col-span-2 lg:col-span-3">
             <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-800">
               <input
                 type="checkbox"
@@ -1498,6 +1563,215 @@ export function AturanDivisiTab({ formData, onUpdateAturan }: AturanDivisiTabPro
           </div>
         </section>
       </div>
+
+      {/* Bagian 3: Profil Pondok, Berkas Wajib & Jadwal Santri (Tampil di /daftar) */}
+      {(() => {
+        const profil = mergeProfilPondokPsb(aturan.profil_pondok);
+        const updateProfil = (
+          updater: (curr: ProfilPondokPsbConfig) => ProfilPondokPsbConfig
+        ) => {
+          onUpdateAturan((prev) => ({
+            ...prev,
+            profil_pondok: updater(mergeProfilPondokPsb(prev.profil_pondok)),
+          }));
+        };
+        const linesToArray = (text: string) =>
+          text
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        const jadwalToText = (items: Array<{ waktu: string; kegiatan: string }>) =>
+          items.map((j) => `${j.waktu} | ${j.kegiatan}`).join('\n');
+        const textToJadwal = (text: string) =>
+          text
+            .split('\n')
+            .map((line) => {
+              const idx = line.indexOf('|');
+              if (idx === -1) return { waktu: '', kegiatan: line.trim() };
+              return {
+                waktu: line.slice(0, idx).trim(),
+                kegiatan: line.slice(idx + 1).trim(),
+              };
+            })
+            .filter((item) => item.waktu || item.kegiatan);
+
+        return (
+          <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                  Profil Pondok, Berkas Wajib &amp; Jadwal Santri (Tampil di /daftar)
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Atur teks Sejarah, Visi, Misi, Berkas Wajib, Tata Tertib, dan Jadwal Kegiatan yang dibaca wali santri saat mendaftar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateAturan((prev) => ({
+                    ...prev,
+                    profil_pondok: { ...DEFAULT_PROFIL_PONDOK_PSB },
+                  }))
+                }
+                className="min-h-[34px] px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Profil Standar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="md:col-span-2">
+                <label htmlFor="profil_sejarah" className="font-semibold text-slate-700 block mb-1.5">
+                  Sejarah Singkat Pesantren
+                </label>
+                <textarea
+                  id="profil_sejarah"
+                  rows={3}
+                  value={profil.sejarahSingkat}
+                  onChange={(e) =>
+                    updateProfil((p) => ({ ...p, sejarahSingkat: e.target.value }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_visi" className="font-semibold text-slate-700 block mb-1.5">
+                  Visi Pesantren
+                </label>
+                <textarea
+                  id="profil_visi"
+                  rows={3}
+                  value={profil.visi}
+                  onChange={(e) => updateProfil((p) => ({ ...p, visi: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_misi" className="font-semibold text-slate-700 block mb-1.5">
+                  Misi Pesantren
+                </label>
+                <textarea
+                  id="profil_misi"
+                  rows={3}
+                  value={profil.misi}
+                  onChange={(e) => updateProfil((p) => ({ ...p, misi: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label htmlFor="profil_jam_kantor" className="font-semibold text-slate-700 block mb-1.5">
+                  Jam Layanan Kantor Sekretariat / Sowan
+                </label>
+                <input
+                  id="profil_jam_kantor"
+                  type="text"
+                  value={profil.jamKantorOffline}
+                  onChange={(e) =>
+                    updateProfil((p) => ({ ...p, jamKantorOffline: e.target.value }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_berkas" className="font-semibold text-slate-700 block mb-1">
+                  Berkas Fisik Wajib (1 baris = 1 poin)
+                </label>
+                <textarea
+                  id="profil_berkas"
+                  rows={5}
+                  value={profil.berkasFisikWajib.join('\n')}
+                  onChange={(e) =>
+                    updateProfil((p) => ({
+                      ...p,
+                      berkasFisikWajib: linesToArray(e.target.value),
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_ketentuan" className="font-semibold text-slate-700 block mb-1">
+                  Ketentuan Santri &amp; Wali (1 baris = 1 poin)
+                </label>
+                <textarea
+                  id="profil_ketentuan"
+                  rows={5}
+                  value={profil.ketentuanWali.join('\n')}
+                  onChange={(e) =>
+                    updateProfil((p) => ({
+                      ...p,
+                      ketentuanWali: linesToArray(e.target.value),
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label htmlFor="profil_larangan" className="font-semibold text-slate-700 block mb-1">
+                  Larangan &amp; Tata Tertib Pondok (1 baris = 1 poin)
+                </label>
+                <textarea
+                  id="profil_larangan"
+                  rows={3}
+                  value={profil.laranganTataTertib.join('\n')}
+                  onChange={(e) =>
+                    updateProfil((p) => ({
+                      ...p,
+                      laranganTataTertib: linesToArray(e.target.value),
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_jadwal_harian" className="font-semibold text-slate-700 block mb-1">
+                  Jadwal Harian Santri (Format: <code className="font-mono">Waktu | Kegiatan</code>)
+                </label>
+                <textarea
+                  id="profil_jadwal_harian"
+                  rows={5}
+                  value={jadwalToText(profil.jadwalHarian)}
+                  onChange={(e) =>
+                    updateProfil((p) => ({
+                      ...p,
+                      jadwalHarian: textToJadwal(e.target.value),
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-[11px]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="profil_jadwal_jumat" className="font-semibold text-slate-700 block mb-1">
+                  Jadwal Malam Jumat &amp; Hari Jumat (Format: <code className="font-mono">Waktu | Kegiatan</code>)
+                </label>
+                <textarea
+                  id="profil_jadwal_jumat"
+                  rows={5}
+                  value={jadwalToText(profil.jadwalJumat)}
+                  onChange={(e) =>
+                    updateProfil((p) => ({
+                      ...p,
+                      jadwalJumat: textToJadwal(e.target.value),
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-[11px]"
+                />
+              </div>
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 }
@@ -1837,8 +2111,8 @@ export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTab
                       </div>
                     )}
                     <div className="min-w-0">
-                      <div className="font-bold truncate leading-tight">{tema.appShortTitle || 'e-Pondok'}</div>
-                      <div className="text-[9px] opacity-75 truncate">{tema.appSubtitle || 'Pondok'}</div>
+                      <div className="font-bold truncate leading-tight">{tema.appShortTitle || 'e-annursatu'}</div>
+                      <div className="text-[9px] opacity-75 truncate">{tema.appSubtitle || 'An-Nur 1'}</div>
                     </div>
                   </div>
 
@@ -1853,7 +2127,7 @@ export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTab
                     <div className="px-2 py-1 rounded text-white/75">Pengaturan</div>
                   </div>
                 </div>
-                <div className="text-[9px] opacity-60">SIAP v1.0</div>
+                <div className="text-[9px] opacity-60">e-annursatu</div>
               </div>
 
               {/* Mini Canvas */}

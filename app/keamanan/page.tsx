@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import {
   ShieldAlert,
@@ -462,6 +463,9 @@ function getTingkatStyle(tingkat: TingkatPelanggaran): {
 }
 
 export default function KeamananPage() {
+  const { canEditModule, pengurus } = useAuth();
+  const canEdit = canEditModule('keamanan');
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('pelanggaran');
   const [todayStr, setTodayStr] = useState<string>('');
   const [currentHm, setCurrentHm] = useState<string>('12:00');
@@ -1035,13 +1039,14 @@ export default function KeamananPage() {
   };
 
   const openCreatePelanggaranModal = (prefillAlert?: OverdueIzinAlert) => {
+    if (!canEdit) return;
     const baseDate = todayStr || getLocalTodayStr();
     setEditingPelanggaran(null);
     setSantriDropdownOpen(false);
     setPetugasDropdownOpen(false);
     setFormStatusTakzir('belum_selesai');
     setFormTglSelesaiTakzir('');
-    setFormPetugasText('');
+    setFormPetugasText(pengurus?.nama_lengkap || '');
     setFormIncludeSita(false);
     setFormSitaNama('');
     setFormSitaKategori('HP / Smartphone');
@@ -1094,6 +1099,7 @@ export default function KeamananPage() {
   };
 
   const openEditPelanggaranModal = (item: PelanggaranViewItem) => {
+    if (!canEdit) return;
     setEditingPelanggaran(item);
     setFormSantriId(item.santri_id);
     setSantriSearch(item.santri?.nama_lengkap || '');
@@ -1117,6 +1123,7 @@ export default function KeamananPage() {
 
   const handleSavePelanggaran = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!formSantriId) {
       showToast('error', 'Santri Belum Dipilih', 'Pilih santri terlebih dahulu dari daftar.');
       return;
@@ -1241,6 +1248,7 @@ export default function KeamananPage() {
   };
 
   const handleToggleTakzirSelesai = async (item: PelanggaranViewItem) => {
+    if (!canEdit) return;
     const nextStatus: StatusTakzir =
       item.status_takzir === 'selesai' ? 'belum_selesai' : 'selesai';
     const nextTgl = nextStatus === 'selesai' ? todayStr || getLocalTodayStr() : null;
@@ -1278,6 +1286,7 @@ export default function KeamananPage() {
   // MODAL HANDLERS: SITA BARANG
   // ==========================
   const openCreateSitaModal = () => {
+    if (!canEdit) return;
     const baseDate = todayStr || getLocalTodayStr();
     setEditingSita(null);
     setSitaSantriSearch('');
@@ -1288,13 +1297,14 @@ export default function KeamananPage() {
     setSitaFormJumlah('1');
     setSitaFormTanggal(baseDate);
     setSitaFormLokasi('Lemari Keamanan Pondok');
-    setSitaFormPetugasText('');
+    setSitaFormPetugasText(pengurus?.nama_lengkap || '');
     setSitaPetugasDropdownOpen(false);
     setSitaFormCatatan('');
     setShowSitaModal(true);
   };
 
   const openEditSitaModal = (item: SitaBarangViewItem) => {
+    if (!canEdit) return;
     setEditingSita(item);
     setSitaFormSantriId(item.santri_id);
     setSitaSantriSearch(item.santri?.nama_lengkap || '');
@@ -1314,6 +1324,7 @@ export default function KeamananPage() {
 
   const handleSaveSita = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!sitaFormSantriId) {
       showToast('error', 'Santri Belum Dipilih', 'Pilih pemilik barang sitaan.');
       return;
@@ -1376,6 +1387,7 @@ export default function KeamananPage() {
   };
 
   const openReturnSitaModal = (item: SitaBarangViewItem) => {
+    if (!canEdit) return;
     const wali = getDefaultWali(item.santri);
     setReturnTarget(item);
     setReturnStatus('dikembalikan');
@@ -1386,7 +1398,7 @@ export default function KeamananPage() {
 
   const handleConfirmReturnSita = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!returnTarget) return;
+    if (!canEdit || !returnTarget) return;
     setSaving(true);
     try {
       const updateFields = {
@@ -1433,6 +1445,7 @@ export default function KeamananPage() {
   // MODAL HANDLERS: MASTER KATEGORI
   // ==========================
   const openCreateMasterModal = () => {
+    if (!canEdit) return;
     setEditingMaster(null);
     setMasterNama('');
     setMasterTingkat('ringan');
@@ -1443,6 +1456,7 @@ export default function KeamananPage() {
   };
 
   const openEditMasterModal = (item: MasterPelanggaranItem) => {
+    if (!canEdit) return;
     setEditingMaster(item);
     setMasterNama(item.nama_pelanggaran);
     setMasterTingkat(item.tingkat);
@@ -1454,6 +1468,7 @@ export default function KeamananPage() {
 
   const handleSaveMaster = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!masterNama.trim()) {
       showToast('error', 'Nama Pelanggaran Kosong', 'Isi nama jenis pelanggaran.');
       return;
@@ -1500,6 +1515,7 @@ export default function KeamananPage() {
   };
 
   const handleSeedStarterMaster = async () => {
+    if (!canEdit) return;
     const existingNames = new Set(masterList.map((m) => m.nama_pelanggaran.toLowerCase()));
     const toAdd = STARTER_MASTER_PELANGGARAN.filter(
       (item) => !existingNames.has(item.nama_pelanggaran.toLowerCase())
@@ -1530,7 +1546,7 @@ export default function KeamananPage() {
   // DELETE HANDLER
   // ==========================
   const handleConfirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!canEdit || !deleteTarget) return;
     setDeleting(true);
     try {
       if (deleteTarget.kind === 'pelanggaran') {
@@ -1681,7 +1697,7 @@ export default function KeamananPage() {
   };
 
   const markPelanggaranWaSent = async (item: PelanggaranViewItem) => {
-    if (item.wa_terkirim) return;
+    if (!canEdit || item.wa_terkirim) return;
     if (pelanggaranLocalFallback) {
       const next = pelanggaranList.map((p) =>
         p.id === item.id ? { ...p, wa_terkirim: true } : p
@@ -1702,7 +1718,7 @@ export default function KeamananPage() {
   };
 
   const markSitaWaSent = async (item: SitaBarangViewItem) => {
-    if (item.wa_terkirim) return;
+    if (!canEdit || item.wa_terkirim) return;
     if (sitaLocalFallback) {
       const next = sitaList.map((s) => (s.id === item.id ? { ...s, wa_terkirim: true } : s));
       setSitaList(next);
@@ -2232,25 +2248,31 @@ export default function KeamananPage() {
             Ekspor Excel
           </button>
 
-          <button
-            type="button"
-            onClick={openCreateSitaModal}
-            className="min-h-[40px] px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
-          >
-            <Package className="w-4 h-4" />
-            Sita Barang
-          </button>
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                onClick={openCreateSitaModal}
+                className="min-h-[40px] px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <Package className="w-4 h-4" />
+                Sita Barang
+              </button>
 
-          <button
-            type="button"
-            onClick={() => openCreatePelanggaranModal()}
-            className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            Catat Pelanggaran
-          </button>
+              <button
+                type="button"
+                onClick={() => openCreatePelanggaranModal()}
+                className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                Catat Pelanggaran
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      <TransparencyBanner moduleLabel="Keamanan, Poin & Sita Barang" isReadOnly={!canEdit} />
 
       {fetchError && (
         <div className="print:hidden bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3 text-rose-900 text-xs">
@@ -2458,14 +2480,16 @@ export default function KeamananPage() {
                         {alert.keteranganTelat} &middot; {alert.dendaLabel}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openCreatePelanggaranModal(alert)}
-                      className="min-h-[40px] px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Catat Pelanggaran Telat
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => openCreatePelanggaranModal(alert)}
+                        className="min-h-[40px] px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Catat Pelanggaran Telat
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2539,14 +2563,16 @@ export default function KeamananPage() {
                     Tidak ada kasus yang cocok dengan filter saat ini, atau klik tombol di bawah untuk mencatat kasus baru.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openCreatePelanggaranModal()}
-                  className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  Catat Pelanggaran Pertama
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => openCreatePelanggaranModal()}
+                    className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Catat Pelanggaran Pertama
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -2644,31 +2670,33 @@ export default function KeamananPage() {
 
                             <td className="py-3.5 px-3.5 align-top text-right">
                               <div className="flex flex-col items-end gap-1.5">
-                                <div className="flex flex-nowrap items-center justify-end gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleTakzirSelesai(item)}
-                                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors ${
-                                      item.status_takzir === 'selesai'
-                                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                        : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                    }`}
-                                  >
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    {item.status_takzir === 'selesai'
-                                      ? 'Buka Ulang'
-                                      : 'Tuntaskan Takzir'}
-                                  </button>
+                                {canEdit && (
+                                  <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleTakzirSelesai(item)}
+                                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors ${
+                                        item.status_takzir === 'selesai'
+                                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                          : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                                      }`}
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      {item.status_takzir === 'selesai'
+                                        ? 'Buka Ulang'
+                                        : 'Tuntaskan Takzir'}
+                                    </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditPelanggaranModal(item)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                    Edit
-                                  </button>
-                                </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditPelanggaranModal(item)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                      Edit
+                                    </button>
+                                  </div>
+                                )}
 
                                 <div className="flex flex-nowrap items-center justify-end gap-1.5">
                                   {waNum && (
@@ -2709,15 +2737,17 @@ export default function KeamananPage() {
                                     BA
                                   </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => setDeleteTarget({ kind: 'pelanggaran', item })}
-                                    title="Hapus catatan"
-                                    aria-label={`Hapus catatan ${item.nama_pelanggaran}`}
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 shrink-0"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeleteTarget({ kind: 'pelanggaran', item })}
+                                      title="Hapus catatan"
+                                      aria-label={`Hapus catatan ${item.nama_pelanggaran}`}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 shrink-0"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -2780,18 +2810,20 @@ export default function KeamananPage() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTakzirSelesai(item)}
-                            className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 ${
-                              item.status_takzir === 'selesai'
-                                ? 'bg-slate-100 text-slate-700'
-                                : 'bg-emerald-700 text-white'
-                            }`}
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            {item.status_takzir === 'selesai' ? 'Buka Takzir' : 'Tuntaskan'}
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleTakzirSelesai(item)}
+                              className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 ${
+                                item.status_takzir === 'selesai'
+                                  ? 'bg-slate-100 text-slate-700'
+                                  : 'bg-emerald-700 text-white'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              {item.status_takzir === 'selesai' ? 'Buka Takzir' : 'Tuntaskan'}
+                            </button>
+                          )}
 
                           {waNum ? (
                             <a
@@ -2839,22 +2871,26 @@ export default function KeamananPage() {
                               <Printer className="w-3.5 h-3.5" />
                               BA
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditPelanggaranModal(item)}
-                              aria-label="Edit pelanggaran"
-                              className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTarget({ kind: 'pelanggaran', item })}
-                              aria-label="Hapus pelanggaran"
-                              className="min-h-[40px] min-w-[40px] rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEdit && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditPelanggaranModal(item)}
+                                  aria-label="Edit pelanggaran"
+                                  className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget({ kind: 'pelanggaran', item })}
+                                  aria-label="Hapus pelanggaran"
+                                  className="min-h-[40px] min-w-[40px] rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -3197,14 +3233,16 @@ export default function KeamananPage() {
               <option value="dimusnahkan">Dimusnahkan</option>
             </select>
 
-            <button
-              type="button"
-              onClick={openCreateSitaModal}
-              className="md:col-span-3 min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" />
-              Catat Barang Sitaan
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openCreateSitaModal}
+                className="md:col-span-3 min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                Catat Barang Sitaan
+              </button>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -3292,26 +3330,28 @@ export default function KeamananPage() {
                             </td>
                             <td className="py-3.5 px-3.5 align-top text-right">
                               <div className="flex flex-col items-end gap-1.5">
-                                <div className="flex flex-nowrap items-center justify-end gap-1.5">
-                                  {item.status === 'disita' && (
+                                {canEdit && (
+                                  <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                                    {item.status === 'disita' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openReturnSitaModal(item)}
+                                        className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                                      >
+                                        <Undo2 className="w-3.5 h-3.5" />
+                                        Kembalikan
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
-                                      onClick={() => openReturnSitaModal(item)}
-                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                                      onClick={() => openEditSitaModal(item)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                                     >
-                                      <Undo2 className="w-3.5 h-3.5" />
-                                      Kembalikan
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                      Edit
                                     </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditSitaModal(item)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                    Edit
-                                  </button>
-                                </div>
+                                  </div>
+                                )}
 
                                 <div className="flex flex-nowrap items-center justify-end gap-1.5">
                                   {waNum && (
@@ -3344,14 +3384,16 @@ export default function KeamananPage() {
                                     <Printer className="w-3.5 h-3.5" />
                                     Bukti
                                   </button>
-                                  <button
-                                    type="button"
-                                    aria-label={`Hapus sita ${item.nama_barang}`}
-                                    onClick={() => setDeleteTarget({ kind: 'sita', item })}
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 shrink-0"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      type="button"
+                                      aria-label={`Hapus sita ${item.nama_barang}`}
+                                      onClick={() => setDeleteTarget({ kind: 'sita', item })}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 shrink-0"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -3404,25 +3446,26 @@ export default function KeamananPage() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          {item.status === 'disita' ? (
-                            <button
-                              type="button"
-                              onClick={() => openReturnSitaModal(item)}
-                              className="min-h-[40px] px-3 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
-                            >
-                              <Undo2 className="w-4 h-4" />
-                              Kembalikan
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => openEditSitaModal(item)}
-                              className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                              Edit Data
-                            </button>
-                          )}
+                          {canEdit &&
+                            (item.status === 'disita' ? (
+                              <button
+                                type="button"
+                                onClick={() => openReturnSitaModal(item)}
+                                className="min-h-[40px] px-3 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                              >
+                                <Undo2 className="w-4 h-4" />
+                                Kembalikan
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openEditSitaModal(item)}
+                                className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                                Edit Data
+                              </button>
+                            ))}
 
                           {waNum ? (
                             <a
@@ -3464,22 +3507,26 @@ export default function KeamananPage() {
                               <Printer className="w-3.5 h-3.5" />
                               Bukti
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditSitaModal(item)}
-                              aria-label="Edit barang sitaan"
-                              className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTarget({ kind: 'sita', item })}
-                              aria-label="Hapus barang sitaan"
-                              className="min-h-[40px] min-w-[40px] rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEdit && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditSitaModal(item)}
+                                  aria-label="Edit barang sitaan"
+                                  className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget({ kind: 'sita', item })}
+                                  aria-label="Hapus barang sitaan"
+                                  className="min-h-[40px] min-w-[40px] rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -3506,23 +3553,25 @@ export default function KeamananPage() {
                 Daftar aturan Ringan, Sedang, dan Berat ini otomatis mengisi poin &amp; takzir saat petugas mencatat pelanggaran.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleSeedStarterMaster}
-                className="min-h-[40px] px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold whitespace-nowrap"
-              >
-                Muat Template Pedoman
-              </button>
-              <button
-                type="button"
-                onClick={openCreateMasterModal}
-                className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <Plus className="w-4 h-4" />
-                Tambah Aturan Poin
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSeedStarterMaster}
+                  className="min-h-[40px] px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold whitespace-nowrap"
+                >
+                  Muat Template Pedoman
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateMasterModal}
+                  className="min-h-[40px] px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah Aturan Poin
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -3566,23 +3615,27 @@ export default function KeamananPage() {
                         </td>
                         <td className="py-3 px-3.5 text-slate-600">{m.takzir_default || '-'}</td>
                         <td className="py-3 px-3.5 text-right">
-                          <div className="inline-flex flex-nowrap items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openEditMasterModal(m)}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold whitespace-nowrap"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Hapus aturan ${m.nama_pelanggaran}`}
-                              onClick={() => setDeleteTarget({ kind: 'master', item: m })}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
+                          {canEdit ? (
+                            <div className="inline-flex flex-nowrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openEditMasterModal(m)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold whitespace-nowrap"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Hapus aturan ${m.nama_pelanggaran}`}
+                                onClick={() => setDeleteTarget({ kind: 'master', item: m })}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">Hanya Lihat</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -3605,22 +3658,24 @@ export default function KeamananPage() {
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-600">{m.takzir_default}</p>
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => openEditMasterModal(m)}
-                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs"
-                      >
-                        Edit Aturan
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget({ kind: 'master', item: m })}
-                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600 font-bold text-xs"
-                      >
-                        Hapus
-                      </button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditMasterModal(m)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs"
+                        >
+                          Edit Aturan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget({ kind: 'master', item: m })}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600 font-bold text-xs"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

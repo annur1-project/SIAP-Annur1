@@ -9,6 +9,7 @@ import {
   DEFAULT_PENGATURAN_FORM,
   DEFAULT_TEMA_APLIKASI,
   extractExtendedPayload,
+  generateNextNisForYear,
   getTahunAjaranForDate,
   getTarifAktifFromRiwayat,
   hitungRincianPendaftaran,
@@ -23,6 +24,7 @@ import {
   removeKamarItem,
   sanitizeCorePayload,
 } from './pengaturan';
+import { buildSantriExcelImportPlan } from './santri-excel';
 
 test('getTarifAktifFromRiwayat memilih tarif terakhir yang sudah berlaku pada tanggal acuan', () => {
   const riwayat = [
@@ -209,4 +211,70 @@ test('isMissingColumnError mengenali error kolom PostgREST / PostgreSQL', () => 
   assert.equal(isMissingColumnError({ code: '23505', message: 'duplicate key value' }), false);
   assert.equal(isMissingColumnError(null), false);
 });
+
+test('generateNextNisForYear memisahkan urutan NIS PSB 2027 (27XXXX) dan Mutasi 2026 (26XXXX)', () => {
+  const existing = [{ nis: '260004' }, { nis: '260012' }, { nis: '270001' }];
+  // Santri Mutasi masuk Nov 2026 -> 260013
+  assert.equal(generateNextNisForYear('2026-11-19', existing), '260013');
+  // Santri PSB TA 2027/2028 -> 270002 (tidak tercampur urutan 260012)
+  assert.equal(generateNextNisForYear('2027-07-01', existing), '270002');
+  assert.equal(generateNextNisForYear('2027-07-01', existing, 2), '270003');
+});
+
+test('buildSantriExcelImportPlan memperbarui data EMIS berdasarkan NIS tanpa menerbitkan NIS baru', () => {
+  const existing = [
+    {
+      id: 'santri-1',
+      nis: '270001',
+      tgl_masuk: '2027-07-01',
+      nama_lengkap: 'Ahmad Santri PSB',
+      kamar: 'Menunggu Penempatan',
+      tarif_syahriyah: 500000,
+      status: 'ndalem',
+      paket_pendaftaran: 'vip',
+      nominal_pendaftaran: 2500000,
+      nama_ayah: 'H. Ahmad',
+    },
+  ];
+
+  const plan = buildSantriExcelImportPlan({
+    rows: [
+      {
+        NIS: '270001',
+        'Tanggal Masuk': '2027-07-01',
+        'Nama Lengkap': 'Ahmad Santri PSB',
+        'Khos / Kamar': 'Al-Fachriyah 1 (VIP)',
+        'Tipe SPP': 'VIP',
+        NISN: 991234567,
+        NIK: '3507123456780001',
+        'Tempat Lahir': 'Malang',
+        'Tanggal Lahir': '2013-05-01',
+        'Jenis Kelamin (L/P)': 'L',
+      },
+      {
+        NIS: '',
+        'Tanggal Masuk': '2026-11-19',
+        'Nama Lengkap': 'Santri Mutasi Baru',
+        'Khos / Kamar': 'A2',
+        'Tipe SPP': 'Reguler',
+      },
+    ],
+    existingSantriList: existing,
+    skemaPendaftaran: DEFAULT_PENGATURAN_FORM.aturan_operasional.pendaftaran,
+    todayStr: '2026-11-19',
+  });
+
+  assert.equal(plan.updates.length, 1);
+  assert.equal(plan.updates[0].id, 'santri-1');
+  assert.equal(plan.updates[0].nis, '270001');
+  assert.equal(plan.updates[0].payload.nis, '270001');
+  assert.equal(plan.updates[0].payload.status, 'ndalem'); // status asli terjaga
+  assert.equal(plan.updates[0].payload.kamar, 'Al-Fachriyah 1 (VIP)');
+  assert.equal(plan.updates[0].payload.nisn, '991234567');
+
+  assert.equal(plan.inserts.length, 1);
+  assert.equal(plan.inserts[0].nis, '260001');
+  assert.equal(plan.inserts[0].payload.nama_lengkap, 'Santri Mutasi Baru');
+});
+
 

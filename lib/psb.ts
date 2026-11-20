@@ -148,25 +148,25 @@ export const PSB_STATUS_META: Record<
     stepIndex: 1,
   },
   dp_terverifikasi: {
-    label: 'DP Terverifikasi (Belum Lunas)',
+    label: 'DP Terverifikasi · Menunggu Konfirmasi Aktif',
     shortLabel: 'DP Terverifikasi',
     badgeClass: 'bg-sky-50 text-sky-800 border-sky-200',
     stepIndex: 2,
   },
   lunas_menunggu_kedatangan: {
-    label: 'Lunas · Siap Masuk Pondok',
-    shortLabel: 'Lunas (Siap Sowan)',
+    label: 'Terverifikasi & Lunas',
+    shortLabel: 'Terverifikasi Lunas',
     badgeClass: 'bg-indigo-50 text-indigo-800 border-indigo-200',
-    stepIndex: 3,
+    stepIndex: 2,
   },
   diterima_aktif: {
     label: 'Resmi Santri Aktif',
     shortLabel: 'Santri Aktif',
     badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-    stepIndex: 4,
+    stepIndex: 3,
   },
   ditolak: {
-    label: 'Ditolak / Perlu Perbaikan',
+    label: 'Ditolak (Bukti TF Tidak Valid)',
     shortLabel: 'Ditolak',
     badgeClass: 'bg-rose-50 text-rose-800 border-rose-200',
     stepIndex: 0,
@@ -176,7 +176,7 @@ export const PSB_STATUS_META: Record<
 export const PSB_TABLE_SQL = `CREATE TABLE IF NOT EXISTS psb_pendaftaran (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   no_registrasi text NOT NULL UNIQUE,
-  tahun_psb integer NOT NULL DEFAULT 2026,
+  tahun_psb integer NOT NULL DEFAULT 2027,
   status text NOT NULL DEFAULT 'menunggu_verifikasi',
   paket text NOT NULL DEFAULT 'reguler',
   kamar_rencana text DEFAULT '',
@@ -243,11 +243,11 @@ export function toWaMeDigits(raw: string): string {
 }
 
 /**
- * Buat nomor registrasi PSB unik berurutan: PSB-26-001, PSB-26-002, dst.
+ * Buat nomor registrasi PSB unik berurutan: PSB-27-001, PSB-27-002, dst.
  */
 export function generateNextNoRegistrasi(
   existingList: Array<Pick<PsbPendaftaranRecord, 'no_registrasi'>>,
-  yearFull = 2026
+  yearFull = 2027
 ): string {
   const yy = String(yearFull).slice(-2);
   const prefix = `PSB-${yy}-`;
@@ -261,6 +261,29 @@ export function generateNextNoRegistrasi(
     }
   }
   return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+/**
+ * Hitung sisa kuota promo bergaya promosi realistis (default mulai sisa 28 dari 100
+ * agar tetap terasa meyakinkan dan berkurang alami per pendaftar terverifikasi).
+ */
+export function computePromoDisplayRemaining(params: {
+  psbRecordsCount: number;
+  kuotaTotal: number;
+  realQuotaUsed: number;
+  promoDisplayStart?: number;
+}): number {
+  const total = Math.max(0, Number(params.kuotaTotal || 100));
+  const realRemaining = Math.max(0, total - Math.max(0, Number(params.realQuotaUsed || 0)));
+  if (realRemaining === 0) return 0;
+
+  const startDisplay = Math.max(
+    1,
+    Math.min(total, Number(params.promoDisplayStart || 28))
+  );
+  const psbOnlineCount = Math.max(0, Number(params.psbRecordsCount || 0));
+  const promoSimulated = Math.max(3, startDisplay - psbOnlineCount);
+  return Math.min(realRemaining, promoSimulated);
 }
 
 export interface PsbBillingSummary {

@@ -59,6 +59,13 @@ import {
   updateKeuanganLampiranResilient,
   uploadKeuanganLampiranImage,
 } from '@/lib/keuangan';
+import { TransparencyBanner, useAuth } from '@/lib/auth';
+
+function isBisyarohTransaction(tx: { kategori?: string | null; keterangan?: string | null }): boolean {
+  const kat = String(tx.kategori || '').toLowerCase();
+  const ket = String(tx.keterangan || '').toLowerCase();
+  return kat.includes('bisyaroh') || ket.includes('bisyaroh');
+}
 
 // ============================================================================
 // TIPE DATA & KONSTANTA
@@ -429,7 +436,15 @@ function getWaliDisplayName(santri: SantriItem): string {
 // ============================================================================
 
 export default function KeuanganPage() {
-  // User & Role
+  const {
+    pengurus: authPengurus,
+    canEditModule,
+    canViewBisyaroh,
+    isPimpinanInti,
+  } = useAuth();
+  const canEditKeuangan = canEditModule('keuangan');
+
+  // User & Role (tersinkron dengan akun pengurus aktif)
   const [userRole, setUserRole] = useState<string>('keuangan');
   const [petugasNama, setPetugasNama] = useState<string>('Bendahara Pondok');
   const [petugasId, setPetugasId] = useState<string | null>(null);
@@ -634,27 +649,16 @@ export default function KeuanganPage() {
         'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
       ];
       setBisyarohBulanLabel(`${bulanIndo[now.getMonth()]} ${yyyy}`);
+
+      if (authPengurus) {
+        setPetugasId(authPengurus.auth_user_id || authPengurus.id);
+        setPetugasNama(authPengurus.nama_lengkap || 'Pengurus Pondok');
+        setUserRole(isPimpinanInti ? 'super_admin' : canEditKeuangan ? 'keuangan' : 'viewer');
+      }
     }, 0);
 
-    // Ambil profil user aktif
-    const loadUserRole = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user) {
-        setPetugasId(authData.user.id);
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('role, nama_divisi, username')
-          .eq('id', authData.user.id)
-          .maybeSingle();
-        if (prof) {
-          setUserRole(prof.role || 'keuangan');
-          setPetugasNama(prof.nama_divisi || prof.username || 'Bendahara Pondok');
-        }
-      }
-    };
-    void loadUserRole();
     return () => clearTimeout(timer);
-  }, []);
+  }, [authPengurus, canEditKeuangan, isPimpinanInti]);
 
   // ==========================================================================
   // LOAD SELURUH DATA KEUANGAN DARI SUPABASE
@@ -681,7 +685,9 @@ export default function KeuanganPage() {
           .order('tgl_transaksi', { ascending: false })
           .order('created_at', { ascending: false }),
         supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
-        supabase.from('v_pengurus_lengkap').select('*').eq('status', 'aktif').order('nama_lengkap', { ascending: true }),
+        canViewBisyaroh
+          ? supabase.from('v_pengurus_lengkap').select('*').eq('status', 'aktif').order('nama_lengkap', { ascending: true })
+          : Promise.resolve({ data: null, error: null }),
       ]);
 
       if (santriRes.data) {
@@ -721,8 +727,20 @@ export default function KeuanganPage() {
         }));
       }
 
-      if (pengurusRes.data) {
-        const pList = pengurusRes.data as PengurusItem[];
+      if (canViewBisyaroh && pengurusRes.data) {
+        let pList = pengurusRes.data as PengurusItem[];
+        // Sinkronkan bisyaroh melalui RPC aman jika kolom nominal di view disamarkan
+        const { data: bisMap } = await supabase.rpc('get_pengurus_bisyaroh_map');
+        if (Array.isArray(bisMap)) {
+          const mapById = new Map<string, number>();
+          bisMap.forEach((row: { pengurus_id?: string; nominal_bisyaroh?: number }) => {
+            if (row.pengurus_id) mapById.set(String(row.pengurus_id), Number(row.nominal_bisyaroh || 0));
+          });
+          pList = pList.map((pg) => ({
+            ...pg,
+            nominal_bisyaroh: mapById.has(pg.id) ? (mapById.get(pg.id) ?? 0) : Number(pg.nominal_bisyaroh || 0),
+          }));
+        }
         setPengurusList(pList);
         const initBisyaroh: Record<string, { checked: boolean; nominal: number }> = {};
         pList.forEach((pg) => {
@@ -730,6 +748,9 @@ export default function KeuanganPage() {
           initBisyaroh[pg.id] = { checked: nom > 0, nominal: nom };
         });
         setSelectedPengurusBisyaroh(initBisyaroh);
+      } else {
+        setPengurusList([]);
+        setSelectedPengurusBisyaroh({});
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Terjadi kesalahan saat memuat data keuangan.';
@@ -737,7 +758,7 @@ export default function KeuanganPage() {
     } finally {
       setLoading(false);
     }
-  }, [migrasiSantriId, selectedSantriId, showToast]);
+  }, [canViewBisyaroh, migrasiSantriId, selectedSantriId, showToast]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -972,11 +993,19 @@ export default function KeuanganPage() {
   }, [santriList]);
 
   // ==========================================================================
+  // PENYARINGAN KETAT DATA BISYAROH (HANYA PIMPINAN INTI & BENDAHARA)
+  // ==========================================================================
+  const visibleKasTransaksi = useMemo(() => {
+    if (canViewBisyaroh) return kasTransaksi;
+    return kasTransaksi.filter((tx) => !isBisyarohTransaction(tx));
+  }, [kasTransaksi, canViewBisyaroh]);
+
+  // ==========================================================================
   // PERHITUNGAN SALDO 4 DOMPET (KHUSUS TUNAI) & SYAHRIYAH TRANSFER (LAPORAN)
   // ==========================================================================
   const walletSummary = useMemo(() => {
     const summary = computeWalletAndTransferSummary(
-      kasTransaksi,
+      visibleKasTransaksi,
       {
         pendaftaran: Number(pengaturan.saldo_awal_pendaftaran || 0),
         operasional: Number(pengaturan.saldo_awal_operasional || 0),
@@ -994,7 +1023,7 @@ export default function KeuanganPage() {
       transferMasukBulanIni: summary.syahriyahTransfer.bulanIniMasuk,
       syahriyahTransfer: summary.syahriyahTransfer,
     };
-  }, [kasTransaksi, pengaturan, currentMonthStr]);
+  }, [visibleKasTransaksi, pengaturan, currentMonthStr]);
 
   // ==========================================================================
   // TAB 1: LOGIKA LOKET PEMBAYARAN SANTRI
@@ -1031,7 +1060,12 @@ export default function KeuanganPage() {
   const santriSudahPsbSet = useMemo(() => {
     const set = new Set<string>();
     kasTransaksi.forEach((tx) => {
-      if (tx.santri_id && tx.dompet === 'pendaftaran' && tx.tipe === 'masuk') {
+      if (!tx.santri_id || tx.dompet !== 'pendaftaran' || tx.tipe !== 'masuk') return;
+      const kat = (tx.kategori || '').toLowerCase();
+      if (
+        (kat.includes('pendaftaran') || kat.includes('psb')) &&
+        !kat.includes('infaq madin')
+      ) {
         set.add(tx.santri_id);
       }
     });
@@ -1231,6 +1265,10 @@ export default function KeuanganPage() {
 
   // Simpan Pembayaran Santri & Terbitkan Kuitansi
   const handleSimpanPembayaran = async () => {
+    if (!canEditKeuangan) {
+      showToast('warning', 'Mode Transparansi', 'Akun Anda dalam mode hanya lihat pada modul Keuangan.');
+      return;
+    }
     if (!activeSantri) return;
     if (loketCartSummary.items.length === 0) {
       showToast('warning', 'Belum Ada Item Dipilih', 'Silakan centang minimal 1 bulan Syahriyah, Iuran Tahunan, atau KTL terlebih dahulu.');
@@ -1312,9 +1350,9 @@ export default function KeuanganPage() {
           tipe: 'masuk' as const,
           kategori:
             d === 'pendaftaran'
-              ? activeSantriHasPsb
-                ? 'Infaq Madin & Pendaftaran'
-                : `Pendaftaran ${bayarPsbPaket.toUpperCase()} (PSB)`
+              ? bayarPsbChecked && !activeSantriHasPsb
+                ? `Pendaftaran ${bayarPsbPaket.toUpperCase()} (PSB)`
+                : 'Infaq Madin'
               : d === 'mda'
               ? 'Iuran Ujian / Raport MDA'
               : 'Syahriyah & Iuran Santri',
@@ -1399,7 +1437,7 @@ export default function KeuanganPage() {
         'success',
         'Pembayaran Berhasil & Kuitansi Terbit',
         metodeBayar === 'transfer'
-          ? `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk laporan Syahriyah Transfer (saldo kas tunai tidak berubah).`
+          ? `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk laporan Pemasukan Transfer (saldo kas tunai tidak berubah).`
           : `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk ke Dompet Tunai & Buku Kas.`
       );
     } catch (err: unknown) {
@@ -1713,13 +1751,14 @@ export default function KeuanganPage() {
     }
   };
 
-  // Hapus Transaksi Pembayaran Santri (Hanya Super Admin, Bendahara Tampil Notif Peringatan)
+  // Hapus Transaksi Pembayaran Santri (Hanya Pimpinan Inti, Bendahara Tampil Notif Peringatan)
   const handleClickHapusKuitansi = (kwt: KuitansiGroup) => {
-    if (userRole !== 'super_admin') {
+    if (!canEditKeuangan) return;
+    if (!isPimpinanInti && userRole !== 'super_admin') {
       showToast(
         'warning',
-        'Akses Dibatasi (Khusus Admin Utama)',
-        'Penghapusan transaksi pembayaran santri hanya dapat dilakukan oleh Admin Utama. Silakan hubungi Admin Utama untuk menghapus transaksi tersebut.'
+        'Akses Dibatasi (Khusus Pimpinan Inti)',
+        'Penghapusan transaksi pembayaran santri hanya dapat dilakukan oleh Pengasuh / Kepala Pondok. Silakan hubungi Pimpinan Inti untuk menghapus transaksi tersebut.'
       );
       return;
     }
@@ -1983,7 +2022,7 @@ export default function KeuanganPage() {
   // ==========================================================================
   const filteredKasTransaksi = useMemo(() => {
     const q = kasSearch.trim().toLowerCase();
-    return kasTransaksi.filter((tx) => {
+    return visibleKasTransaksi.filter((tx) => {
       if (kasBulanFilter !== 'SEMUA' && !(tx.tgl_transaksi || '').startsWith(kasBulanFilter)) {
         return false;
       }
@@ -2004,28 +2043,41 @@ export default function KeuanganPage() {
         (tx.santri?.nama_lengkap || '').toLowerCase().includes(q)
       );
     });
-  }, [kasTransaksi, kasBulanFilter, kasDompetFilter, kasTipeFilter, kasMetodeFilter, kasSearch]);
+  }, [visibleKasTransaksi, kasBulanFilter, kasDompetFilter, kasTipeFilter, kasMetodeFilter, kasSearch]);
 
   const kasFilteredTotals = useMemo(() => {
-    let masuk = 0;
-    let keluar = 0;
-    let tunai = 0;
-    let transfer = 0;
+    let tunaiMasuk = 0;
+    let tunaiKeluar = 0;
+    let transferMasuk = 0;
+    let transferKeluar = 0;
     filteredKasTransaksi.forEach((tx) => {
       const nom = Number(tx.nominal || 0);
+      const isTransfer = tx.metode_pembayaran === 'transfer';
       if (tx.tipe === 'masuk') {
-        masuk += nom;
-        if (tx.metode_pembayaran === 'transfer') transfer += nom;
-        else tunai += nom;
+        if (isTransfer) transferMasuk += nom;
+        else tunaiMasuk += nom;
       } else {
-        keluar += nom;
+        if (isTransfer) transferKeluar += nom;
+        else tunaiKeluar += nom;
       }
     });
-    return { masuk, keluar, selisih: masuk - keluar, tunai, transfer };
+    return {
+      tunaiMasuk,
+      tunaiKeluar,
+      tunaiNetto: tunaiMasuk - tunaiKeluar,
+      transferMasuk,
+      transferKeluar,
+      transferNetto: transferMasuk - transferKeluar,
+    };
   }, [filteredKasTransaksi]);
 
   const handleSimpanKasManual = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditKeuangan) return;
+    if (!canViewBisyaroh && kasForm.kategori.toLowerCase().includes('bisyaroh')) {
+      showToast('error', 'Akses Ditolak', 'Kategori Bisyaroh hanya dapat dicatat oleh Pimpinan Inti dan Bendahara.');
+      return;
+    }
     const nom = Number(kasForm.nominal.replace(/\D/g, ''));
     if (nom <= 0) {
       showToast('warning', 'Nominal Tidak Valid', 'Masukkan nominal transaksi lebih dari Rp 0.');
@@ -2075,7 +2127,7 @@ export default function KeuanganPage() {
         'success',
         'Transaksi Kas Tercatat',
         kasForm.metode_pembayaran === 'transfer'
-          ? `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} transfer ${formatRupiah(nom)} dicatat ke laporan Syahriyah Transfer.`
+          ? `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} transfer ${formatRupiah(nom)} dicatat ke laporan Pemasukan Transfer.`
           : `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} tunai sebesar ${formatRupiah(nom)} berhasil disimpan.`
       );
     } catch (err: unknown) {
@@ -2123,17 +2175,13 @@ export default function KeuanganPage() {
   };
 
   const handleDeleteKasRow = (tx: KeuanganTransaksiItem) => {
+    if (!canEditKeuangan) return;
     if (tx.no_kuitansi) {
       showToast(
         'info',
         'Transaksi Terhubung Kuitansi Santri',
-        `Transaksi ini berasal dari kuitansi santri (${tx.no_kuitansi}). Gunakan tombol Hapus Transaksi pada Tab 2. Kuitansi 21×10 cm (khusus Admin Utama).`
+        `Transaksi ini berasal dari kuitansi santri (${tx.no_kuitansi}). Gunakan tombol Hapus Transaksi pada Tab 2. Kuitansi 21×10 cm (khusus Pimpinan Inti).`
       );
-      return;
-    }
-
-    if (userRole !== 'super_admin' && userRole !== 'keuangan') {
-      showToast('warning', 'Akses Ditolak', 'Anda tidak memiliki izin menghapus catatan buku kas.');
       return;
     }
 
@@ -2163,6 +2211,7 @@ export default function KeuanganPage() {
   }, [selectedPengurusBisyaroh]);
 
   const handleCairkanBisyarohKolektif = async () => {
+    if (!canEditKeuangan || !canViewBisyaroh) return;
     const dipilih = pengurusList.filter((p) => selectedPengurusBisyaroh[p.id]?.checked && Number(selectedPengurusBisyaroh[p.id]?.nominal) > 0);
     if (dipilih.length === 0) {
       showToast('warning', 'Belum Ada Pengurus Dipilih', 'Centang minimal 1 pengurus yang akan dicairkan bisyarohnya.');
@@ -2175,16 +2224,18 @@ export default function KeuanganPage() {
         .map((p) => `${p.nama_lengkap} (${formatRupiah(selectedPengurusBisyaroh[p.id].nominal)})`)
         .join(', ');
 
-      const { error } = await supabase.from('keuangan_transaksi').insert({
-        dompet: bisyarohDompet,
-        tipe: 'keluar',
-        kategori: `Bisyaroh Pengurus (${bisyarohBulanLabel})`,
-        nominal: totalBisyarohDipilih,
-        keterangan: `Pencairan kolektif ${dipilih.length} pengurus bulan ${bisyarohBulanLabel}: ${daftarNama}`,
-        metode_pembayaran: bisyarohMetode,
-        petugas_id: petugasId,
-        tgl_transaksi: bisyarohTgl,
-      });
+      const { error } = await insertKeuanganTransaksiResilient([
+        {
+          dompet: bisyarohDompet,
+          tipe: 'keluar',
+          kategori: `Bisyaroh Pengurus (${bisyarohBulanLabel})`,
+          nominal: totalBisyarohDipilih,
+          keterangan: `Pencairan kolektif ${dipilih.length} pengurus bulan ${bisyarohBulanLabel}: ${daftarNama}`,
+          metode_pembayaran: bisyarohMetode,
+          petugas_id: petugasId,
+          tgl_transaksi: bisyarohTgl,
+        },
+      ]);
 
       if (error) throw error;
 
@@ -2197,7 +2248,9 @@ export default function KeuanganPage() {
       showToast(
         'success',
         'Bisyaroh Pengurus Dicairkan',
-        `Total ${formatRupiah(totalBisyarohDipilih)} untuk ${dipilih.length} pengurus telah dicatat di Buku Kas.`
+        bisyarohMetode === 'transfer'
+          ? `Total ${formatRupiah(totalBisyarohDipilih)} untuk ${dipilih.length} pengurus dicatat sebagai pengeluaran Transfer Bank (saldo kas tunai tidak berubah).`
+          : `Total ${formatRupiah(totalBisyarohDipilih)} untuk ${dipilih.length} pengurus telah dicatat di Buku Kas Tunai.`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal mencatat pencairan bisyaroh.';
@@ -2282,7 +2335,7 @@ export default function KeuanganPage() {
   }, [activeMigrasiSantri, pembayaranDetails, tahunAjaran]);
 
   const handleSimpanMigrasiSatuan = async () => {
-    if (!activeMigrasiSantri) return;
+    if (!canEditKeuangan || !activeMigrasiSantri) return;
     setSavingMigrasi(true);
     try {
       // 1. Hapus record lama yang bertanda is_migrasi = true untuk santri & TA ini agar bersih saat disetel ulang
@@ -2408,7 +2461,7 @@ export default function KeuanganPage() {
   // Import Excel Migrasi Massal
   const handleImportExcelMigrasi = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !canEditKeuangan) return;
 
     setImportingMigrasi(true);
     try {
@@ -3026,6 +3079,17 @@ export default function KeuanganPage() {
           </div>
         )}
 
+        {/* BANNER MODE TRANSPARANSI & PRIVASI BISYAROH */}
+        <TransparencyBanner
+          moduleLabel="Keuangan Pondok"
+          isReadOnly={!canEditKeuangan}
+          extraNote={
+            !canViewBisyaroh
+              ? 'Data Bisyaroh Pengurus & rincian pencairannya disembunyikan (khusus Pimpinan Inti & Bendahara).'
+              : undefined
+          }
+        />
+
         {/* HEADER RINGKAS & SALDO 4 DOMPET + TUNAI VS TRANSFER BULAN INI */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3047,7 +3111,7 @@ export default function KeuanganPage() {
               </div>
               <div className="px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5 text-sky-700" />
-                <span>Syahriyah Transfer Bln Ini:</span>
+                <span>Pemasukan Transfer Bln Ini:</span>
                 <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.transferMasukBulanIni)}</strong>
               </div>
               <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white flex items-center gap-1.5">
@@ -3123,44 +3187,75 @@ export default function KeuanganPage() {
             </div>
           </div>
 
-          {/* KARTU LAPORAN TERPISAH: SYAHRIYAH TRANSFER (TIDAK MASUK SALDO TUNAI DOMPET) */}
-          <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-            <div className="flex items-start sm:items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-sky-700 text-white shrink-0">
-                <CreditCard className="w-4 h-4" />
+          {/* KARTU LAPORAN TERPISAH: PEMASUKAN TRANSFER (REKENING BANK, TERPISAH DARI KAS TUNAI) */}
+          <div className="rounded-xl border border-sky-200 bg-sky-50/55 overflow-hidden text-xs">
+            <div className="px-3.5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-sky-700 text-white flex items-center justify-center shrink-0">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-xs font-extrabold text-slate-900 uppercase tracking-wide">
+                    Pemasukan Transfer
+                  </h2>
+                  <p className="text-[11px] text-sky-900/80 mt-0.5">
+                    Rekening Transfer Bank &middot; Laporan khusus (tidak memengaruhi saldo kas tunai 4 dompet)
+                  </p>
+                </div>
               </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-extrabold text-slate-900 uppercase tracking-wide text-[11px]">
-                    Syahriyah Transfer
+
+              <div className="grid grid-cols-3 gap-3 sm:gap-5 border-t md:border-t-0 md:border-l border-sky-200/80 pt-2.5 md:pt-0 md:pl-5 shrink-0">
+                <div>
+                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+                    Masuk Bln Ini
                   </span>
-                  <span className="text-[10.5px] font-semibold text-sky-800 bg-white px-2 py-0.5 rounded-md border border-sky-200">
-                    Khusus Laporan Rekening • Terpisah dari Kas Tunai
+                  <span className="text-xs sm:text-sm font-bold text-sky-900 font-mono tabular-nums whitespace-nowrap">
+                    {formatRupiah(walletSummary.syahriyahTransfer.bulanIniMasuk)}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  Rincian Transfer Masuk: Syahriyah/Tahunan{' '}
-                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.operasional)}</strong>
-                  {' '}&bull; Pendaftaran{' '}
-                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.pendaftaran)}</strong>
-                  {' '}&bull; MDA{' '}
-                  <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.mda)}</strong>
-                </p>
+                <div>
+                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+                    Keluar Rekening
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                    {formatRupiah(walletSummary.syahriyahTransfer.totalKeluarAllTime)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+                    Netto Rekening Transfer
+                  </span>
+                  <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums whitespace-nowrap">
+                    {formatRupiah(walletSummary.syahriyahTransfer.netAllTime)}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 sm:text-right shrink-0 pl-9 sm:pl-0">
-              <div>
-                <span className="text-[10px] font-semibold text-slate-500 block">Transfer Bln Ini</span>
-                <span className="text-xs font-bold text-sky-900 font-mono tabular-nums">
-                  {formatRupiah(walletSummary.syahriyahTransfer.bulanIniMasuk)}
-                </span>
+            <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-sky-200/80 bg-white/75 divide-y lg:divide-y-0 divide-x divide-sky-100">
+              <div className="px-3.5 py-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-slate-600 truncate">Syahriyah &amp; Tahunan</span>
+                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                  {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.operasional)}
+                </strong>
               </div>
-              <div>
-                <span className="text-[10px] font-semibold text-slate-500 block">Akumulasi Netto Transfer</span>
-                <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums">
-                  {formatRupiah(walletSummary.syahriyahTransfer.netAllTime)}
-                </span>
+              <div className="px-3.5 py-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-slate-600 truncate">Pendaftaran</span>
+                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                  {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.pendaftaran)}
+                </strong>
+              </div>
+              <div className="px-3.5 py-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-slate-600 truncate">Dompet MDA</span>
+                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                  {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.mda)}
+                </strong>
+              </div>
+              <div className="px-3.5 py-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-slate-600 truncate">Kas Umum</span>
+                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                  {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.kas_pondok)}
+                </strong>
               </div>
             </div>
           </div>
@@ -3228,7 +3323,7 @@ export default function KeuanganPage() {
               }`}
             >
               <BookOpen className="w-3.5 h-3.5" />
-              4. Buku Kas &amp; Bisyaroh
+              {canViewBisyaroh ? '4. Buku Kas & Bisyaroh' : '4. Buku Kas Umum'}
             </button>
 
             <button
@@ -3773,7 +3868,7 @@ export default function KeuanganPage() {
                       <div className="shrink-0 px-3 sm:px-4 py-1.5 bg-sky-50 border-t border-sky-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-bold text-sky-900 whitespace-nowrap">
-                            Masuk: Syahriyah Transfer
+                            Masuk: Pemasukan Transfer
                           </span>
                           <span className="hidden sm:inline text-sky-700 truncate">
                             (Hanya laporan bank, tidak masuk kas tunai dompet)
@@ -3870,24 +3965,30 @@ export default function KeuanganPage() {
                           </span>
                         </div>
 
-                        <button
-                          type="button"
-                          disabled={savingPayment || loketCartSummary.items.length === 0}
-                          onClick={handleSimpanPembayaran}
-                          className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
-                        >
-                          <ReceiptText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                          <span>
-                            {savingPayment ? (
-                              'Menyimpan...'
-                            ) : (
-                              <>
-                                <span className="sm:hidden">Bayar</span>
-                                <span className="hidden sm:inline">Simpan &amp; Terbitkan Kuitansi</span>
-                              </>
-                            )}
+                        {canEditKeuangan ? (
+                          <button
+                            type="button"
+                            disabled={savingPayment || loketCartSummary.items.length === 0}
+                            onClick={handleSimpanPembayaran}
+                            className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
+                          >
+                            <ReceiptText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                            <span>
+                              {savingPayment ? (
+                                'Menyimpan...'
+                              ) : (
+                                <>
+                                  <span className="sm:hidden">Bayar</span>
+                                  <span className="hidden sm:inline">Simpan &amp; Terbitkan Kuitansi</span>
+                                </>
+                              )}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-300/40 text-amber-100 font-bold text-[11px] whitespace-nowrap shrink-0">
+                            Hanya Lihat
                           </span>
-                        </button>
+                        )}
                       </div>
                     </div>
                   </>
@@ -4065,7 +4166,7 @@ export default function KeuanganPage() {
                               </button>
                             );
                           }
-                          if (activeKuitansi.metode_pembayaran === 'transfer') {
+                          if (canEditKeuangan && activeKuitansi.metode_pembayaran === 'transfer') {
                             return (
                               <button
                                 type="button"
@@ -4090,20 +4191,22 @@ export default function KeuanganPage() {
                           return null;
                         })()}
 
-                        {/* TOMBOL HAPUS TRANSAKSI (MUNCUL DI ADMIN UTAMA & BENDAHARA, NAMUN BENDAHARA MENDAPAT NOTIF PERINGATAN) */}
-                        <button
-                          type="button"
-                          onClick={() => handleClickHapusKuitansi(activeKuitansi)}
-                          title={
-                            userRole === 'super_admin'
-                              ? 'Hapus Transaksi Pembayaran (Admin Utama)'
-                              : 'Khusus Admin Utama'
-                          }
-                          className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Hapus Transaksi
-                        </button>
+                        {/* TOMBOL HAPUS TRANSAKSI (HANYA PIMPINAN INTI / BENDAHARA, BENDAHARA MENDAPAT NOTIF PERINGATAN) */}
+                        {canEditKeuangan && (
+                          <button
+                            type="button"
+                            onClick={() => handleClickHapusKuitansi(activeKuitansi)}
+                            title={
+                              isPimpinanInti || userRole === 'super_admin'
+                                ? 'Hapus Transaksi Pembayaran (Pimpinan Inti)'
+                                : 'Khusus Pimpinan Inti'
+                            }
+                            className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Hapus Transaksi
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -4469,21 +4572,25 @@ export default function KeuanganPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => setShowBisyarohModal(true)}
-                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
-                    >
-                      <Users className="w-3.5 h-3.5" />
-                      Pencairan Bisyaroh Pengurus
-                    </button>
+                    {canViewBisyaroh && canEditKeuangan && (
+                      <button
+                        onClick={() => setShowBisyarohModal(true)}
+                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        Pencairan Bisyaroh Pengurus
+                      </button>
+                    )}
 
-                    <button
-                      onClick={() => setShowKasModal(true)}
-                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Catat Kas Masuk / Keluar
-                    </button>
+                    {canEditKeuangan && (
+                      <button
+                        onClick={() => setShowKasModal(true)}
+                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Catat Kas Masuk / Keluar
+                      </button>
+                    )}
 
                     <button
                       onClick={handleExportBukuKasExcel}
@@ -4571,16 +4678,24 @@ export default function KeuanganPage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums shrink-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs tabular-nums shrink-0">
                     <span className="text-emerald-800 font-bold whitespace-nowrap">
-                      Masuk: {formatRupiah(kasFilteredTotals.masuk)}
+                      Tunai Masuk: {formatRupiah(kasFilteredTotals.tunaiMasuk)}
                     </span>
                     <span className="text-rose-700 font-bold whitespace-nowrap">
-                      Keluar: {formatRupiah(kasFilteredTotals.keluar)}
+                      Tunai Keluar: {formatRupiah(kasFilteredTotals.tunaiKeluar)}
                     </span>
                     <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold whitespace-nowrap">
-                      Netto: {formatRupiah(kasFilteredTotals.selisih)}
+                      Tunai Netto: {formatRupiah(kasFilteredTotals.tunaiNetto)}
                     </span>
+                    {(kasFilteredTotals.transferMasuk > 0 || kasFilteredTotals.transferKeluar > 0) && (
+                      <span className="px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-900 font-bold whitespace-nowrap">
+                        Transfer: +{formatRupiah(kasFilteredTotals.transferMasuk)}
+                        {kasFilteredTotals.transferKeluar > 0
+                          ? ` / -${formatRupiah(kasFilteredTotals.transferKeluar)}`
+                          : ''}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -4666,7 +4781,7 @@ export default function KeuanganPage() {
                                   <Eye className="w-3.5 h-3.5" />
                                   {attachKind === 'bukti_tf' ? 'Bukti' : 'Nota'}
                                 </button>
-                              ) : (
+                              ) : canEditKeuangan ? (
                                 <button
                                   type="button"
                                   disabled={uploadingLampiranId === lockKey}
@@ -4687,16 +4802,18 @@ export default function KeuanganPage() {
                                     ? '+ Bukti'
                                     : '+ Nota'}
                                 </button>
-                              )}
+                              ) : null}
 
-                              <button
-                                onClick={() => handleDeleteKasRow(tx)}
-                                title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Admin Utama)' : 'Hapus catatan kas'}
-                                aria-label="Hapus transaksi kas"
-                                className="min-h-[36px] min-w-[36px] p-2 rounded-lg bg-slate-50 text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-center"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {canEditKeuangan && (
+                                <button
+                                  onClick={() => handleDeleteKasRow(tx)}
+                                  title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Pimpinan Inti)' : 'Hapus catatan kas'}
+                                  aria-label="Hapus transaksi kas"
+                                  className="min-h-[36px] min-w-[36px] p-2 rounded-lg bg-slate-50 text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-center"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -4791,7 +4908,7 @@ export default function KeuanganPage() {
                                     <Eye className="w-3 h-3" />
                                     {attachKind === 'bukti_tf' ? 'Lihat Bukti' : 'Lihat Nota'}
                                   </button>
-                                ) : (
+                                ) : canEditKeuangan ? (
                                   <button
                                     type="button"
                                     disabled={uploadingLampiranId === lockKey}
@@ -4812,17 +4929,23 @@ export default function KeuanganPage() {
                                       ? '+ Bukti TF'
                                       : '+ Nota'}
                                   </button>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">-</span>
                                 )}
                               </td>
                               <td className="py-3 px-3 text-center">
-                                <button
-                                  onClick={() => handleDeleteKasRow(tx)}
-                                  title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Admin Utama)' : 'Hapus catatan kas'}
-                                  aria-label="Hapus transaksi kas"
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {canEditKeuangan ? (
+                                  <button
+                                    onClick={() => handleDeleteKasRow(tx)}
+                                    title={tx.no_kuitansi ? 'Hapus lewat Tab 2 Kuitansi (Pimpinan Inti)' : 'Hapus catatan kas'}
+                                    aria-label="Hapus transaksi kas"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">-</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -4861,17 +4984,19 @@ export default function KeuanganPage() {
                     Download Template Excel Migrasi (.xlsx)
                   </button>
 
-                  <label className="py-2.5 px-4 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
-                    <FileSpreadsheet className="w-4 h-4" />
-                    {importingMigrasi ? 'Mengimpor Data...' : 'Upload File Excel Migrasi (.xlsx)'}
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      disabled={importingMigrasi}
-                      onChange={handleImportExcelMigrasi}
-                      className="hidden"
-                    />
-                  </label>
+                  {canEditKeuangan && (
+                    <label className="py-2.5 px-4 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      {importingMigrasi ? 'Mengimpor Data...' : 'Upload File Excel Migrasi (.xlsx)'}
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        disabled={importingMigrasi}
+                        onChange={handleImportExcelMigrasi}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -5070,17 +5195,19 @@ export default function KeuanganPage() {
                           </div>
                         </div>
 
-                        <div className="pt-2 flex justify-end">
-                          <button
-                            type="button"
-                            disabled={savingMigrasi}
-                            onClick={handleSimpanMigrasiSatuan}
-                            className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-extrabold flex items-center gap-2 shadow-xs cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            {savingMigrasi ? 'Menyimpan...' : 'Simpan Status Migrasi & KTL Santri'}
-                          </button>
-                        </div>
+                        {canEditKeuangan && (
+                          <div className="pt-2 flex justify-end">
+                            <button
+                              type="button"
+                              disabled={savingMigrasi}
+                              onClick={handleSimpanMigrasiSatuan}
+                              className="px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-extrabold flex items-center gap-2 shadow-xs cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              {savingMigrasi ? 'Menyimpan...' : 'Simpan Status Migrasi & KTL Santri'}
+                            </button>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -5218,7 +5345,7 @@ export default function KeuanganPage() {
 
               {kasForm.metode_pembayaran === 'transfer' && (
                 <div className="px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 text-[11px] text-sky-900 font-medium">
-                  Transaksi bermetode Transfer Bank dicatat di laporan <strong>Syahriyah Transfer</strong> dan tidak mengubah saldo kas tunai 4 Dompet.
+                  Transaksi bermetode Transfer Bank dicatat di laporan <strong>Pemasukan Transfer</strong> dan tidak mengubah saldo kas tunai 4 Dompet.
                 </div>
               )}
 
@@ -5304,7 +5431,7 @@ export default function KeuanganPage() {
         {/* ==================================================================
             MODAL PENCAIRAN KOLEKTIF BISYAROH PENGURUS
         ================================================================== */}
-        {showBisyarohModal && (
+        {canEditKeuangan && canViewBisyaroh && showBisyarohModal && (
           <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[88vh] flex flex-col text-xs overflow-hidden">
               <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-indigo-950 text-white">
@@ -5603,23 +5730,27 @@ export default function KeuanganPage() {
               </div>
 
               <div className="px-4 py-3 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAttachTarget({
-                      txId: lightboxLampiran.txId,
-                      noKuitansi: lightboxLampiran.noKuitansi,
-                      kind: lightboxLampiran.title.toLowerCase().includes('transfer')
-                        ? 'bukti_tf'
-                        : 'nota',
-                    });
-                    quickAttachInputRef.current?.click();
-                  }}
-                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  Ganti Foto
-                </button>
+                {canEditKeuangan ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickAttachTarget({
+                        txId: lightboxLampiran.txId,
+                        noKuitansi: lightboxLampiran.noKuitansi,
+                        kind: lightboxLampiran.title.toLowerCase().includes('transfer')
+                          ? 'bukti_tf'
+                          : 'nota',
+                      });
+                      quickAttachInputRef.current?.click();
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    Ganti Foto
+                  </button>
+                ) : (
+                  <span className="text-slate-500">Mode Hanya Lihat</span>
+                )}
 
                 <button
                   type="button"

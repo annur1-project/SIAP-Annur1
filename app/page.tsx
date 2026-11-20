@@ -80,6 +80,8 @@ import {
   getNextPrayerCountdown,
   getWibTodayIso,
 } from '@/lib/kalender';
+import { computeWalletAndTransferSummary } from '@/lib/keuangan';
+import { useAuth } from '@/lib/auth';
 
 interface SantriRow {
   id: string;
@@ -95,6 +97,9 @@ interface TransaksiRow {
   tipe: 'masuk' | 'keluar';
   nominal: number;
   tgl_transaksi?: string;
+  metode_pembayaran?: string | null;
+  kategori?: string | null;
+  keterangan?: string | null;
 }
 
 interface PengaturanRow {
@@ -191,14 +196,16 @@ function parseBatasJam(alasan?: string | null): string {
 }
 
 function formatRupiah(nominal: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(nominal || 0);
+  const rounded = Math.round(Number(nominal) || 0);
+  const sign = rounded < 0 ? '-' : '';
+  const digits = Math.abs(rounded)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${sign}Rp ${digits}`;
 }
 
 export default function DashboardPage() {
+  const { canViewBisyaroh } = useAuth();
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [tahunAjaran, setTahunAjaran] = useState('2026/2027');
@@ -224,6 +231,8 @@ export default function DashboardPage() {
     saldoKasPondok: 0,
     saldoMda: 0,
     masukBulanIni: 0,
+    transferMasukBulanIni: 0,
+    transferNetAllTime: 0,
     namaPesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
   });
 
@@ -398,7 +407,7 @@ export default function DashboardPage() {
       laundryCatatanRes,
     ] = await Promise.all([
       supabase.from('santri').select('id, nama_lengkap, nis, status, kamar'),
-      supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi'),
+      supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi, metode_pembayaran, kategori, keterangan'),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
       supabase
         .from('absen_jamaah')
@@ -426,7 +435,13 @@ export default function DashboardPage() {
     if (transaksiRes.error) throw transaksiRes.error;
 
     const santriList = (santriRes.data || []) as SantriRow[];
-    const transaksiList = (transaksiRes.data || []) as TransaksiRow[];
+    const allTransaksiList = (transaksiRes.data || []) as TransaksiRow[];
+    const transaksiList = canViewBisyaroh
+      ? allTransaksiList
+      : allTransaksiList.filter(
+          (tx) =>
+            !`${tx.kategori || ''} ${tx.keterangan || ''}`.toLowerCase().includes('bisyaroh')
+        );
     const setting = (pengaturanRes.data || {}) as PengaturanRow;
     const localExt = readExtendedLocal();
     const mergedAturan = mergeAturanOperasional(
@@ -468,24 +483,23 @@ export default function DashboardPage() {
     const santriNdalem = santriList.filter((s) => s.status === 'ndalem').length;
     const santriBeasiswa = santriList.filter((s) => s.status === 'beasiswa_lazis').length;
 
-    let saldoPendaftaran = Number(setting.saldo_awal_pendaftaran || 0);
-    let saldoOperasional = Number(setting.saldo_awal_operasional || 0);
-    let saldoKasPondok = Number(setting.saldo_awal_kas_pondok || 0);
-    let saldoMda = Number(setting.saldo_awal_mda || 0);
-    let masukBulanIni = 0;
-
-    for (const tx of transaksiList) {
-      const nominal = Number(tx.nominal || 0);
-      const signed = tx.tipe === 'masuk' ? nominal : -nominal;
-      if (tx.dompet === 'pendaftaran') saldoPendaftaran += signed;
-      else if (tx.dompet === 'operasional') saldoOperasional += signed;
-      else if (tx.dompet === 'kas_pondok') saldoKasPondok += signed;
-      else if (tx.dompet === 'mda') saldoMda += signed;
-
-      if (tx.tipe === 'masuk' && (tx.tgl_transaksi || '').startsWith(monthPrefix)) {
-        masukBulanIni += nominal;
-      }
-    }
+    const walletSummary = computeWalletAndTransferSummary(
+      transaksiList,
+      {
+        pendaftaran: Number(setting.saldo_awal_pendaftaran || 0),
+        operasional: Number(setting.saldo_awal_operasional || 0),
+        kas_pondok: Number(setting.saldo_awal_kas_pondok || 0),
+        mda: Number(setting.saldo_awal_mda || 0),
+      },
+      monthPrefix
+    );
+    const saldoPendaftaran = walletSummary.totals.pendaftaran;
+    const saldoOperasional = walletSummary.totals.operasional;
+    const saldoKasPondok = walletSummary.totals.kas_pondok;
+    const saldoMda = walletSummary.totals.mda;
+    const masukBulanIni = walletSummary.tunaiMasukBulanIni;
+    const transferMasukBulanIni = walletSummary.syahriyahTransfer.bulanIniMasuk;
+    const transferNetAllTime = walletSummary.syahriyahTransfer.netAllTime;
 
     const activeSantriIds = new Set(
       santriList
@@ -700,6 +714,8 @@ export default function DashboardPage() {
         saldoKasPondok,
         saldoMda,
         masukBulanIni,
+        transferMasukBulanIni,
+        transferNetAllTime,
         namaPesantren: setting.nama_pesantren || 'Pondok Pesantren An-Nur 1 Bululawang',
       },
       jamaahToday: {
@@ -874,15 +890,46 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewBisyaroh]);
 
   const todayCalendarInfo = useMemo(() => {
-    const ref = nowClock || new Date('2026-11-18T08:00:00Z');
-    const todayIso = getWibTodayIso(ref);
+    if (!nowClock) {
+      return {
+        todayIso: '',
+        masehiPasaran: 'Memuat tanggal...',
+        hijri: {
+          day: 1,
+          month: 1,
+          year: 1448,
+          monthName: 'Muharram',
+          arabicDay: '١',
+          formatted: 'Memuat Hijriyah...',
+        },
+        sholat: {
+          isoDate: '',
+          imsak: '--:--',
+          subuh: '--:--',
+          terbit: '--:--',
+          dhuha: '--:--',
+          dzuhur: '--:--',
+          ashar: '--:--',
+          maghrib: '--:--',
+          isya: '--:--',
+        },
+        countdown: {
+          nextName: 'Sholat',
+          nextTime: '--:--',
+          remainingSeconds: 0,
+          remainingFormatted: '- -- : -- : --',
+        },
+      };
+    }
+    const todayIso = getWibTodayIso(nowClock);
     const masehiPasaran = formatHariPasaranIndo(todayIso);
     const hijri = getHijriDate(todayIso, koreksiHijriyah);
     const sholat = computeJadwalSholatBululawang(todayIso);
-    const countdown = getNextPrayerCountdown(ref, sholat);
+    const countdown = getNextPrayerCountdown(nowClock, sholat);
     return { todayIso, masehiPasaran, hijri, sholat, countdown };
   }, [nowClock, koreksiHijriyah]);
 
@@ -966,7 +1013,7 @@ export default function DashboardPage() {
             <span className="truncate">{stats.namaPesantren}</span>
           </div>
           <h1 className="text-lg sm:text-2xl font-bold mt-1.5 tracking-tight">
-            Beranda Pengurus SIAP An-Nur 1
+            Beranda Pengurus e-annursatu
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -1144,7 +1191,7 @@ export default function DashboardPage() {
 
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Kas Operasional</span>
+            <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Syahriyah (Tunai)</span>
             <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
           </div>
           <div className="mt-2">
@@ -1152,22 +1199,22 @@ export default function DashboardPage() {
               {loading ? '...' : formatRupiah(stats.saldoOperasional)}
             </strong>
             <span className="text-[10.5px] text-slate-500 block mt-0.5 tabular-nums">
-              Masuk {bulanLabel}: {formatRupiah(stats.masukBulanIni)}
+              Tunai {bulanLabel}: {formatRupiah(stats.masukBulanIni)}
             </span>
           </div>
         </div>
 
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Total 4 Dompet</span>
+            <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Total 4 Dompet Tunai</span>
             <FileSpreadsheet className="w-4 h-4 text-indigo-600 shrink-0" />
           </div>
           <div className="mt-2">
             <strong className="text-sm sm:text-lg font-extrabold text-slate-900 tabular-nums block leading-snug">
               {loading ? '...' : formatRupiah(total4Dompet)}
             </strong>
-            <span className="text-[10.5px] text-slate-500 block mt-0.5">
-              PSB, Ops, Kas &amp; MDA
+            <span className="text-[10.5px] text-sky-700 font-medium block mt-0.5 tabular-nums">
+              Transfer {bulanLabel}: {formatRupiah(stats.transferMasukBulanIni)}
             </span>
           </div>
         </div>
@@ -1212,7 +1259,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Wallet className="w-4 h-4 text-emerald-700 shrink-0" />
-              <h3 className="font-bold text-sm text-slate-900">Keuangan 4 Dompet</h3>
+              <h3 className="font-bold text-sm text-slate-900">Keuangan 4 Dompet (Tunai)</h3>
             </div>
             <Link
               href="/keuangan"
@@ -1229,13 +1276,13 @@ export default function DashboardPage() {
               </strong>
             </div>
             <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
-              <span className="text-[10.5px] font-semibold text-emerald-900 block">2. Operasional</span>
+              <span className="text-[10.5px] font-semibold text-emerald-900 block">2. Syahriyah</span>
               <strong className="text-xs sm:text-sm font-bold text-emerald-950 tabular-nums">
                 {loading ? '...' : formatRupiah(stats.saldoOperasional)}
               </strong>
             </div>
             <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
-              <span className="text-[10.5px] font-semibold text-amber-900 block">3. Kas Lainnya</span>
+              <span className="text-[10.5px] font-semibold text-amber-900 block">3. Kas Umum</span>
               <strong className="text-xs sm:text-sm font-bold text-amber-950 tabular-nums">
                 {loading ? '...' : formatRupiah(stats.saldoKasPondok)}
               </strong>
@@ -1246,6 +1293,12 @@ export default function DashboardPage() {
                 {loading ? '...' : formatRupiah(stats.saldoMda)}
               </strong>
             </div>
+          </div>
+          <div className="px-2.5 py-2 rounded-xl bg-sky-50/70 border border-sky-200 flex items-center justify-between gap-2 text-[11px]">
+            <span className="font-semibold text-sky-900">Pemasukan Transfer</span>
+            <strong className="font-bold text-sky-950 font-mono tabular-nums">
+              {loading ? '...' : formatRupiah(stats.transferNetAllTime)}
+            </strong>
           </div>
         </div>
 

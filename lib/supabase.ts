@@ -53,6 +53,14 @@ function readSyncCredentials(): { url: string; anonKey: string } {
     if (winUrl && winKey) {
       return { url: winUrl, anonKey: winKey };
     }
+    if (typeof document !== 'undefined') {
+      const envEl = document.getElementById('siap-supabase-env');
+      const domUrl = (envEl?.getAttribute('data-url') || '').trim();
+      const domKey = (envEl?.getAttribute('data-anon-key') || '').trim();
+      if (domUrl && domKey) {
+        return { url: domUrl, anonKey: domKey };
+      }
+    }
   } else {
     const serverUrl = (process.env.SUPABASE_URL || '').trim();
     const serverKey = (process.env.SUPABASE_ANON_KEY || '').trim();
@@ -62,6 +70,38 @@ function readSyncCredentials(): { url: string; anonKey: string } {
   }
 
   return { url: '', anonKey: '' };
+}
+
+export function normalizeUsername(raw: string): string {
+  return (raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '');
+}
+
+export function usernameToAuthEmail(username: string): string {
+  const clean = normalizeUsername(username);
+  return `${clean}@pengurus.annur1.local`;
+}
+
+export function isSupabaseConfigured(): boolean {
+  const { url, anonKey } = readSyncCredentials();
+  return Boolean(url && anonKey);
+}
+
+export function setMockAccountPassword(username: string, password: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const clean = normalizeUsername(username);
+    if (!clean || !password) return;
+    const raw = window.localStorage.getItem('eannursatu_mock_auth_passwords_v1');
+    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    map[clean] = password;
+    window.localStorage.setItem('eannursatu_mock_auth_passwords_v1', JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 function createId(prefix = 'id'): string {
@@ -364,6 +404,9 @@ function createMockSupabaseClient(): SupabaseClient {
         status: 'aktif',
         masa_khidmat: '2026/2027',
         catatan: null,
+        username: 'pengasuh',
+        auth_user_id: 'mock-user-pengasuh',
+        must_change_password: false,
         created_at: '2026-01-01T00:00:00Z',
       },
       {
@@ -377,6 +420,9 @@ function createMockSupabaseClient(): SupabaseClient {
         status: 'aktif',
         masa_khidmat: '2026/2027',
         catatan: null,
+        username: 'fajar.wahyudi',
+        auth_user_id: 'mock-user-fajar',
+        must_change_password: false,
         created_at: '2026-01-02T00:00:00Z',
       },
       {
@@ -390,6 +436,9 @@ function createMockSupabaseClient(): SupabaseClient {
         status: 'aktif',
         masa_khidmat: '2026/2027',
         catatan: null,
+        username: 'sayid.ali',
+        auth_user_id: 'mock-user-sayid',
+        must_change_password: false,
         created_at: '2026-01-03T00:00:00Z',
       },
       {
@@ -403,6 +452,9 @@ function createMockSupabaseClient(): SupabaseClient {
         status: 'aktif',
         masa_khidmat: '2026/2027',
         catatan: null,
+        username: 'ali.nur',
+        auth_user_id: 'mock-user-alinur',
+        must_change_password: false,
         created_at: '2026-01-04T00:00:00Z',
       },
     ],
@@ -522,9 +574,70 @@ function createMockSupabaseClient(): SupabaseClient {
       { Kelurahan: 'Kasri', Kecamatan: 'Bululawang', Kabupaten: 'KAB. MALANG', Provinsi: 'JAWA TIMUR', 'Kode Pos': '65171' },
       { Kelurahan: 'Sempalwadak', Kecamatan: 'Bululawang', Kabupaten: 'KAB. MALANG', Provinsi: 'JAWA TIMUR', 'Kode Pos': '65171' },
     ],
+    kebersihan_area: [
+      { id: 'ka-1', nama_area: 'Musala & Tempat Wudhu', deskripsi: 'Lantai dalam musala, serambi, karpet, dan area wudhu', urutan: 1, aktif: true },
+      { id: 'ka-2', nama_area: 'Halaman Utama Pondok', deskripsi: 'Pelataran tengah, taman depan, dan jalur masuk utama', urutan: 2, aktif: true },
+      { id: 'ka-3', nama_area: 'Kamar Mandi & WC', deskripsi: 'Bak mandi, lantai kamar mandi, dan saluran air', urutan: 3, aktif: true },
+      { id: 'ka-4', nama_area: 'Selasar Asrama', deskripsi: 'Teras kamar lantai 1 & 2 serta tempat sandal', urutan: 4, aktif: true },
+      { id: 'ka-5', nama_area: 'Area Dapur & Ruang Makan', deskripsi: 'Meja makan santri, wastafel, dan tempat sampah', urutan: 5, aktif: true },
+    ],
+    kebersihan_jadwal: [],
+    koperasi_pengaturan: [
+      { id: 1, modal_receh_tetap: 200000, saldo_kas_koperasi: 0, updated_at: nowIso },
+    ],
+    koperasi_kulaan: [],
+    koperasi_tutup_kas: [],
+    koperasi_setoran_pondok: [],
+    dapur_buku_masak: [],
+    dapur_jualan_malam: [],
   };
 
   const storageUrls = new Map<string, string>();
+  const authListeners = new Set<(event: string, session: unknown) => void>();
+  const MOCK_AUTH_KEY = 'eannursatu_mock_auth_session_v1';
+  const MOCK_PW_KEY = 'eannursatu_mock_auth_passwords_v1';
+
+  function readMockPasswords(): Record<string, string> {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = window.localStorage.getItem(MOCK_PW_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function writeMockPasswords(map: Record<string, string>) {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(MOCK_PW_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  function readMockSession(): { user: { id: string; email: string } } | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(MOCK_AUTH_KEY);
+      return raw ? (JSON.parse(raw) as { user: { id: string; email: string } }) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeMockSession(session: { user: { id: string; email: string } } | null) {
+    if (typeof window === 'undefined') return;
+    try {
+      if (session) {
+        window.localStorage.setItem(MOCK_AUTH_KEY, JSON.stringify(session));
+      } else {
+        window.localStorage.removeItem(MOCK_AUTH_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   function getTableRows(table: string): Row[] {
     if (table === 'v_pengurus_lengkap') {
@@ -532,6 +645,12 @@ function createMockSupabaseClient(): SupabaseClient {
         ...p,
         jabatan_list: (db.pengurus_jabatan || []).filter((j) => j.pengurus_id === p.id),
       }));
+    }
+    if (table === 'v_pengurus_aman') {
+      return (db.pengurus || []).map((p) => ({ ...p }));
+    }
+    if (table === 'v_santri_aman') {
+      return (db.santri || []).map((s) => ({ ...s }));
     }
     if (!db[table]) db[table] = [];
     return db[table];
@@ -743,11 +862,87 @@ function createMockSupabaseClient(): SupabaseClient {
 
   return {
     from: (table: string) => createQueryBuilder(table),
+    rpc: async (fnName: string) => {
+      if (fnName === 'get_pengurus_bisyaroh_map') {
+        return {
+          data: (db.pengurus || []).map((p) => ({
+            pengurus_id: p.id,
+            nominal_bisyaroh: p.nominal_bisyaroh ?? 0,
+          })),
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    },
     auth: {
-      getUser: async () => ({
-        data: { user: { id: 'mock-admin-id', email: 'super.admin@annur1.local' } },
-        error: null,
-      }),
+      getUser: async () => {
+        const s = readMockSession();
+        return { data: { user: s?.user ?? null }, error: null };
+      },
+      getSession: async () => {
+        const s = readMockSession();
+        return { data: { session: s }, error: null };
+      },
+      signInWithPassword: async ({ email, password }: { email: string; password: string }) => {
+        const uname = email.split('@')[0].toLowerCase();
+        const person = (db.pengurus || []).find(
+          (p) => String(p.username || '').toLowerCase() === uname
+        );
+        if (!person) {
+          return { data: { user: null, session: null }, error: { message: 'Username atau kata sandi tidak ditemukan.' } };
+        }
+        if (String(person.status || 'aktif').toLowerCase() !== 'aktif') {
+          return { data: { user: null, session: null }, error: { message: 'Akun dinonaktifkan karena status pengurus tidak aktif / boyong.' } };
+        }
+        const pwMap = readMockPasswords();
+        const expected = pwMap[uname] ?? 'annur1234';
+        if (password !== expected) {
+          return { data: { user: null, session: null }, error: { message: 'Kata sandi salah.' } };
+        }
+        const user = {
+          id: String(person.auth_user_id || person.id),
+          email,
+          user_metadata: { username: uname, pengurus_id: person.id },
+        };
+        const session = { user };
+        writeMockSession(session);
+        authListeners.forEach((cb) => cb('SIGNED_IN', session));
+        return { data: { user, session }, error: null };
+      },
+      signOut: async () => {
+        writeMockSession(null);
+        authListeners.forEach((cb) => cb('SIGNED_OUT', null));
+        return { error: null };
+      },
+      updateUser: async ({ password }: { password?: string }) => {
+        const s = readMockSession();
+        if (!s?.user) {
+          return { data: { user: null }, error: { message: 'Sesi tidak ditemukan.' } };
+        }
+        if (password) {
+          const uname = s.user.email.split('@')[0].toLowerCase();
+          const pwMap = readMockPasswords();
+          pwMap[uname] = password;
+          writeMockPasswords(pwMap);
+          const person = (db.pengurus || []).find(
+            (p) => String(p.username || '').toLowerCase() === uname
+          );
+          if (person) {
+            person.must_change_password = false;
+          }
+        }
+        return { data: { user: s.user }, error: null };
+      },
+      onAuthStateChange: (cb: (event: string, session: unknown) => void) => {
+        authListeners.add(cb);
+        return {
+          data: {
+            subscription: {
+              unsubscribe: () => authListeners.delete(cb),
+            },
+          },
+        };
+      },
     },
     storage: {
       from: (bucket: string) => ({
@@ -891,6 +1086,13 @@ export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
       return (table: string) => createDeferredQueryBuilder(table);
     }
 
+    if (prop === 'rpc') {
+      return async (fn: string, params?: Record<string, unknown>) => {
+        const client = await resolveClientAsync();
+        return client.rpc(fn, params);
+      };
+    }
+
     if (prop === 'auth') {
       return {
         getUser: async (...args: unknown[]) => {
@@ -900,6 +1102,22 @@ export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
         getSession: async (...args: unknown[]) => {
           const client = await resolveClientAsync();
           return (client.auth.getSession as (...a: unknown[]) => Promise<unknown>)(...args);
+        },
+        signInWithPassword: async (...args: unknown[]) => {
+          const client = await resolveClientAsync();
+          return (client.auth.signInWithPassword as (...a: unknown[]) => Promise<unknown>)(...args);
+        },
+        signOut: async (...args: unknown[]) => {
+          const client = await resolveClientAsync();
+          return (client.auth.signOut as (...a: unknown[]) => Promise<unknown>)(...args);
+        },
+        updateUser: async (...args: unknown[]) => {
+          const client = await resolveClientAsync();
+          return (client.auth.updateUser as (...a: unknown[]) => Promise<unknown>)(...args);
+        },
+        onAuthStateChange: (cb: (event: string, session: unknown) => void) => {
+          const client = getFallbackClientSync();
+          return client.auth.onAuthStateChange(cb as never);
         },
       };
     }

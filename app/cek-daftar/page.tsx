@@ -111,7 +111,7 @@ function CekDaftarInner() {
                 Cek Status Pendaftaran Santri Baru
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Masukkan No. HP/WA Wali untuk melihat verifikasi DP, sisa pelunasan, penempatan kamar, dan NIS. Kosongkan Nomor Registrasi jika ingin menampilkan semua anak dengan No. WA yang sama.
+                Masukkan No. HP/WA Wali untuk memantau verifikasi DP, status aktif santri, dan rincian biaya. Kosongkan Nomor Registrasi bila ingin menampilkan seluruh pendaftar dengan No. WA yang sama.
               </p>
             </div>
           </div>
@@ -139,7 +139,7 @@ function CekDaftarInner() {
               <input
                 id="cek_reg"
                 type="text"
-                placeholder="Misal: PSB-26-001"
+                placeholder="Misal: PSB-27-001"
                 value={noReg}
                 onChange={(e) => setNoReg(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono uppercase"
@@ -219,14 +219,13 @@ function CekDaftarInner() {
                 </span>
               </div>
 
-              {/* Timeline 4 Tahap */}
+              {/* Timeline 3 Tahap PSB */}
               {rec.status !== 'ditolak' && (
-                <div className="grid grid-cols-4 gap-1.5 text-[11px]">
+                <div className="grid grid-cols-3 gap-2 text-[11px]">
                   {[
                     { idx: 1, title: '1. Kirim DP' },
                     { idx: 2, title: '2. Verifikasi DP' },
-                    { idx: 3, title: '3. Pelunasan' },
-                    { idx: 4, title: '4. Santri Aktif' },
+                    { idx: 3, title: '3. Santri Aktif' },
                   ].map((st) => {
                     const passed = meta.stepIndex >= st.idx;
                     return (
@@ -284,18 +283,18 @@ function CekDaftarInner() {
                     </span>
                   </div>
                   <div className="flex justify-between border-t border-slate-100 pt-1.5 font-bold">
-                    <span className="text-slate-800">Sisa Tagihan Saat Sowan</span>
+                    <span className="text-slate-800">Sisa Biaya Pendaftaran</span>
                     <span className="font-mono text-amber-800">{formatRupiah(sisaTagihan)}</span>
                   </div>
-                  {rec.kamar_rencana && (
+                  {(rec.kamar_rencana || rec.nis_terbit) && (
                     <div className="flex items-center justify-between pt-1 text-emerald-800 font-bold">
                       <span className="inline-flex items-center gap-1">
                         <BedDouble className="w-3.5 h-3.5" />
-                        Kamar Ditetapkan
+                        Status Kamar / NIS
                       </span>
                       <span>
-                        {rec.kamar_rencana}
-                        {rec.nis_terbit ? ` (NIS: ${rec.nis_terbit})` : ''}
+                        {rec.kamar_rencana || 'Menunggu Penempatan'}
+                        {rec.nis_terbit ? ` · NIS ${rec.nis_terbit}` : ''}
                       </span>
                     </div>
                   )}
@@ -312,7 +311,7 @@ function CekDaftarInner() {
                 <div className="flex items-start gap-2 text-slate-700">
                   <ClipboardCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                   <span>
-                    Rencana Masuk: <strong>{rec.rencana_tgl_masuk || '-'}</strong> · Siapkan FC KK, KTP Ortu, Akta, Ijazah/SKL &amp; Foto 3×4 (masing-masing 2 lembar) saat sowan ke kantor pondok.
+                    Tanggal Pendaftaran: <strong>{(rec.created_at || rec.rencana_tgl_masuk || '-').slice(0, 10)}</strong> · Siapkan berkas fisik (FC KK, KTP Ortu, Akta, Ijazah/SKL &amp; Foto 3×4 masing-masing 2 lembar) saat datang ke pondok.
                   </span>
                 </div>
                 <a

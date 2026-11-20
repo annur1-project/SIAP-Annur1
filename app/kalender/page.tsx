@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   BULAN_INDO,
@@ -59,6 +60,9 @@ interface CombinedAgendaDisplay {
 }
 
 export default function KalenderPage() {
+  const { canEditModule } = useAuth();
+  const canEdit = canEditModule('kalender');
+
   const [todayIso, setTodayIso] = useState<string>('2026-11-18');
   const todayParts = useMemo(() => parseIsoParts(todayIso), [todayIso]);
 
@@ -298,6 +302,7 @@ export default function KalenderPage() {
   };
 
   const handleUpdateKoreksi = async (nextVal: number) => {
+    if (!canEdit) return;
     const clamped = Math.max(-2, Math.min(2, nextVal));
     setKoreksiHijriyah(clamped);
 
@@ -330,7 +335,7 @@ export default function KalenderPage() {
 
   const handleSaveNewAgenda = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formJudul.trim()) return;
+    if (!canEdit || !formJudul.trim()) return;
     setSavingAgenda(true);
     const item: KalenderAgendaItem = {
       id: createKalenderId(),
@@ -351,12 +356,14 @@ export default function KalenderPage() {
   };
 
   const handleDeleteAgenda = async (id: string) => {
+    if (!canEdit) return;
     await deleteKalenderAgenda(id);
     setAgendaKustom((prev) => prev.filter((a) => a.id !== id));
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
+      <TransparencyBanner moduleLabel="Kalender Pendidikan & Agenda Pondok" isReadOnly={!canEdit} />
       {/* Header Nuansa NU Online + Jadwal Sholat Bululawang */}
       <section className="rounded-2xl bg-gradient-to-br from-emerald-800 via-emerald-900 to-teal-950 text-white p-4 sm:p-6 shadow-md">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -393,9 +400,10 @@ export default function KalenderPage() {
               </span>
               <select
                 aria-label="Koreksi Tanggal Hijriyah"
+                disabled={!canEdit}
                 value={koreksiHijriyah}
                 onChange={(e) => handleUpdateKoreksi(Number(e.target.value))}
-                className="bg-emerald-950/80 border border-white/25 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none"
+                className="bg-emerald-950/80 border border-white/25 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <option value={-2}>-2 hari</option>
                 <option value={-1}>-1 hari</option>
@@ -640,14 +648,16 @@ export default function KalenderPage() {
                   <span className="text-xs font-bold text-slate-700">
                     Agenda Tanggal {selectedIso.split('-').reverse().join('/')}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowModalAgenda(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Tambah Agenda
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setShowModalAgenda(true)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Tambah Agenda
+                    </button>
+                  )}
                 </div>
 
                 {selectedDateAgendas.length === 0 ? (
@@ -678,7 +688,7 @@ export default function KalenderPage() {
                             <p className="text-[11px] text-slate-600 mt-1">{item.catatan}</p>
                           )}
                         </div>
-                        {item.sumber === 'kustom' && item.rawKustom && (
+                        {canEdit && item.sumber === 'kustom' && item.rawKustom && (
                           <button
                             type="button"
                             onClick={() => handleDeleteAgenda(item.rawKustom!.id)}
