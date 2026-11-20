@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  output: "standalone",
   allowedDevOrigins: [
     'ais-dev-jd43bttabuh3ziyzycee3p-998334587231.asia-southeast1.run.app',
     'ais-pre-jd43bttabuh3ziyzycee3p-998334587231.asia-southeast1.run.app',

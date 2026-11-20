@@ -9,7 +9,7 @@ import {
   type WalletTxLike,
 } from './keuangan';
 
-describe('Keuangan canonical wallet routing & Syahriyah Transfer separation', () => {
+describe('Keuangan canonical wallet routing & Pemasukan Transfer separation', () => {
   it('routes every fee item to its exact designated wallet', () => {
     // Dompet Syahriyah (operasional)
     assert.equal(resolveCanonicalDompetForItem('syahriyah'), 'operasional');
@@ -33,7 +33,7 @@ describe('Keuangan canonical wallet routing & Syahriyah Transfer separation', ()
     assert.equal(resolveCanonicalDompetForItem('psb_pendaftaran'), 'pendaftaran');
   });
 
-  it('excludes transfer transactions from the 4 cash Dompet cards and aggregates them into Syahriyah Transfer', () => {
+  it('excludes transfer transactions from the 4 cash Dompet cards and aggregates them into Pemasukan Transfer', () => {
     const txs: WalletTxLike[] = [
       {
         id: '1',
@@ -94,7 +94,7 @@ describe('Keuangan canonical wallet routing & Syahriyah Transfer separation', ()
     assert.equal(summary.tunaiMasukBulanIni, 450000 + 75000);
     assert.equal(summary.tunaiKeluarBulanIni, 150000);
 
-    // Syahriyah Transfer summary captures all incoming transfers separately
+    // Pemasukan Transfer summary captures all incoming transfers separately
     assert.equal(summary.syahriyahTransfer.totalMasukAllTime, 1000000);
     assert.equal(summary.syahriyahTransfer.bulanIniMasuk, 1000000);
     assert.equal(summary.syahriyahTransfer.byDompetMasuk.operasional, 500000);

@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import LaporanDocument from '@/components/LaporanDocument';
+import { TransparencyBanner, useAuth } from '@/lib/auth';
 import {
   addDaysIso,
   buildAllDivisionReports,
@@ -32,6 +33,8 @@ import {
 const ALL_DIV_KEYS: LaporanDivisionKey[] = LAPORAN_DIVISIONS.map((d) => d.key);
 
 export default function PusatLaporanPage() {
+  const { canEditModule, canViewBisyaroh } = useAuth();
+  const canEditLaporan = canEditModule('laporan');
   const [todayStr, setTodayStr] = useState<string>('');
   const [mode, setMode] = useState<PeriodeMode>('mingguan');
   const [anchorDate, setAnchorDate] = useState<string>('');
@@ -53,7 +56,7 @@ export default function PusatLaporanPage() {
   const loadData = useCallback(async () => {
     try {
       setErrorMsg('');
-      const data = await fetchAllLaporanRawData();
+      const data = await fetchAllLaporanRawData({ canViewBisyaroh });
       setRawData(data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal memuat data laporan.';
@@ -62,7 +65,7 @@ export default function PusatLaporanPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [canViewBisyaroh]);
 
   useEffect(() => {
     let active = true;
@@ -98,8 +101,8 @@ export default function PusatLaporanPage() {
 
   const bundle = useMemo(() => {
     if (!rawData) return null;
-    return buildAllDivisionReports(rawData, periodWindow, effectiveToday);
-  }, [rawData, periodWindow, effectiveToday]);
+    return buildAllDivisionReports(rawData, periodWindow, effectiveToday, { canViewBisyaroh });
+  }, [rawData, periodWindow, effectiveToday, canViewBisyaroh]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -149,6 +152,18 @@ export default function PusatLaporanPage() {
           }
         }
       `}</style>
+
+      <div className="print:hidden">
+        <TransparencyBanner
+          moduleLabel="Pusat Laporan Pondok"
+          isReadOnly={!canEditLaporan}
+          extraNote={
+            !canViewBisyaroh
+              ? 'Rincian & daftar Bisyaroh Pengurus disembunyikan sesuai kebijakan privasi.'
+              : undefined
+          }
+        />
+      </div>
 
       {/* ================================================================= */}
       {/* HEADER & TOMBOL EKSPOR (HIDDEN SAAT PRINT PDF)                    */}

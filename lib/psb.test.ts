@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculatePsbBilling,
+  computePromoDisplayRemaining,
   countVerifiedPsbQuota,
   generateNextNoRegistrasi,
   matchPsbRecordsForGuardian,
   normalizeWaNumber,
   PSB_PROFIL_PONDOK,
+  PSB_STATUS_META,
   splitPelunasanForWallets,
   toWaMeDigits,
   type PsbPendaftaranRecord,
@@ -93,14 +95,14 @@ test('calculatePsbBilling memakai rincian terbaru aplikasi (Free Uang Pangkal 10
   assert.equal(regNormal.sisaTagihan, 4850000);
 });
 
-test('generateNextNoRegistrasi menghasilkan kode PSB-26-XXX berurutan', () => {
-  assert.equal(generateNextNoRegistrasi([], 2026), 'PSB-26-001');
+test('generateNextNoRegistrasi menghasilkan kode PSB-27-XXX berurutan untuk TA 2027/2028', () => {
+  assert.equal(generateNextNoRegistrasi([], 2027), 'PSB-27-001');
   assert.equal(
     generateNextNoRegistrasi(
-      [{ no_registrasi: 'PSB-26-001' }, { no_registrasi: 'PSB-26-009' }],
-      2026
+      [{ no_registrasi: 'PSB-27-001' }, { no_registrasi: 'PSB-27-009' }],
+      2027
     ),
-    'PSB-26-010'
+    'PSB-27-010'
   );
 });
 
@@ -175,4 +177,31 @@ test('PSB_PROFIL_PONDOK memuat data historis dan persyaratan resmi dari PDF', ()
   assert.equal(PSB_PROFIL_PONDOK.tahunBerdiri, 1940);
   assert.equal(PSB_PROFIL_PONDOK.rekeningOfflinePdf.nomor, '144-00-7488889-9');
   assert.ok(PSB_PROFIL_PONDOK.berkasFisikWajib.length >= 5);
+});
+
+test('computePromoDisplayRemaining menjaga tampilan kuota promosi tetap realistis (20-30 slot)', () => {
+  assert.equal(
+    computePromoDisplayRemaining({ psbRecordsCount: 0, kuotaTotal: 100, realQuotaUsed: 4 }),
+    28
+  );
+  assert.equal(
+    computePromoDisplayRemaining({ psbRecordsCount: 3, kuotaTotal: 100, realQuotaUsed: 7 }),
+    25
+  );
+  assert.equal(
+    computePromoDisplayRemaining({ psbRecordsCount: 10, kuotaTotal: 100, realQuotaUsed: 14, promoDisplayStart: 25 }),
+    15
+  );
+  assert.equal(
+    computePromoDisplayRemaining({ psbRecordsCount: 1, kuotaTotal: 100, realQuotaUsed: 100 }),
+    0
+  );
+});
+
+test('PSB_STATUS_META mengikuti 3 tahapan baru tanpa wajib lunas sebelum aktif', () => {
+  assert.equal(PSB_STATUS_META.menunggu_verifikasi.stepIndex, 1);
+  assert.equal(PSB_STATUS_META.dp_terverifikasi.stepIndex, 2);
+  assert.equal(PSB_STATUS_META.lunas_menunggu_kedatangan.stepIndex, 2);
+  assert.equal(PSB_STATUS_META.diterima_aktif.stepIndex, 3);
+  assert.equal(PSB_STATUS_META.ditolak.stepIndex, 0);
 });

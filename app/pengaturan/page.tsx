@@ -5,14 +5,21 @@ import {
   AlertCircle,
   Building2,
   CheckCircle2,
+  Copy,
+  Database,
+  Download,
   Landmark,
   Palette,
   Save,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Wallet,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
+import { E_ANNURSATU_UPGRADE_SQL } from '@/lib/sql-schema';
 import { supabase } from '@/lib/supabase';
 import {
   applyThemeToDocument,
@@ -56,14 +63,23 @@ const TAB_ITEMS: Array<{
 ];
 
 export default function PengaturanPage() {
+  const {
+    canEditModule,
+    isPimpinanInti,
+    isBendahara,
+    canManageAccounts,
+    jabatanLabels,
+  } = useAuth();
+  const canEdit = canEditModule('pengaturan');
+  const canManageFinance = isPimpinanInti || isBendahara;
+
   const [activeTab, setActiveTab] = useState<PengaturanTabKey>('identitas');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [todayStr, setTodayStr] = useState('');
-  const [userRole, setUserRole] = useState<string>('super_admin');
-  const [canManageFinance, setCanManageFinance] = useState<boolean>(true);
+  const [showSqlCard, setShowSqlCard] = useState(false);
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -102,9 +118,8 @@ export default function PengaturanPage() {
 
   const loadAllData = async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
-    const [{ data: authData }, { data: setRow }, { data: items }, { data: riwayat }] =
+    const [{ data: setRow }, { data: items }, { data: riwayat }] =
       await Promise.all([
-        supabase.auth.getUser(),
         supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle(),
         supabase.from('master_pembayaran').select('*').order('urutan', { ascending: true }),
         supabase
@@ -112,20 +127,6 @@ export default function PengaturanPage() {
           .select('*')
           .order('berlaku_mulai', { ascending: false }),
       ]);
-
-    let resolvedRole = userRole;
-    if (authData?.user) {
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', authData.user.id)
-        .single();
-      if (prof?.role) {
-        resolvedRole = prof.role;
-        setUserRole(prof.role);
-        setCanManageFinance(['super_admin', 'admin', 'keuangan'].includes(prof.role));
-      }
-    }
 
     const localExt = readExtendedLocal();
     const rowObj = (setRow || {}) as Record<string, unknown>;
@@ -198,10 +199,9 @@ export default function PengaturanPage() {
     });
 
     if (missingSeeds.length > 0) {
-      const canEditFin = ['super_admin', 'admin', 'keuangan'].includes(resolvedRole);
       let syncedFromDb = false;
 
-      if (canEditFin) {
+      if (canManageFinance) {
         const { data: upserted } = await supabase
           .from('master_pembayaran')
           .upsert(
@@ -304,6 +304,7 @@ export default function PengaturanPage() {
     field: K,
     value: PengaturanFormState[K]
   ) => {
+    if (!canEdit && !canManageFinance) return;
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -311,6 +312,7 @@ export default function PengaturanPage() {
     e: React.ChangeEvent<HTMLInputElement>,
     fieldName: keyof PengaturanFormState
   ) => {
+    if (!canEdit) return;
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingField(fieldName);
@@ -331,6 +333,7 @@ export default function PengaturanPage() {
 
   const handleSavePengaturan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!canEdit && !(activeTab === 'keuangan' && canManageFinance)) return;
     if (!isKeamananThresholdValid(formData.aturan_operasional.keamanan)) {
       setActiveTab('operasional');
       showToast('error', 'Ambang poin keamanan harus menanjak: SP 1 < SP 2 < SP 3.');
@@ -611,23 +614,108 @@ export default function PengaturanPage() {
             Pengaturan Aplikasi Pondok
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Pusat identitas resmi, kop surat JPG, legalitas TTD, tarif &amp; tema · Hak akses:{' '}
-            <span className="font-semibold text-slate-700">{userRole.toUpperCase()}</span>
+            Pusat identitas resmi, kop surat JPG, legalitas TTD, tarif &amp; tema &middot; Jabatan:{' '}
+            <span className="font-semibold text-slate-700">
+              {jabatanLabels.length > 0 ? jabatanLabels.join(', ') : 'Pengurus Aktif'}
+            </span>
           </p>
         </div>
 
         <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => handleSavePengaturan()}
-            className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
-          </button>
+          {canManageAccounts && (
+            <>
+              <Link
+                href="/tools/pwa-icon"
+                className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                Studio Ikon PWA
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowSqlCard((v) => !v)}
+                className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-700" />
+                Skema SQL &amp; RLS
+              </button>
+            </>
+          )}
+          {(canEdit || (activeTab === 'keuangan' && canManageFinance)) && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSavePengaturan()}
+              className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
+            </button>
+          )}
         </div>
       </div>
+
+      <TransparencyBanner
+        moduleLabel="Pengaturan Aplikasi Pondok"
+        isReadOnly={!canEdit}
+        extraNote={
+          isBendahara && !canEdit
+            ? 'Khusus Tab 3 (Keuangan & Tarif) tetap dapat Anda kelola sebagai Bendahara.'
+            : undefined
+        }
+      />
+
+      {canManageAccounts && showSqlCard && (
+        <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-700 p-4 sm:p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-400" />
+                Skrip Migrasi Supabase PostgreSQL &amp; RLS (e-annursatu)
+              </h2>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Salin dan jalankan di Supabase SQL Editor untuk mengaktifkan tabel Kebersihan, Koperasi, Dapur 2 Buku, dan RLS Multi-Jabatan.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(E_ANNURSATU_UPGRADE_SQL);
+                    showToast('success', 'Skrip SQL berhasil disalin ke clipboard.');
+                  } catch {
+                    showToast('error', 'Gagal menyalin skrip SQL.');
+                  }
+                }}
+                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Salin SQL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const blob = new Blob([E_ANNURSATU_UPGRADE_SQL], { type: 'text/sql;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'e-annursatu-supabase-upgrade.sql';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 border border-slate-600 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Unduh .sql
+              </button>
+            </div>
+          </div>
+          <pre className="max-h-56 overflow-auto rounded-xl bg-slate-950 p-3 text-[11px] font-mono text-emerald-200 border border-slate-800">
+            {E_ANNURSATU_UPGRADE_SQL}
+          </pre>
+        </div>
+      )}
 
       {/* NAVIGASI 5 TAB (Rapi di HP & Desktop) */}
       <div
@@ -663,43 +751,52 @@ export default function PengaturanPage() {
 
       {/* KONTEN TAB AKTIF */}
       {activeTab === 'identitas' && (
-        <IdentitasRekeningTab formData={formData} onUpdateField={handleUpdateField} />
+        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
+          <IdentitasRekeningTab formData={formData} onUpdateField={handleUpdateField} />
+        </fieldset>
       )}
 
       {activeTab === 'legalitas' && (
-        <LogoLegalitasTab
-          formData={formData}
-          onUpdateField={handleUpdateField}
-          onUploadImage={handleUploadImage}
-          uploadingField={uploadingField}
-        />
+        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
+          <LogoLegalitasTab
+            formData={formData}
+            onUpdateField={handleUpdateField}
+            onUploadImage={handleUploadImage}
+            uploadingField={uploadingField}
+          />
+        </fieldset>
       )}
 
       {activeTab === 'keuangan' && (
         <KeuanganTarifTab
           formData={formData}
           onUpdateField={handleUpdateField}
-          onUpdateTahunAjaran={(val) =>
+          onUpdateTahunAjaran={(val) => {
+            if (!canManageFinance && !canEdit) return;
             setFormData((prev) => ({
               ...prev,
               aturan_operasional: { ...prev.aturan_operasional, tahun_ajaran_aktif: val },
-            }))
-          }
-          onUpdatePendaftaran={(updater) =>
+            }));
+          }}
+          onUpdatePendaftaran={(updater) => {
+            if (!canManageFinance && !canEdit) return;
             setFormData((prev) => ({
               ...prev,
               aturan_operasional: {
                 ...prev.aturan_operasional,
                 pendaftaran: updater(prev.aturan_operasional.pendaftaran),
               },
-            }))
-          }
+            }));
+          }}
           canManageFinance={canManageFinance}
           masterItems={masterItems}
           riwayatMap={riwayatMap}
           todayStr={todayStr}
-          onOpenNewModal={() => setShowModalBaru(true)}
+          onOpenNewModal={() => {
+            if (canManageFinance) setShowModalBaru(true);
+          }}
           onOpenEditTarif={(item, nominalAktif) => {
+            if (!canManageFinance) return;
             setEditTarifItem(item);
             setNewNominal(nominalAktif);
             setBerlakuMulai(todayStr);
@@ -711,37 +808,43 @@ export default function PengaturanPage() {
       )}
 
       {activeTab === 'operasional' && (
-        <AturanDivisiTab
-          formData={formData}
-          onUpdateAturan={(updater) =>
-            setFormData((prev) => ({
-              ...prev,
-              aturan_operasional: updater(prev.aturan_operasional),
-            }))
-          }
-        />
+        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
+          <AturanDivisiTab
+            formData={formData}
+            onUpdateAturan={(updater) => {
+              if (!canEdit) return;
+              setFormData((prev) => ({
+                ...prev,
+                aturan_operasional: updater(prev.aturan_operasional),
+              }));
+            }}
+          />
+        </fieldset>
       )}
 
       {activeTab === 'tema' && (
-        <TemaAplikasiTab
-          tema={formData.aturan_operasional.tema}
-          logoUrl={formData.logo_url}
-          onUpdateTema={(updater) => {
-            const nextTema = updater(formData.aturan_operasional.tema);
-            setFormData((prev) => ({
-              ...prev,
-              aturan_operasional: {
-                ...prev.aturan_operasional,
-                tema: nextTema,
-              },
-            }));
-            applyThemeToDocument(nextTema, { logoUrl: formData.logo_url });
-          }}
-        />
+        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
+          <TemaAplikasiTab
+            tema={formData.aturan_operasional.tema}
+            logoUrl={formData.logo_url}
+            onUpdateTema={(updater) => {
+              if (!canEdit) return;
+              const nextTema = updater(formData.aturan_operasional.tema);
+              setFormData((prev) => ({
+                ...prev,
+                aturan_operasional: {
+                  ...prev.aturan_operasional,
+                  tema: nextTema,
+                },
+              }));
+              applyThemeToDocument(nextTema, { logoUrl: formData.logo_url });
+            }}
+          />
+        </fieldset>
       )}
 
       {/* STICKY SAVE BAR SAAT ADA PERUBAHAN BELUM DISIMPAN */}
-      {hasUnsavedChanges && (
+      {hasUnsavedChanges && (canEdit || (activeTab === 'keuangan' && canManageFinance)) && (
         <div className="fixed bottom-16 md:bottom-5 inset-x-4 md:left-72 md:right-8 z-40 max-w-4xl mx-auto">
           <div className="bg-slate-900 text-white rounded-xl px-4 py-2.5 shadow-xl border border-slate-700 flex items-center justify-between gap-3">
             <span className="text-xs font-medium truncate">

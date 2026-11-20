@@ -12,12 +12,15 @@ import * as XLSX from 'xlsx';
 import {
   DEFAULT_KAMAR_MASTER,
   DEFAULT_SKEMA_PENDAFTARAN,
+  generateNextNisForYear,
   getTahunAjaranForDate,
   hitungRincianPendaftaran,
   mergeAturanOperasional,
   readExtendedLocal,
   type SkemaPendaftaranConfig,
 } from '@/lib/pengaturan';
+import { buildSantriExcelImportPlan } from '@/lib/santri-excel';
+import { TransparencyBanner, maskIdentityNumber, useAuth } from '@/lib/auth';
 
 const ALLOWED_DB_COLUMNS = [
   'nis', 'tgl_masuk', 'nama_lengkap', 'kamar', 'tarif_syahriyah',
@@ -29,8 +32,82 @@ const ALLOWED_DB_COLUMNS = [
   'status', 'foto_url', 'unit_asrama', 'paket_pendaftaran', 'nominal_pendaftaran', 'catatan_keringanan'
 ];
 
-function sanitizePayload(data: any) {
-  const clean: any = {};
+type SantriFieldValue = string | number | boolean | null | undefined;
+
+interface SantriRow {
+  id: string;
+  nis?: string;
+  nisn?: string;
+  nik?: string | null;
+  no_kk?: string | null;
+  tgl_masuk?: string;
+  nama_lengkap?: string;
+  kamar?: string;
+  tarif_syahriyah?: number;
+  tempat_lahir?: string;
+  tgl_lahir?: string;
+  jk?: string;
+  hobi?: string;
+  cita_cita?: string;
+  status_ayah?: string;
+  nama_ayah?: string | null;
+  nik_ayah?: string | null;
+  pendidikan_ayah?: string | null;
+  pekerjaan_ayah?: string | null;
+  penghasilan_ayah?: string | null;
+  no_wa_ayah?: string | null;
+  status_ibu?: string;
+  nama_ibu?: string | null;
+  nik_ibu?: string | null;
+  pendidikan_ibu?: string | null;
+  pekerjaan_ibu?: string | null;
+  penghasilan_ibu?: string | null;
+  no_wa_ibu?: string | null;
+  nama_wali?: string | null;
+  nik_wali?: string | null;
+  pendidikan_wali?: string | null;
+  pekerjaan_wali?: string | null;
+  no_wa_wali?: string | null;
+  alamat_jalan?: string;
+  rt?: string;
+  rw?: string;
+  desa?: string;
+  kecamatan?: string;
+  kabupaten?: string;
+  provinsi?: string;
+  kode_pos?: string;
+  status?: string;
+  foto_url?: string;
+  unit_asrama?: string;
+  paket_pendaftaran?: string;
+  nominal_pendaftaran?: number;
+  catatan_keringanan?: string;
+  [key: string]: SantriFieldValue;
+}
+
+interface WilayahItem {
+  Provinsi: string;
+  Kabupaten: string;
+  Kecamatan: string;
+  Kelurahan: string;
+  'Kode Pos': string | number;
+}
+
+interface PengaturanSantriState {
+  nama_pesantren: string;
+  alamat_lengkap: string;
+  no_telepon: string;
+  email_resmi?: string;
+  logo_url?: string;
+  stempel_url?: string;
+  nama_pengasuh: string;
+  ttd_pengasuh_url?: string;
+  nama_kepala_pondok: string;
+  ttd_kepala_pondok_url?: string;
+}
+
+function sanitizePayload(data: Partial<SantriRow>) {
+  const clean: Record<string, SantriFieldValue> = {};
   ALLOWED_DB_COLUMNS.forEach((col) => {
     if (data[col] !== undefined) {
       clean[col] = data[col] === '' ? null : data[col];
@@ -39,7 +116,7 @@ function sanitizePayload(data: any) {
   return clean;
 }
 
-function cekWaliSamaAyah(s: any) {
+function cekWaliSamaAyah(s: Partial<SantriRow>) {
   if (s.status_ayah === 'Meninggal') return false;
   if (!s.nama_wali || String(s.nama_wali).trim() === '') return true;
   return (
@@ -48,7 +125,7 @@ function cekWaliSamaAyah(s: any) {
   );
 }
 
-function cekKelengkapanEmis(s: any) {
+function cekKelengkapanEmis(s: Partial<SantriRow>) {
   const wajibUmum = [
     s.tgl_masuk, s.nama_lengkap, s.kamar, s.tarif_syahriyah,
     s.nisn, s.nik, s.tempat_lahir, s.tgl_lahir, s.jk,
@@ -90,8 +167,10 @@ function formatTanggalIndo(dateStr?: string) {
 }
 
 export default function DataSantriPage() {
-  const [santriList, setSantriList] = useState<any[]>([]);
-  const [pengaturan, setPengaturan] = useState<any>({
+  const { canEditModule, canViewSensitiveSantri } = useAuth();
+  const canEditSantri = canEditModule('santri');
+  const [santriList, setSantriList] = useState<SantriRow[]>([]);
+  const [pengaturan, setPengaturan] = useState<PengaturanSantriState>({
     nama_pesantren: 'PONDOK PESANTREN AN-NUR 1 BULULAWANG',
     alamat_lengkap: 'Jl. Diponegoro IV / 2-6 Bululawang, Kab. Malang, Jawa Timur 65171',
     no_telepon: '085604551562',
@@ -125,19 +204,19 @@ export default function DataSantriPage() {
 
   // Seleksi Massal & Antrean Cetak Buku Induk (Satuan / Massal)
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [printQueue, setPrintQueue] = useState<any[]>([]);
+  const [printQueue, setPrintQueue] = useState<SantriRow[]>([]);
 
   // Modal States
   const [showModalForm, setShowModalForm] = useState(false);
   const [showModalDetail, setShowModalDetail] = useState(false);
   const [showModalEdit, setShowModalEdit] = useState(false);
   const [showModalImport, setShowModalImport] = useState(false);
-  const [selectedSantri, setSelectedSantri] = useState<any>(null);
+  const [selectedSantri, setSelectedSantri] = useState<SantriRow | null>(null);
   const [activeEditTab, setActiveEditTab] = useState<'pribadi' | 'ortu' | 'wali' | 'alamat'>('pribadi');
 
   // Pencarian Wilayah Indonesia
   const [wilayahQuery, setWilayahQuery] = useState('');
-  const [wilayahResults, setWilayahResults] = useState<any[]>([]);
+  const [wilayahResults, setWilayahResults] = useState<WilayahItem[]>([]);
   const [importing, setImporting] = useState(false);
 
   const [skemaPendaftaran, setSkemaPendaftaran] = useState<SkemaPendaftaranConfig>(
@@ -165,30 +244,43 @@ export default function DataSantriPage() {
   });
 
   // Form Edit Santri (39 Kolom Lengkap) & Toggle Wali
-  const [editFormData, setEditFormData] = useState<any>({});
+  const [editFormData, setEditFormData] = useState<Partial<SantriRow>>({});
   const [waliSamaAyah, setWaliSamaAyah] = useState(true);
 
-  const generateNextNis = (tglMasuk: string, existingList: any[], offset = 1) => {
-    const yearPrefix = tglMasuk && tglMasuk.length >= 4 ? tglMasuk.slice(2, 4) : '26';
-    const maxSeq = existingList.reduce((max, s) => {
-      const numPart = parseInt(String(s.nis || '').slice(2), 10);
-      return !isNaN(numPart) && numPart > max ? numPart : max;
-    }, 0);
-    return `${yearPrefix}${String(maxSeq + offset).padStart(4, '0')}`;
-  };
+  const nextNisPreview = generateNextNisForYear(
+    formData.tgl_masuk || todayStr || '2027-07-01',
+    santriList,
+    1
+  );
 
-  const nextNisPreview = generateNextNis(formData.tgl_masuk || todayStr, santriList, 1);
+  const maskRowIfRestricted = (row: SantriRow): SantriRow => {
+    if (canViewSensitiveSantri) return row;
+    return {
+      ...row,
+      nik: row.nik ? maskIdentityNumber(String(row.nik)) : row.nik,
+      no_kk: row.no_kk ? maskIdentityNumber(String(row.no_kk)) : row.no_kk,
+      nik_ayah: row.nik_ayah ? maskIdentityNumber(String(row.nik_ayah)) : row.nik_ayah,
+      nik_ibu: row.nik_ibu ? maskIdentityNumber(String(row.nik_ibu)) : row.nik_ibu,
+      nik_wali: row.nik_wali ? maskIdentityNumber(String(row.nik_wali)) : row.nik_wali,
+    };
+  };
 
   const fetchSantri = async () => {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data, error } = await supabase.from('santri').select('*').order('nis', { ascending: true });
+      const viewRes = await supabase
+        .from('v_santri_aman')
+        .select('*')
+        .order('nis', { ascending: true });
+      const { data, error } = viewRes.error
+        ? await supabase.from('santri').select('*').order('nis', { ascending: true })
+        : viewRes;
       if (error) {
         setFetchError(error.message || 'Gagal mengambil data santri dari Supabase.');
         showToast('error', 'Gagal Memuat Data Santri', error.message || 'Terjadi kendala saat mengambil data santri.');
       } else {
-        setSantriList(data || []);
+        setSantriList(((data || []) as SantriRow[]).map(maskRowIfRestricted));
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan koneksi ke database.';
@@ -204,7 +296,7 @@ export default function DataSantriPage() {
       const localExt = readExtendedLocal();
       const { data } = await supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle();
       if (data) {
-        setPengaturan((prev: any) => ({ ...prev, ...data }));
+        setPengaturan((prev) => ({ ...prev, ...(data as Partial<PengaturanSantriState>) }));
       }
       const aturan = mergeAturanOperasional(
         (data as Record<string, unknown> | null)?.aturan_operasional ?? localExt?.aturan_operasional
@@ -234,7 +326,7 @@ export default function DataSantriPage() {
     }, 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canViewSensitiveSantri]);
 
   const rincianReguler = useMemo(
     () =>
@@ -318,7 +410,7 @@ export default function DataSantriPage() {
   };
 
   // Trigger Cetak Satuan maupun Massal
-  const triggerPrintBukuInduk = (listToPrint: any[]) => {
+  const triggerPrintBukuInduk = (listToPrint: SantriRow[]) => {
     if (!listToPrint || listToPrint.length === 0) return;
     setPrintQueue(listToPrint);
     setTimeout(() => {
@@ -344,10 +436,10 @@ export default function DataSantriPage() {
       .select('*')
       .or(`Kelurahan.ilike.%${query}%,Kecamatan.ilike.%${query}%,Kabupaten.ilike.%${query}%,Provinsi.ilike.%${query}%`)
       .limit(12);
-    if (data) setWilayahResults(data);
+    if (data) setWilayahResults(data as WilayahItem[]);
   };
 
-  const selectWilayah = (item: any, isEdit = false) => {
+  const selectWilayah = (item: WilayahItem, isEdit = false) => {
     const mapped = {
       provinsi: item.Provinsi,
       kabupaten: item.Kabupaten,
@@ -356,7 +448,7 @@ export default function DataSantriPage() {
       kode_pos: String(item['Kode Pos'])
     };
     if (isEdit) {
-      setEditFormData((prev: any) => ({ ...prev, ...mapped }));
+      setEditFormData((prev) => ({ ...prev, ...mapped }));
     } else {
       setFormData((prev) => ({ ...prev, ...mapped }));
     }
@@ -367,6 +459,7 @@ export default function DataSantriPage() {
   // Simpan Pendaftaran Santri Baru
   const handleSaveSantri = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditSantri) return;
     if (!formData.desa || !formData.kode_pos) {
       showToast('error', 'Alamat Belum Dipilih', 'Silakan ketik dan pilih Desa/Kelurahan dari daftar pencarian wilayah.');
       return;
@@ -374,7 +467,7 @@ export default function DataSantriPage() {
 
     setSaving(true);
     const tglMasukFinal = formData.tgl_masuk || todayStr;
-    const assignedNis = generateNextNis(tglMasukFinal, santriList, 1);
+    const assignedNis = generateNextNisForYear(tglMasukFinal, santriList, 1);
     const rincianFinal = hitungRincianPendaftaran({
       paket: formData.paket_pendaftaran === 'vip' ? 'vip' : 'reguler',
       jumlahPendaftarSaatIni: santriList.length,
@@ -496,7 +589,8 @@ export default function DataSantriPage() {
   };
 
   // Buka Modal Edit & Deteksi Otomatis Status Wali
-  const handleOpenEditModal = (item: any) => {
+  const handleOpenEditModal = (item: SantriRow) => {
+    if (!canEditSantri) return;
     setSelectedSantri(item);
     setEditFormData({ ...item });
     setWaliSamaAyah(cekWaliSamaAyah(item));
@@ -508,6 +602,7 @@ export default function DataSantriPage() {
   // Simpan Perubahan Edit Santri
   const handleUpdateSantri = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditSantri || !selectedSantri) return;
     setSaving(true);
 
     const draft = { ...editFormData };
@@ -562,7 +657,7 @@ export default function DataSantriPage() {
 
   // Mutasi Massal Ke An-Nur Al-Burhany
   const handleBulkMutasiAlBurhany = () => {
-    if (selectedIds.length === 0) return;
+    if (!canEditSantri || selectedIds.length === 0) return;
     setConfirmDialog({
       title: 'Konfirmasi Mutasi Santri',
       message: `Pindahkan ${selectedIds.length} santri terpilih ke unit asrama SMK An-Nur Al-Burhany? Riwayat keuangan lama tetap tersimpan.`,
@@ -620,8 +715,9 @@ export default function DataSantriPage() {
     showToast('info', 'Template Diunduh', 'Kolom NIS biarkan kosong saat mengisi data baru; sistem akan mengurutkannya otomatis.');
   };
 
-  // Import Excel Massal (.xlsx)
+  // Import Excel Massal (.xlsx) — memperbarui data berdasarkan NIS tanpa mengubah NIS lama
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditSantri) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -632,107 +728,84 @@ export default function DataSantriPage() {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws);
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
 
-        const validRows = rows.filter(
-          (r) => r['Nama Lengkap'] && !String(r['Nama Lengkap']).toLowerCase().includes('wajib')
-        );
+        const plan = buildSantriExcelImportPlan({
+          rows,
+          existingSantriList: santriList,
+          skemaPendaftaran,
+          todayStr: todayStr || '2027-07-01',
+        });
 
-        if (validRows.length === 0) {
+        if (plan.total === 0) {
           setImporting(false);
           showToast('error', 'File Kosong', 'Tidak ditemukan baris data santri yang valid pada file Excel.');
           return;
         }
 
-        const formattedPayloads = validRows.map((row, idx) => {
-          const tglMasuk = row['Tanggal Masuk'] || todayStr || '2026-01-01';
-          const autoNis = row['NIS'] ? String(row['NIS']).trim() : generateNextNis(tglMasuk, santriList, idx + 1);
-          const tipeSpp = String(row['Tipe SPP'] || 'Reguler').toLowerCase();
-          const tarif = tipeSpp.includes('vip')
-            ? skemaPendaftaran.syahriyah_vip
-            : tipeSpp.includes('ndalem')
-            ? 145000
-            : skemaPendaftaran.syahriyah_reguler;
-
-          return sanitizePayload({
-            nis: autoNis,
-            tgl_masuk: tglMasuk,
-            nama_lengkap: row['Nama Lengkap'],
-            kamar: row['Khos / Kamar'] || 'A1',
-            tarif_syahriyah: tarif,
-            nisn: row['NISN'] ? String(row['NISN']) : null,
-            nik: row['NIK'] ? String(row['NIK']) : null,
-            no_kk: row['No KK'] ? String(row['No KK']) : null,
-            tempat_lahir: row['Tempat Lahir'],
-            tgl_lahir: row['Tanggal Lahir'] || null,
-            jk: row['Jenis Kelamin (L/P)'] || 'L',
-            hobi: row['Hobi'],
-            cita_cita: row['Cita-Cita'],
-            status_ayah: row['Status Ayah'] || 'Hidup',
-            nama_ayah: row['Nama Ayah'],
-            nik_ayah: row['NIK Ayah'] ? String(row['NIK Ayah']) : null,
-            pendidikan_ayah: row['Pendidikan Ayah'],
-            pekerjaan_ayah: row['Pekerjaan Ayah'],
-            penghasilan_ayah: row['Penghasilan Ayah'],
-            no_wa_ayah: row['No HP/WA Ayah'] ? String(row['No HP/WA Ayah']) : null,
-            status_ibu: row['Status Ibu'] || 'Hidup',
-            nama_ibu: row['Nama Ibu'],
-            nik_ibu: row['NIK Ibu'] ? String(row['NIK Ibu']) : null,
-            pendidikan_ibu: row['Pendidikan Ibu'],
-            pekerjaan_ibu: row['Pekerjaan Ibu'],
-            penghasilan_ibu: row['Penghasilan Ibu'],
-            no_wa_ibu: row['No HP/WA Ibu'] ? String(row['No HP/WA Ibu']) : null,
-            nama_wali: row['Nama Wali'] || row['Nama Ayah'],
-            nik_wali: row['NIK Wali'] ? String(row['NIK Wali']) : (row['NIK Ayah'] ? String(row['NIK Ayah']) : null),
-            pendidikan_wali: row['Pendidikan Wali'] || row['Pendidikan Ayah'],
-            pekerjaan_wali: row['Pekerjaan Wali'] || row['Pekerjaan Ayah'],
-            no_wa_wali: row['No HP/WA Wali'] ? String(row['No HP/WA Wali']) : (row['No HP/WA Ayah'] ? String(row['No HP/WA Ayah']) : null),
-            alamat_jalan: row['Alamat Jalan'],
-            rt: row['RT'] ? String(row['RT']) : null,
-            rw: row['RW'] ? String(row['RW']) : null,
-            desa: row['Desa/Kelurahan'],
-            kecamatan: row['Kecamatan'],
-            kabupaten: row['Kabupaten'],
-            provinsi: row['Provinsi'],
-            kode_pos: row['Kode Pos'] ? String(row['Kode Pos']) : null,
-            status: 'aktif'
-          });
-        });
-
-        const { error } = await supabase.from('santri').upsert(formattedPayloads, { onConflict: 'nis' });
-        setImporting(false);
-
-        if (error) {
-          showToast('error', 'Gagal Impor Excel', error.message);
-        } else {
-          setShowModalImport(false);
-          showToast('success', 'Impor Massal Berhasil', `${formattedPayloads.length} data santri berhasil diimpor dengan NIS terurut otomatis.`);
-          fetchSantri();
+        if (plan.inserts.length > 0) {
+          const { error: insertErr } = await supabase
+            .from('santri')
+            .insert(plan.inserts.map((i) => i.payload));
+          if (insertErr) {
+            setImporting(false);
+            showToast('error', 'Gagal Menambah Santri Baru', insertErr.message);
+            return;
+          }
         }
-      } catch (err: any) {
+
+        for (const upd of plan.updates) {
+          const { error: updErr } = await supabase
+            .from('santri')
+            .update(upd.payload)
+            .eq('id', upd.id);
+          if (updErr) {
+            setImporting(false);
+            showToast('error', `Gagal Memperbarui NIS ${upd.nis}`, updErr.message);
+            return;
+          }
+        }
+
         setImporting(false);
-        showToast('error', 'Kesalahan Format File', err.message);
+        setShowModalImport(false);
+        showToast(
+          'success',
+          'Impor Excel Berhasil',
+          `${plan.updates.length} data santri diperbarui (NIS tetap), ${plan.inserts.length} santri baru ditambahkan.`
+        );
+        fetchSantri();
+      } catch (err: unknown) {
+        setImporting(false);
+        const message = err instanceof Error ? err.message : 'Format file tidak valid.';
+        showToast('error', 'Kesalahan Format File', message);
       }
     };
     reader.readAsBinaryString(file);
   };
 
-  // Export Data Santri ke Excel
+  // Export Data Santri ke Excel (mengikuti filter aktif bila difilter, atau semua jika Tanpa Filter)
   const handleExportExcel = () => {
-    const exportRows = santriList.map((s) => ({
+    const isFiltered =
+      filterKamar !== 'Semua' ||
+      filterStatus !== 'Semua' ||
+      filterKelengkapan !== 'Semua' ||
+      search.trim().length > 0;
+    const sourceRows = isFiltered ? filteredSantri : santriList;
+
+    const exportRows = sourceRows.map((s) => ({
       'NIS': s.nis || '',
       'Tanggal Masuk': s.tgl_masuk || '',
       'Nama Lengkap': s.nama_lengkap || '',
       'Khos / Kamar': s.kamar || '',
       'Tipe SPP':
-        s.tarif_syahriyah >= 475000 || String(s.kamar || '').toUpperCase().includes('VIP')
+        Number(s.tarif_syahriyah || 0) >= 475000 || String(s.kamar || '').toUpperCase().includes('VIP')
           ? 'VIP'
-          : s.tarif_syahriyah === 145000
+          : Number(s.tarif_syahriyah || 0) === 145000
           ? 'Ndalem'
           : 'Reguler',
       'NISN': s.nisn || '',
-      'NIK': s.nik || '',
-      'No KK': s.no_kk || '',
+      'NIK': s.nik ? (canViewSensitiveSantri ? s.nik : maskIdentityNumber(String(s.nik))) : '',
+      'No KK': s.no_kk ? (canViewSensitiveSantri ? s.no_kk : maskIdentityNumber(String(s.no_kk))) : '',
       'Tempat Lahir': s.tempat_lahir || '',
       'Tanggal Lahir': s.tgl_lahir || '',
       'Jenis Kelamin (L/P)': s.jk || '',
@@ -740,20 +813,20 @@ export default function DataSantriPage() {
       'Cita-Cita': s.cita_cita || '',
       'Status Ayah': s.status_ayah || 'Hidup',
       'Nama Ayah': s.nama_ayah || '',
-      'NIK Ayah': s.nik_ayah || '',
+      'NIK Ayah': s.nik_ayah ? (canViewSensitiveSantri ? s.nik_ayah : maskIdentityNumber(String(s.nik_ayah))) : '',
       'Pendidikan Ayah': s.pendidikan_ayah || '',
       'Pekerjaan Ayah': s.pekerjaan_ayah || '',
       'Penghasilan Ayah': s.penghasilan_ayah || '',
       'No HP/WA Ayah': s.no_wa_ayah || '',
       'Status Ibu': s.status_ibu || 'Hidup',
       'Nama Ibu': s.nama_ibu || '',
-      'NIK Ibu': s.nik_ibu || '',
+      'NIK Ibu': s.nik_ibu ? (canViewSensitiveSantri ? s.nik_ibu : maskIdentityNumber(String(s.nik_ibu))) : '',
       'Pendidikan Ibu': s.pendidikan_ibu || '',
       'Pekerjaan Ibu': s.pekerjaan_ibu || '',
       'Penghasilan Ibu': s.penghasilan_ibu || '',
       'No HP/WA Ibu': s.no_wa_ibu || '',
       'Nama Wali': s.nama_wali || '',
-      'NIK Wali': s.nik_wali || '',
+      'NIK Wali': s.nik_wali ? (canViewSensitiveSantri ? s.nik_wali : maskIdentityNumber(String(s.nik_wali))) : '',
       'Pendidikan Wali': s.pendidikan_wali || '',
       'Pekerjaan Wali': s.pekerjaan_wali || '',
       'No HP/WA Wali': s.no_wa_wali || '',
@@ -772,11 +845,16 @@ export default function DataSantriPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Data_Santri');
     const dateStamp = todayStr || 'export';
     XLSX.writeFile(wb, `DATA_SANTRI_ANNUR1_${dateStamp}.xlsx`);
-    showToast('success', 'Export Berhasil', 'Data santri lengkap beserta NIS telah diunduh.');
+    showToast(
+      'success',
+      'Export Berhasil',
+      `${sourceRows.length} data santri beserta NIS telah diunduh.`
+    );
   };
 
   // Upload Foto 3x4 Santri
   const handleUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>, santriId: string) => {
+    if (!canEditSantri) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -806,16 +884,19 @@ export default function DataSantriPage() {
       return;
     }
 
-    setSelectedSantri((prev: any) => ({ ...prev, foto_url: publicUrl.publicUrl }));
+    setSelectedSantri((prev) => (prev ? { ...prev, foto_url: publicUrl.publicUrl } : prev));
     showToast('success', 'Foto 3x4 Tersimpan', 'Foto profil santri siap dicetak di Buku Induk A4.');
     fetchSantri();
   };
 
-  // Hitung Statistik Kelengkapan Data EMIS
+  // Hitung Statistik Kelengkapan Data EMIS & Kamar Menunggu Penempatan
   const totalSantri = santriList.length;
   const lengkapCount = santriList.filter((s) => cekKelengkapanEmis(s).lengkap).length;
   const belumLengkapCount = totalSantri - lengkapCount;
   const persentaseLengkap = totalSantri > 0 ? Math.round((lengkapCount / totalSantri) * 100) : 0;
+  const menungguPenempatanCount = santriList.filter(
+    (s) => s.kamar === 'Menunggu Penempatan'
+  ).length;
 
   // Filter Data
   const filteredSantri = santriList.filter((s) => {
@@ -833,31 +914,34 @@ export default function DataSantriPage() {
   });
 
   // Helper Render Baris Kontak WA Ringkas
-  const renderKontakRow = (label: string, nomor: string) => (
-    <div key={label} className="flex items-center gap-1.5 text-[11px]">
-      <span className="text-slate-400 font-sans w-8">{label}:</span>
-      <span className="font-mono text-slate-700">{nomor}</span>
-      <button
-        title={`Salin Nomor ${label}`}
-        onClick={() => {
-          navigator.clipboard.writeText(nomor);
-          showToast('info', 'Tersalin', `Nomor ${label} (${nomor}) disalin.`);
-        }}
-        className="p-0.5 hover:bg-slate-200 rounded text-slate-500"
-      >
-        <Copy className="w-3 h-3" />
-      </button>
-      <a
-        title={`Chat WA ${label}`}
-        href={`https://wa.me/62${String(nomor).replace(/^0/, '')}`}
-        target="_blank"
-        rel="noreferrer"
-        className="p-0.5 hover:bg-emerald-100 rounded text-emerald-600"
-      >
-        <MessageCircle className="w-3 h-3" />
-      </a>
-    </div>
-  );
+  const renderKontakRow = (label: string, nomor?: string | null) => {
+    if (!nomor) return null;
+    return (
+      <div key={label} className="flex items-center gap-1.5 text-[11px]">
+        <span className="text-slate-400 font-sans w-8">{label}:</span>
+        <span className="font-mono text-slate-700">{nomor}</span>
+        <button
+          title={`Salin Nomor ${label}`}
+          onClick={() => {
+            navigator.clipboard.writeText(nomor);
+            showToast('info', 'Tersalin', `Nomor ${label} (${nomor}) disalin.`);
+          }}
+          className="p-0.5 hover:bg-slate-200 rounded text-slate-500"
+        >
+          <Copy className="w-3 h-3" />
+        </button>
+        <a
+          title={`Chat WA ${label}`}
+          href={`https://wa.me/62${String(nomor).replace(/^0/, '')}`}
+          target="_blank"
+          rel="noreferrer"
+          className="p-0.5 hover:bg-emerald-100 rounded text-emerald-600"
+        >
+          <MessageCircle className="w-3 h-3" />
+        </a>
+      </div>
+    );
+  };
 
   // Status kelengkapan santri yang sedang dibuka di Modal Detail
   const detailEmisStatus = selectedSantri ? cekKelengkapanEmis(selectedSantri) : { lengkap: false, kurang: 0 };
@@ -1034,7 +1118,9 @@ export default function DataSantriPage() {
                         </tr>
                         <tr className="bg-emerald-50/40">
                           <td className="border border-emerald-900/30 px-2.5 py-1 text-slate-700">2. NIK Santri / Nomor Kartu Keluarga</td>
-                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">{santriItem.nik || '-'} / {santriItem.no_kk || '-'}</td>
+                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">
+                            {santriItem.nik ? (canViewSensitiveSantri ? santriItem.nik : maskIdentityNumber(String(santriItem.nik))) : '-'} / {santriItem.no_kk ? (canViewSensitiveSantri ? santriItem.no_kk : maskIdentityNumber(String(santriItem.no_kk))) : '-'}
+                          </td>
                         </tr>
                         <tr className="bg-white">
                           <td className="border border-emerald-900/30 px-2.5 py-1 text-slate-700">3. Tempat, Tanggal Lahir</td>
@@ -1101,8 +1187,12 @@ export default function DataSantriPage() {
                         </tr>
                         <tr className="bg-white">
                           <td className="border border-emerald-900/30 px-2.5 py-1 text-slate-700">11. Nomor Induk Kependudukan (NIK)</td>
-                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">{santriItem.nik_ayah || '-'}</td>
-                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">{santriItem.nik_ibu || '-'}</td>
+                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">
+                            {santriItem.nik_ayah ? (canViewSensitiveSantri ? santriItem.nik_ayah : maskIdentityNumber(String(santriItem.nik_ayah))) : '-'}
+                          </td>
+                          <td className="border border-emerald-900/30 px-2.5 py-1 font-mono">
+                            {santriItem.nik_ibu ? (canViewSensitiveSantri ? santriItem.nik_ibu : maskIdentityNumber(String(santriItem.nik_ibu))) : '-'}
+                          </td>
                         </tr>
                         <tr className="bg-emerald-50/40">
                           <td className="border border-emerald-900/30 px-2.5 py-1 text-slate-700">12. Pendidikan Terakhir</td>
@@ -1137,7 +1227,7 @@ export default function DataSantriPage() {
                         <tbody>
                           <tr className="bg-white">
                             <td className="border border-emerald-900/30 px-2.5 py-1 w-[34%] text-slate-700">15. Nama Lengkap &amp; NIK Wali</td>
-                            <td className="border border-emerald-900/30 px-2.5 py-1"><strong>{santriItem.nama_wali || '-'}</strong> (NIK: <span className="font-mono">{santriItem.nik_wali || '-'}</span>)</td>
+                            <td className="border border-emerald-900/30 px-2.5 py-1"><strong>{santriItem.nama_wali || '-'}</strong> (NIK: <span className="font-mono">{santriItem.nik_wali ? (canViewSensitiveSantri ? santriItem.nik_wali : maskIdentityNumber(String(santriItem.nik_wali))) : '-'}</span>)</td>
                           </tr>
                           <tr className="bg-emerald-50/40">
                             <td className="border border-emerald-900/30 px-2.5 py-1 text-slate-700">16. Pendidikan &amp; Pekerjaan Wali</td>
@@ -1183,7 +1273,7 @@ export default function DataSantriPage() {
                   </div>
 
                   <div className="mt-2 pt-1 border-t border-emerald-800/30 flex justify-between text-[8px] text-slate-500">
-                    <span>Dokumen Sah Buku Induk Santri • SIAP An-Nur 1 Bululawang</span>
+                    <span>Dokumen Sah Buku Induk Santri • e-annursatu • Ponpes An-Nur 1 Bululawang</span>
                     <span className="font-mono">NIS: {santriItem.nis}</span>
                   </div>
                 </div>
@@ -1245,6 +1335,19 @@ export default function DataSantriPage() {
         </div>
       )}
 
+      {/* BANNER MODE TRANSPARANSI */}
+      <div className="print:hidden">
+        <TransparencyBanner
+          moduleLabel="Data Induk Santri"
+          isReadOnly={!canEditSantri}
+          extraNote={
+            !canViewSensitiveSantri
+              ? 'NIK dan Nomor KK santri/orang tua disamarkan pada Mode Transparansi.'
+              : undefined
+          }
+        />
+      </div>
+
       {/* HEADER PAGE + PROGRESS BAR KELENGKAPAN EMIS */}
       <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden space-y-4">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
@@ -1267,13 +1370,15 @@ export default function DataSantriPage() {
               Template Excel
             </button>
 
-            <button
-              onClick={() => setShowModalImport(true)}
-              className="min-h-[40px] px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
-            >
-              <Upload className="w-4 h-4 shrink-0" />
-              Import Excel
-            </button>
+            {canEditSantri && (
+              <button
+                onClick={() => setShowModalImport(true)}
+                className="min-h-[40px] px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <Upload className="w-4 h-4 shrink-0" />
+                Import Excel
+              </button>
+            )}
 
             <button
               onClick={handleExportExcel}
@@ -1283,16 +1388,18 @@ export default function DataSantriPage() {
               Export Excel
             </button>
 
-            <button
-              onClick={() => {
-                setWilayahQuery('');
-                setShowModalForm(true);
-              }}
-              className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 shrink-0" />
-              Pendaftaran Santri Baru
-            </button>
+            {canEditSantri && (
+              <button
+                onClick={() => {
+                  setWilayahQuery('');
+                  setShowModalForm(true);
+                }}
+                className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                Pendaftaran Santri Baru
+              </button>
+            )}
           </div>
         </div>
 
@@ -1320,7 +1427,26 @@ export default function DataSantriPage() {
             </div>
           </div>
 
-          <div className="shrink-0 flex items-center justify-end">
+          <div className="shrink-0 flex flex-wrap items-center justify-end gap-2">
+            {menungguPenempatanCount > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setFilterKamar(
+                    filterKamar === 'Menunggu Penempatan' ? 'Semua' : 'Menunggu Penempatan'
+                  )
+                }
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border cursor-pointer ${
+                  filterKamar === 'Menunggu Penempatan'
+                    ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
+                    : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                }`}
+              >
+                {filterKamar === 'Menunggu Penempatan'
+                  ? `Menampilkan ${menungguPenempatanCount} Belum Punya Kamar (Reset)`
+                  : `${menungguPenempatanCount} Santri Menunggu Penempatan Kamar`}
+              </button>
+            )}
             {belumLengkapCount > 0 ? (
               <button
                 type="button"
@@ -1359,13 +1485,15 @@ export default function DataSantriPage() {
               Cetak Buku Induk ({selectedIds.length} Lembar)
             </button>
 
-            <button
-              onClick={handleBulkMutasiAlBurhany}
-              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 font-bold rounded-lg flex items-center gap-1.5 transition-colors"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              Mutasi ke An-Nur Al-Burhany
-            </button>
+            {canEditSantri && (
+              <button
+                onClick={handleBulkMutasiAlBurhany}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 font-bold rounded-lg flex items-center gap-1.5 transition-colors"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                Mutasi ke An-Nur Al-Burhany
+              </button>
+            )}
 
             <button
               onClick={() => setSelectedIds([])}
@@ -1417,6 +1545,7 @@ export default function DataSantriPage() {
           className="sm:col-span-2 lg:col-span-2 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
         >
           <option value="Semua">Semua Kamar</option>
+          <option value="Menunggu Penempatan">Menunggu Penempatan</option>
           {daftarKamar.map((k) => (
             <option key={k} value={k}>Kamar {k}</option>
           ))}
@@ -1524,13 +1653,15 @@ export default function DataSantriPage() {
                     >
                       Detail Santri
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditModal(item)}
-                      className="flex-1 min-h-[40px] px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl border border-amber-200 text-xs flex items-center justify-center gap-1.5"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" /> Edit Data
-                    </button>
+                    {canEditSantri && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(item)}
+                        className="flex-1 min-h-[40px] px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl border border-amber-200 text-xs flex items-center justify-center gap-1.5"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" /> Edit Data
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -1659,12 +1790,14 @@ export default function DataSantriPage() {
                           >
                             Detail
                           </button>
-                          <button
-                            onClick={() => handleOpenEditModal(item)}
-                            className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-lg border border-amber-200 text-xs inline-flex items-center gap-1 whitespace-nowrap shrink-0"
-                          >
-                            <Edit3 className="w-3 h-3" /> Edit
-                          </button>
+                          {canEditSantri && (
+                            <button
+                              onClick={() => handleOpenEditModal(item)}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-lg border border-amber-200 text-xs inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                            >
+                              <Edit3 className="w-3 h-3" /> Edit
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2403,11 +2536,13 @@ export default function DataSantriPage() {
                     )}
                   </div>
 
-                  <label className="w-full justify-center px-3 py-2 bg-emerald-50 text-emerald-800 font-bold rounded-xl cursor-pointer hover:bg-emerald-100 flex items-center gap-1.5 text-[11px] border border-emerald-200 transition-colors">
-                    <Camera className="w-3.5 h-3.5" />
-                    {uploadingFoto ? 'Mengunggah...' : 'Upload Foto 3×4'}
-                    <input type="file" accept="image/*" disabled={uploadingFoto} onChange={(e) => handleUploadFoto(e, selectedSantri.id)} className="hidden" />
-                  </label>
+                  {canEditSantri && (
+                    <label className="w-full justify-center px-3 py-2 bg-emerald-50 text-emerald-800 font-bold rounded-xl cursor-pointer hover:bg-emerald-100 flex items-center gap-1.5 text-[11px] border border-emerald-200 transition-colors">
+                      <Camera className="w-3.5 h-3.5" />
+                      {uploadingFoto ? 'Mengunggah...' : 'Upload Foto 3×4'}
+                      <input type="file" accept="image/*" disabled={uploadingFoto} onChange={(e) => handleUploadFoto(e, selectedSantri.id)} className="hidden" />
+                    </label>
+                  )}
                 </div>
 
                 {/* Lencana Status Santri & Kelengkapan EMIS */}
@@ -2466,11 +2601,15 @@ export default function DataSantriPage() {
                     </div>
                     <div>
                       <span className="text-[10.5px] text-slate-400 block">NIK Santri</span>
-                      <strong className="font-mono text-slate-800">{selectedSantri.nik || '-'}</strong>
+                      <strong className="font-mono text-slate-800">
+                        {selectedSantri.nik ? (canViewSensitiveSantri ? selectedSantri.nik : maskIdentityNumber(String(selectedSantri.nik))) : '-'}
+                      </strong>
                     </div>
                     <div>
                       <span className="text-[10.5px] text-slate-400 block">Nomor Kartu Keluarga (KK)</span>
-                      <strong className="font-mono text-slate-800">{selectedSantri.no_kk || '-'}</strong>
+                      <strong className="font-mono text-slate-800">
+                        {selectedSantri.no_kk ? (canViewSensitiveSantri ? selectedSantri.no_kk : maskIdentityNumber(String(selectedSantri.no_kk))) : '-'}
+                      </strong>
                     </div>
                     <div>
                       <span className="text-[10.5px] text-slate-400 block">Jenis Kelamin</span>
@@ -2542,15 +2681,17 @@ export default function DataSantriPage() {
               </button>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setShowModalDetail(false);
-                    handleOpenEditModal(selectedSantri);
-                  }}
-                  className="px-4 py-2 bg-amber-50 text-amber-800 font-bold border border-amber-200 rounded-xl flex items-center gap-1.5 hover:bg-amber-100 text-xs transition-colors"
-                >
-                  <Edit3 className="w-4 h-4" /> Edit Data EMIS
-                </button>
+                {canEditSantri && (
+                  <button
+                    onClick={() => {
+                      setShowModalDetail(false);
+                      handleOpenEditModal(selectedSantri);
+                    }}
+                    className="px-4 py-2 bg-amber-50 text-amber-800 font-bold border border-amber-200 rounded-xl flex items-center gap-1.5 hover:bg-amber-100 text-xs transition-colors"
+                  >
+                    <Edit3 className="w-4 h-4" /> Edit Data EMIS
+                  </button>
+                )}
                 <button
                   onClick={() => triggerPrintBukuInduk([selectedSantri])}
                   className="px-4 py-2 bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-2 hover:bg-emerald-800 text-xs shadow-xs transition-colors"
@@ -2578,7 +2719,7 @@ export default function DataSantriPage() {
 
             <div className="p-6 space-y-4 text-xs">
               <p className="text-slate-600 leading-relaxed">
-                Gunakan file template resmi (40 kolom). Biarkan kolom <strong>NIS</strong> tetap kosong agar sistem menerbitkan nomor urut NIS secara otomatis berdasarkan tahun tanggal masuk.
+                <strong>Pembaruan Massal Sekretaris:</strong> Unduh data lewat <em>Export Excel</em>, lengkapi kolom EMIS &amp; kamar resmi tanpa mengubah kolom <strong>NIS</strong>, lalu unggah kembali di sini — sistem akan langsung memperbarui data santri yang sudah ada tanpa membuat NIS baru. Untuk santri baru, biarkan kolom NIS kosong agar diurutkan otomatis.
               </p>
 
               <div className="border-2 border-dashed border-emerald-300 rounded-xl p-6 text-center bg-emerald-50/40 space-y-3">

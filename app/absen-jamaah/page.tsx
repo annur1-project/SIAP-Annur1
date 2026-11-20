@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import {
   CheckSquare,
@@ -265,6 +266,9 @@ function createDefaultStatuses(): Record<WaktuSholat, StatusAbsen> {
 }
 
 export default function AbsenJamaahPage() {
+  const { canEditModule } = useAuth();
+  const canEdit = canEditModule('absen-jamaah');
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('input');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedKamar, setSelectedKamar] = useState<string>('SEMUA');
@@ -540,7 +544,7 @@ export default function AbsenJamaahPage() {
   }, [filteredSantri, dailyMap]);
 
   const handleCycleStatus = (santriId: string, waktu: WaktuSholat) => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     setDraftOverrides((prev) => {
       const dayOverrides = prev[selectedDate] || {};
       const current = dailyMap[santriId] || {
@@ -568,7 +572,7 @@ export default function AbsenJamaahPage() {
   };
 
   const handleChangeAlasan = (santriId: string, alasan: string) => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     setDraftOverrides((prev) => {
       const dayOverrides = prev[selectedDate] || {};
       const current = dailyMap[santriId] || {
@@ -590,7 +594,7 @@ export default function AbsenJamaahPage() {
   };
 
   const handleSetSemuaHadir = () => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     setDraftOverrides((prev) => {
       const updated = { ...(prev[selectedDate] || {}) };
       for (const s of filteredSantri) {
@@ -610,7 +614,7 @@ export default function AbsenJamaahPage() {
   };
 
   const handleSaveDailyFiveWaktu = async () => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     if (filteredSantri.length === 0) {
       showToast('error', 'Tidak Ada Data', 'Tidak ada santri pada filter kamar atau pencarian ini.');
       return;
@@ -736,7 +740,7 @@ export default function AbsenJamaahPage() {
   }, [santriList, dailyMap, selectedKamar, searchQuery, takzirFilter]);
 
   const handleToggleTakzirStatus = async (santriId: string, nextSudahTakzir: boolean) => {
-    if (!selectedDate) return;
+    if (!canEdit || !selectedDate) return;
     setTogglingTakzirId(santriId);
 
     try {
@@ -1483,6 +1487,8 @@ export default function AbsenJamaahPage() {
         </div>
       </div>
 
+      <TransparencyBanner moduleLabel="Absen Sholat Jamaah 5 Waktu" isReadOnly={!canEdit} />
+
       {/* ERROR STATE BANNER */}
       {fetchError && (
         <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center justify-between gap-3 text-rose-900 text-xs print:hidden">
@@ -1657,24 +1663,28 @@ export default function AbsenJamaahPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={handleSetSemuaHadir}
-                className="flex-1 sm:flex-none min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Semua Hadir
-              </button>
+              {canEdit && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSetSemuaHadir}
+                    className="flex-1 sm:flex-none min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Semua Hadir
+                  </button>
 
-              <button
-                type="button"
-                disabled={saving || loading || filteredSantri.length === 0}
-                onClick={handleSaveDailyFiveWaktu}
-                className="flex-1 sm:flex-none min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? 'Menyimpan...' : 'Simpan Absen'}
-              </button>
+                  <button
+                    type="button"
+                    disabled={saving || loading || filteredSantri.length === 0}
+                    onClick={handleSaveDailyFiveWaktu}
+                    className="flex-1 sm:flex-none min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Menyimpan...' : 'Simpan Absen'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -1735,8 +1745,9 @@ export default function AbsenJamaahPage() {
                             <button
                               key={w.key}
                               type="button"
+                              disabled={!canEdit}
                               onClick={() => handleCycleStatus(s.id, w.key)}
-                              className={`min-h-[48px] py-1.5 px-1 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-colors ${meta.buttonClass}`}
+                              className={`min-h-[48px] py-1.5 px-1 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-colors disabled:cursor-default ${meta.buttonClass}`}
                             >
                               <span className="text-[9.5px] font-semibold opacity-80 leading-none">
                                 {w.label.slice(0, 4)}
@@ -1750,10 +1761,11 @@ export default function AbsenJamaahPage() {
                       {hasNonHadir && (
                         <input
                           type="text"
+                          disabled={!canEdit}
                           placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
                           value={entry.alasan}
                           onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
-                          className="w-full min-h-[38px] px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                          className="w-full min-h-[38px] px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-50 disabled:text-slate-600"
                         />
                       )}
                     </div>
@@ -1827,9 +1839,16 @@ export default function AbsenJamaahPage() {
                               <td key={w.key} className="py-2 px-1.5 text-center">
                                 <button
                                   type="button"
-                                  title={`${w.label}: ${meta.label} (Klik untuk ubah H → A → I → S)`}
+                                  disabled={!canEdit}
+                                  title={
+                                    canEdit
+                                      ? `${w.label}: ${meta.label} (Klik untuk ubah H → A → I → S)`
+                                      : `${w.label}: ${meta.label}`
+                                  }
                                   onClick={() => handleCycleStatus(s.id, w.key)}
-                                  className={`min-w-[44px] min-h-[38px] px-2.5 py-1 rounded-xl border text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer ${meta.buttonClass}`}
+                                  className={`min-w-[44px] min-h-[38px] px-2.5 py-1 rounded-xl border text-xs font-extrabold whitespace-nowrap transition-colors ${
+                                    canEdit ? 'cursor-pointer' : 'cursor-default'
+                                  } ${meta.buttonClass}`}
                                 >
                                   {meta.code}
                                 </button>
@@ -1840,10 +1859,11 @@ export default function AbsenJamaahPage() {
                             {hasNonHadir ? (
                               <input
                                 type="text"
+                                disabled={!canEdit}
                                 placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
                                 value={entry.alasan}
                                 onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-50 disabled:text-slate-600"
                               />
                             ) : (
                               <span className="text-[11px] text-slate-400">Hadir 5 waktu</span>
@@ -1924,24 +1944,36 @@ export default function AbsenJamaahPage() {
                     {item.alasan && (
                       <div className="text-[11px] text-slate-600">Keterangan: {item.alasan}</div>
                     )}
-                    <button
-                      type="button"
-                      disabled={togglingTakzirId === item.santri.id}
-                      onClick={() =>
-                        handleToggleTakzirStatus(item.santri.id, !item.sudahTakzir)
-                      }
-                      className={`w-full min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors border ${
-                        item.sudahTakzir
-                          ? 'bg-emerald-700 text-white border-emerald-700'
-                          : 'bg-rose-50 text-rose-700 border-rose-300'
-                      }`}
-                    >
-                      {togglingTakzirId === item.santri.id
-                        ? 'Menyimpan...'
-                        : item.sudahTakzir
-                        ? 'Sudah Ditakzir'
-                        : 'Belum Ditakzir (Tandai Selesai)'}
-                    </button>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        disabled={togglingTakzirId === item.santri.id}
+                        onClick={() =>
+                          handleToggleTakzirStatus(item.santri.id, !item.sudahTakzir)
+                        }
+                        className={`w-full min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors border ${
+                          item.sudahTakzir
+                            ? 'bg-emerald-700 text-white border-emerald-700'
+                            : 'bg-rose-50 text-rose-700 border-rose-300'
+                        }`}
+                      >
+                        {togglingTakzirId === item.santri.id
+                          ? 'Menyimpan...'
+                          : item.sudahTakzir
+                          ? 'Sudah Ditakzir'
+                          : 'Belum Ditakzir (Tandai Selesai)'}
+                      </button>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center justify-center w-full min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold border ${
+                          item.sudahTakzir
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {item.sudahTakzir ? 'Sudah Ditakzir' : 'Belum Ditakzir'}
+                      </span>
+                    )}
                   </div>
                 ))
               )}
@@ -1984,24 +2016,36 @@ export default function AbsenJamaahPage() {
                         </td>
                         <td className="py-3.5 px-3.5 text-slate-600">{item.alasan || '-'}</td>
                         <td className="py-3.5 px-3.5 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            disabled={togglingTakzirId === item.santri.id}
-                            onClick={() =>
-                              handleToggleTakzirStatus(item.santri.id, !item.sudahTakzir)
-                            }
-                            className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors border ${
-                              item.sudahTakzir
-                                ? 'bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800'
-                                : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                            }`}
-                          >
-                            {togglingTakzirId === item.santri.id
-                              ? 'Menyimpan...'
-                              : item.sudahTakzir
-                              ? 'Sudah Ditakzir'
-                              : 'Belum Ditakzir'}
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              disabled={togglingTakzirId === item.santri.id}
+                              onClick={() =>
+                                handleToggleTakzirStatus(item.santri.id, !item.sudahTakzir)
+                              }
+                              className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors border ${
+                                item.sudahTakzir
+                                  ? 'bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800'
+                                  : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                              }`}
+                            >
+                              {togglingTakzirId === item.santri.id
+                                ? 'Menyimpan...'
+                                : item.sudahTakzir
+                                ? 'Sudah Ditakzir'
+                                : 'Belum Ditakzir'}
+                            </button>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                                item.sudahTakzir
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {item.sudahTakzir ? 'Sudah Ditakzir' : 'Belum Ditakzir'}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))

@@ -36,7 +36,10 @@ import {
   Sunset,
   Award,
   ShieldAlert,
+  ArrowRightLeft,
+  Moon,
 } from 'lucide-react';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import {
   type DapurShift,
   type DapurSesiMasak,
@@ -44,14 +47,21 @@ import {
   type DapurPetugas,
   type DapurAbsenPetugas,
   type DapurKasItem,
+  type DapurBukuMasakItem,
+  type DapurJualanMalamItem,
+  type TipeBukuMasak,
+  type TipeJualanMalam,
   type StatusAbsenPetugas,
   type JenisKasDapur,
   SHIFT_TARGET_TIME,
+  DEFAULT_JATAH_MASAK_HARIAN,
   LS_DAPUR_SESI_KEY,
   LS_DAPUR_MENU_KEY,
   LS_DAPUR_PETUGAS_KEY,
   LS_DAPUR_ABSEN_KEY,
   LS_DAPUR_KAS_KEY,
+  LS_DAPUR_BUKU_MASAK_KEY,
+  LS_DAPUR_JUALAN_MALAM_KEY,
   KATEGORI_KAS_MASUK,
   KATEGORI_KAS_KELUAR,
   createDapurId,
@@ -69,6 +79,8 @@ import {
   evaluateCookingCompletion,
   computeCookingTimelinessStats,
   computePetugasAnalytics,
+  computeBukuMasakSummary,
+  computeJualanMalamSummary,
   writeLocalArray,
   fetchTableWithFallback,
   buildAnalitikPetugasWaText,
@@ -108,6 +120,9 @@ function formatMonthLabel(ym: string): string {
 }
 
 export default function DapurPage() {
+  const { canEditModule, pengurus } = useAuth();
+  const canEditDapur = canEditModule('dapur');
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('timer');
   const [todayStr, setTodayStr] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -124,6 +139,8 @@ export default function DapurPage() {
   const [petugasList, setPetugasList] = useState<DapurPetugas[]>([]);
   const [absenList, setAbsenList] = useState<DapurAbsenPetugas[]>([]);
   const [kasList, setKasList] = useState<DapurKasItem[]>([]);
+  const [bukuMasakList, setBukuMasakList] = useState<DapurBukuMasakItem[]>([]);
+  const [jualanMalamList, setJualanMalamList] = useState<DapurJualanMalamItem[]>([]);
   const [pengurusSource, setPengurusSource] = useState<PengurusSourceRow[]>([]);
 
   // Tab 1: Timer Filters & Edit Modal
@@ -159,7 +176,28 @@ export default function DapurPage() {
   } | null>(null);
   const [ketInput, setKetInput] = useState<string>('');
 
-  // Tab 4: Buku Kas Dapur States
+  // Tab 4: Keuangan Dapur (Buku 1 Masak & Buku 2 Jualan Malam + Legacy Kas)
+  const [showBuku1Modal, setShowBuku1Modal] = useState<boolean>(false);
+  const [buku1Tipe, setBuku1Tipe] = useState<'jatah_harian' | 'belanja_pagi' | 'belanja_sore'>('jatah_harian');
+  const [buku1Tanggal, setBuku1Tanggal] = useState<string>('');
+  const [buku1Nominal, setBuku1Nominal] = useState<string>(String(DEFAULT_JATAH_MASAK_HARIAN));
+  const [buku1Uraian, setBuku1Uraian] = useState<string>('');
+  const [buku1Pj, setBuku1Pj] = useState<string>('');
+  const [buku1Catatan, setBuku1Catatan] = useState<string>('');
+
+  const [showBuku2Modal, setShowBuku2Modal] = useState<boolean>(false);
+  const [buku2Tipe, setBuku2Tipe] = useState<'omzet_jualan' | 'modal_belanja'>('omzet_jualan');
+  const [buku2Tanggal, setBuku2Tanggal] = useState<string>('');
+  const [buku2Nominal, setBuku2Nominal] = useState<string>('');
+  const [buku2Uraian, setBuku2Uraian] = useState<string>('');
+  const [buku2Pj, setBuku2Pj] = useState<string>('');
+  const [buku2Catatan, setBuku2Catatan] = useState<string>('');
+
+  const [showSubsidiModal, setShowSubsidiModal] = useState<boolean>(false);
+  const [subsidiNominal, setSubsidiNominal] = useState<string>('');
+  const [subsidiCatatan, setSubsidiCatatan] = useState<string>('');
+
+  // Legacy Buku Kas Dapur States (tetap dipertahankan untuk arsip lama)
   const [kasFilterJenis, setKasFilterJenis] = useState<'semua' | JenisKasDapur>('semua');
   const [kasFilterPeriode, setKasFilterPeriode] = useState<'bulan_ini' | 'semua'>('bulan_ini');
   const [kasSearch, setKasSearch] = useState<string>('');
@@ -175,7 +213,7 @@ export default function DapurPage() {
 
   // Delete confirmation modal
   const [deleteDialog, setDeleteDialog] = useState<{
-    kind: 'menu' | 'petugas' | 'kas';
+    kind: 'menu' | 'petugas' | 'kas' | 'buku_masak' | 'jualan_malam';
     id: string;
     label: string;
   } | null>(null);
@@ -214,35 +252,47 @@ export default function DapurPage() {
   const loadAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sesiRes, menuRes, petugasRes, absenRes, kasRes, pengurusRes] = await Promise.all([
-        fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY, {
-          col: 'tanggal',
-          ascending: false,
-        }),
-        fetchTableWithFallback<DapurMenuJadwal>('dapur_menu_jadwal', LS_DAPUR_MENU_KEY, {
-          col: 'tanggal',
-          ascending: true,
-        }),
-        fetchTableWithFallback<DapurPetugas>('dapur_petugas', LS_DAPUR_PETUGAS_KEY, {
-          col: 'nama',
-          ascending: true,
-        }),
-        fetchTableWithFallback<DapurAbsenPetugas>('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, {
-          col: 'tanggal',
-          ascending: false,
-        }),
-        fetchTableWithFallback<DapurKasItem>('dapur_kas', LS_DAPUR_KAS_KEY, {
-          col: 'tanggal',
-          ascending: false,
-        }),
-        supabase.from('v_pengurus_lengkap').select('*'),
-      ]);
+      const [sesiRes, menuRes, petugasRes, absenRes, kasRes, bukuMasakRes, jualanMalamRes, pengurusRes] =
+        await Promise.all([
+          fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY, {
+            col: 'tanggal',
+            ascending: false,
+          }),
+          fetchTableWithFallback<DapurMenuJadwal>('dapur_menu_jadwal', LS_DAPUR_MENU_KEY, {
+            col: 'tanggal',
+            ascending: true,
+          }),
+          fetchTableWithFallback<DapurPetugas>('dapur_petugas', LS_DAPUR_PETUGAS_KEY, {
+            col: 'nama',
+            ascending: true,
+          }),
+          fetchTableWithFallback<DapurAbsenPetugas>('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, {
+            col: 'tanggal',
+            ascending: false,
+          }),
+          fetchTableWithFallback<DapurKasItem>('dapur_kas', LS_DAPUR_KAS_KEY, {
+            col: 'tanggal',
+            ascending: false,
+          }),
+          fetchTableWithFallback<DapurBukuMasakItem>('dapur_buku_masak', LS_DAPUR_BUKU_MASAK_KEY, {
+            col: 'tanggal',
+            ascending: false,
+          }),
+          fetchTableWithFallback<DapurJualanMalamItem>(
+            'dapur_jualan_malam',
+            LS_DAPUR_JUALAN_MALAM_KEY,
+            { col: 'tanggal', ascending: false }
+          ),
+          supabase.from('v_pengurus_lengkap').select('*'),
+        ]);
 
       setSesiList(sesiRes.rows);
       setMenuList(menuRes.rows);
       setPetugasList(petugasRes.rows);
       setAbsenList(absenRes.rows);
       setKasList(kasRes.rows);
+      setBukuMasakList(bukuMasakRes.rows);
+      setJualanMalamList(jualanMalamRes.rows);
 
       if (!pengurusRes.error && Array.isArray(pengurusRes.data)) {
         const activePengurus = (pengurusRes.data as PengurusSourceRow[]).filter(
@@ -389,6 +439,33 @@ export default function DapurPage() {
     }
     return { masuk, keluar };
   }, [kasFiltered]);
+
+  // 2 Pembukuan Terhubung: Buku 1 (Dompet Belanja Masak Harian) & Buku 2 (Kas Jualan Malam)
+  const bukuMasakSummary = useMemo(
+    () => computeBukuMasakSummary(bukuMasakList, selectedDate),
+    [bukuMasakList, selectedDate]
+  );
+
+  const jualanMalamSummary = useMemo(
+    () => computeJualanMalamSummary(jualanMalamList, selectedDate),
+    [jualanMalamList, selectedDate]
+  );
+
+  const bukuMasakDisplay = useMemo(
+    () =>
+      [...bukuMasakSummary.ascWithBalance]
+        .reverse()
+        .filter((item) => (!selectedMonth ? true : item.tanggal.startsWith(selectedMonth))),
+    [bukuMasakSummary.ascWithBalance, selectedMonth]
+  );
+
+  const jualanMalamDisplay = useMemo(
+    () =>
+      [...jualanMalamSummary.ascWithBalance]
+        .reverse()
+        .filter((item) => (!selectedMonth ? true : item.tanggal.startsWith(selectedMonth))),
+    [jualanMalamSummary.ascWithBalance, selectedMonth]
+  );
 
   // =========================================================
   // HANDLERS TAB 1: MULAI / SELESAI MEMASAK REAL-TIME
@@ -811,7 +888,199 @@ export default function DapurPage() {
   };
 
   // =========================================================
-  // HANDLERS TAB 4: BUKU KAS DAPUR
+  // HANDLERS TAB 4: BUKU 1 (BELANJA MASAK) & BUKU 2 (JUALAN MALAM)
+  // =========================================================
+  const openBuku1Modal = (tipe: 'jatah_harian' | 'belanja_pagi' | 'belanja_sore') => {
+    if (!canEditDapur) return;
+    setBuku1Tipe(tipe);
+    setBuku1Tanggal(selectedDate || todayStr);
+    setBuku1Nominal(tipe === 'jatah_harian' ? String(DEFAULT_JATAH_MASAK_HARIAN) : '');
+    setBuku1Uraian(
+      tipe === 'jatah_harian'
+        ? `Jatah Belanja Masak Harian (${formatTanggalPendek(selectedDate || todayStr)})`
+        : tipe === 'belanja_pagi'
+        ? 'Belanja Bahan Masak Pagi'
+        : 'Belanja Bahan Masak Sore'
+    );
+    setBuku1Pj(pengurus?.nama_lengkap || 'Sie Dapur');
+    setBuku1Catatan('');
+    setShowBuku1Modal(true);
+  };
+
+  const handleSaveBuku1 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditDapur) return;
+    const nom = parseInt(buku1Nominal.replace(/\D/g, ''), 10) || 0;
+    if (!buku1Uraian.trim() || nom <= 0) {
+      showToast('error', 'Validasi', 'Uraian dan nominal (> 0) wajib diisi.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const nextItem: DapurBukuMasakItem = {
+        id: createDapurId('bmasak'),
+        tanggal: buku1Tanggal || selectedDate || todayStr,
+        tipe: buku1Tipe,
+        arah: buku1Tipe === 'jatah_harian' ? 'masuk' : 'keluar',
+        nominal: nom,
+        uraian: buku1Uraian.trim(),
+        penanggung_jawab: buku1Pj.trim() || 'Sie Dapur',
+        catatan: buku1Catatan.trim(),
+        created_at: new Date().toISOString(),
+      };
+      const nextList = [nextItem, ...bukuMasakList];
+      setBukuMasakList(nextList);
+      await persistUpsert('dapur_buku_masak', LS_DAPUR_BUKU_MASAK_KEY, nextList, nextItem);
+      setShowBuku1Modal(false);
+      showToast(
+        'success',
+        buku1Tipe === 'jatah_harian' ? 'Jatah Harian Diterima' : 'Belanja Masak Dicatat',
+        `${nextItem.uraian} (${formatRupiah(nom)}) masuk ke Buku 1 Dompet Belanja Masak.`
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openBuku2Modal = (tipe: 'omzet_jualan' | 'modal_belanja') => {
+    if (!canEditDapur) return;
+    setBuku2Tipe(tipe);
+    setBuku2Tanggal(selectedDate || todayStr);
+    setBuku2Nominal('');
+    setBuku2Uraian(
+      tipe === 'omzet_jualan'
+        ? `Omzet Jualan Malam Dapur (${formatTanggalPendek(selectedDate || todayStr)})`
+        : 'Belanja Modal / Bahan Jualan Malam'
+    );
+    setBuku2Pj(pengurus?.nama_lengkap || 'Sie Dapur');
+    setBuku2Catatan('');
+    setShowBuku2Modal(true);
+  };
+
+  const handleSaveBuku2 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditDapur) return;
+    const nom = parseInt(buku2Nominal.replace(/\D/g, ''), 10) || 0;
+    if (!buku2Uraian.trim() || nom <= 0) {
+      showToast('error', 'Validasi', 'Uraian dan nominal (> 0) wajib diisi.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const nextItem: DapurJualanMalamItem = {
+        id: createDapurId('bjual'),
+        tanggal: buku2Tanggal || selectedDate || todayStr,
+        tipe: buku2Tipe,
+        arah: buku2Tipe === 'omzet_jualan' ? 'masuk' : 'keluar',
+        nominal: nom,
+        uraian: buku2Uraian.trim(),
+        penanggung_jawab: buku2Pj.trim() || 'Sie Dapur',
+        catatan: buku2Catatan.trim(),
+        created_at: new Date().toISOString(),
+      };
+      const nextList = [nextItem, ...jualanMalamList];
+      setJualanMalamList(nextList);
+      await persistUpsert('dapur_jualan_malam', LS_DAPUR_JUALAN_MALAM_KEY, nextList, nextItem);
+      setShowBuku2Modal(false);
+      showToast(
+        'success',
+        buku2Tipe === 'omzet_jualan' ? 'Omzet Jualan Malam Tercatat' : 'Modal Jualan Malam Tercatat',
+        `${nextItem.uraian} (${formatRupiah(nom)}) tersimpan di Buku 2 Kas Jualan Malam.`
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openSubsidiModal = () => {
+    if (!canEditDapur) return;
+    if (!bukuMasakSummary.isMinus) {
+      showToast(
+        'info',
+        'Tidak Perlu Subsidi',
+        'Saldo Dompet Belanja Masak Harian masih aman (tidak minus). Dana Kas Jualan Malam tetap utuh.'
+      );
+      return;
+    }
+    if (jualanMalamSummary.saldoAkhir <= 0) {
+      showToast('error', 'Saldo Jualan Malam Kosong', 'Saldo Kas Jualan Malam belum mencukupi untuk menutup kekurangan.');
+      return;
+    }
+    const defaultAmount = Math.min(bukuMasakSummary.kekurangan, jualanMalamSummary.saldoAkhir);
+    setSubsidiNominal(String(defaultAmount));
+    setSubsidiCatatan(`Tutup kekurangan Dompet Belanja Masak (${formatTanggalPendek(selectedDate || todayStr)})`);
+    setShowSubsidiModal(true);
+  };
+
+  const handleConfirmSubsidi = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditDapur) return;
+    if (!bukuMasakSummary.isMinus) return;
+
+    const nom = parseInt(subsidiNominal.replace(/\D/g, ''), 10) || 0;
+    if (nom <= 0) {
+      showToast('error', 'Validasi', 'Nominal subsidi harus lebih dari Rp 0.');
+      return;
+    }
+    if (nom > jualanMalamSummary.saldoAkhir) {
+      showToast('error', 'Saldo Tidak Cukup', 'Nominal melebihi saldo Kas Jualan Malam yang tersedia.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const tgl = selectedDate || todayStr || getLocalTodayStr();
+      const pjName = pengurus?.nama_lengkap || 'Sie Dapur';
+      const masakId = createDapurId('bmasak');
+      const jualId = createDapurId('bjual');
+
+      const buku1Item: DapurBukuMasakItem = {
+        id: masakId,
+        tanggal: tgl,
+        tipe: 'subsidi_jualan_malam',
+        arah: 'masuk',
+        nominal: nom,
+        uraian: 'Subsidi dari Kas Jualan Malam Dapur',
+        penanggung_jawab: pjName,
+        catatan: subsidiCatatan.trim(),
+        created_at: nowIso,
+      };
+
+      const buku2Item: DapurJualanMalamItem = {
+        id: jualId,
+        tanggal: tgl,
+        tipe: 'subsidi_ke_masak',
+        arah: 'keluar',
+        nominal: nom,
+        uraian: 'Penarikan Subsidi Tutup Kekurangan Belanja Masak',
+        penanggung_jawab: pjName,
+        catatan: subsidiCatatan.trim(),
+        linked_masak_id: masakId,
+        created_at: nowIso,
+      };
+
+      const nextBuku1 = [buku1Item, ...bukuMasakList];
+      const nextBuku2 = [buku2Item, ...jualanMalamList];
+      setBukuMasakList(nextBuku1);
+      setJualanMalamList(nextBuku2);
+
+      await persistUpsert('dapur_buku_masak', LS_DAPUR_BUKU_MASAK_KEY, nextBuku1, buku1Item);
+      await persistUpsert('dapur_jualan_malam', LS_DAPUR_JUALAN_MALAM_KEY, nextBuku2, buku2Item);
+
+      setShowSubsidiModal(false);
+      showToast(
+        'success',
+        'Kekurangan Ditutup Otomatis',
+        `${formatRupiah(nom)} dipindahkan dari Buku 2 (Kas Jualan Malam) untuk menyeimbangkan Buku 1 (Belanja Masak).`
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // =========================================================
+  // HANDLERS TAB 4 LEGACY: BUKU KAS DAPUR
   // =========================================================
   const openKasModal = (jenis: JenisKasDapur, item?: DapurKasItem) => {
     setEditingKas(item || null);
@@ -880,6 +1149,14 @@ export default function DapurPage() {
         const next = kasList.filter((k) => k.id !== deleteDialog.id);
         setKasList(next);
         await persistDelete('dapur_kas', LS_DAPUR_KAS_KEY, next, deleteDialog.id);
+      } else if (deleteDialog.kind === 'buku_masak') {
+        const next = bukuMasakList.filter((b) => b.id !== deleteDialog.id);
+        setBukuMasakList(next);
+        await persistDelete('dapur_buku_masak', LS_DAPUR_BUKU_MASAK_KEY, next, deleteDialog.id);
+      } else if (deleteDialog.kind === 'jualan_malam') {
+        const next = jualanMalamList.filter((b) => b.id !== deleteDialog.id);
+        setJualanMalamList(next);
+        await persistDelete('dapur_jualan_malam', LS_DAPUR_JUALAN_MALAM_KEY, next, deleteDialog.id);
       }
       showToast('info', 'Data Dihapus', `${deleteDialog.label} telah dihapus.`);
       setDeleteDialog(null);
@@ -1063,13 +1340,15 @@ export default function DapurPage() {
           <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-500">Menu Terjadwal:</span>
-              <button
-                type="button"
-                onClick={() => openMenuModal(selectedDate, shift, menu)}
-                className="text-[11px] font-semibold text-emerald-700 hover:underline whitespace-nowrap shrink-0"
-              >
-                {menu ? 'Ubah Menu' : '+ Atur Menu'}
-              </button>
+              {canEditDapur && (
+                <button
+                  type="button"
+                  onClick={() => openMenuModal(selectedDate, shift, menu)}
+                  className="text-[11px] font-semibold text-emerald-700 hover:underline whitespace-nowrap shrink-0"
+                >
+                  {menu ? 'Ubah Menu' : '+ Atur Menu'}
+                </button>
+              )}
             </div>
             <p className="font-semibold text-slate-800 mt-1">
               {menu
@@ -1189,48 +1468,51 @@ export default function DapurPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          {!isRunning && !isDone && (
-            <button
-              type="button"
-              disabled={saving || !selectedDate}
-              onClick={() => handleStartCooking(shift)}
-              className="flex-1 min-h-[48px] px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <Play className="w-4 h-4 fill-current shrink-0" />
-              Mulai Memasak {isPagi ? 'Pagi' : 'Sore'}
-            </button>
-          )}
+        {canEditDapur && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {!isRunning && !isDone && (
+              <button
+                type="button"
+                disabled={saving || !selectedDate}
+                onClick={() => handleStartCooking(shift)}
+                className="flex-1 min-h-[48px] px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <Play className="w-4 h-4 fill-current shrink-0" />
+                Mulai Memasak {isPagi ? 'Pagi' : 'Sore'}
+              </button>
+            )}
 
-          {isRunning && (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleFinishCooking(shift)}
-              className="flex-1 min-h-[48px] px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <Square className="w-4 h-4 fill-current shrink-0" />
-              Selesai Memasak (Matang)
-            </button>
-          )}
+            {isRunning && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleFinishCooking(shift)}
+                className="flex-1 min-h-[48px] px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <Square className="w-4 h-4 fill-current shrink-0" />
+                Selesai Memasak (Matang)
+              </button>
+            )}
 
-          {isDone && sesi && (
-            <button
-              type="button"
-              onClick={() => openEditSesiModal(sesi)}
-              className="flex-1 min-h-[44px] px-3.5 py-2 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              Tambah / Edit Catatan &amp; PJ
-            </button>
-          )}
-        </div>
+            {isDone && sesi && (
+              <button
+                type="button"
+                onClick={() => openEditSesiModal(sesi)}
+                className="flex-1 min-h-[44px] px-3.5 py-2 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Tambah / Edit Catatan &amp; PJ
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      <TransparencyBanner moduleLabel="Dapur & Masak Pondok" isReadOnly={!canEditDapur} />
       {/* TOAST NOTIFICATIONS */}
       {toasts.length > 0 && (
         <div className="print:hidden fixed top-14 md:top-5 right-4 left-4 md:left-auto z-50 flex flex-col gap-2 md:w-96">
@@ -1464,23 +1746,22 @@ export default function DapurPage() {
           </div>
         </div>
 
-        {/* KPI 4: Saldo Kas Dapur */}
+        {/* KPI 4: Saldo 2 Buku Keuangan Dapur */}
         <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-slate-500">Saldo Kas Dapur</span>
+            <span className="text-xs font-semibold text-slate-500">Dompet Belanja Masak</span>
             <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
           </div>
           <div className="mt-2.5">
             <strong
               className={`text-base sm:text-xl font-extrabold tabular-nums block ${
-                kasAllChrono.saldoAkhir < 0 ? 'text-rose-700' : 'text-slate-900'
+                bukuMasakSummary.saldoAkhir < 0 ? 'text-rose-700' : 'text-slate-900'
               }`}
             >
-              {loading ? '...' : formatRupiah(kasAllChrono.saldoAkhir)}
+              {loading ? '...' : formatRupiah(bukuMasakSummary.saldoAkhir)}
             </strong>
             <p className="text-[11px] text-slate-500 mt-1 tabular-nums truncate">
-              Masuk {formatRupiah(kasAllChrono.totalMasukAll)} &bull; Keluar{' '}
-              {formatRupiah(kasAllChrono.totalKeluarAll)}
+              Kas Jualan Malam: {formatRupiah(jualanMalamSummary.saldoAkhir)}
             </p>
           </div>
         </div>
@@ -1492,7 +1773,7 @@ export default function DapurPage() {
           { id: 'timer' as const, label: 'Kontrol Masak & Timer', icon: Clock },
           { id: 'menu' as const, label: 'Jadwal Harian Menu', icon: Utensils },
           { id: 'absen' as const, label: 'Absen & Analisis Petugas', icon: BarChart3 },
-          { id: 'kas' as const, label: 'Buku Kas Dapur', icon: Wallet },
+          { id: 'kas' as const, label: 'Keuangan Dapur (2 Buku)', icon: Wallet },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -1750,13 +2031,15 @@ export default function DapurPage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() => openEditSesiModal(s)}
-                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold"
-                            >
-                              Catatan
-                            </button>
+                            {canEditDapur && (
+                              <button
+                                type="button"
+                                onClick={() => openEditSesiModal(s)}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold"
+                              >
+                                Catatan
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1795,13 +2078,15 @@ export default function DapurPage() {
                           Mulai {formatTimeClock(s.started_at, false)} &rarr; Selesai{' '}
                           {s.finished_at ? formatTimeClock(s.finished_at, false) : '-'} ({s.durasi_menit} mnt)
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => openEditSesiModal(s)}
-                          className="min-h-[36px] px-3 py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold font-sans"
-                        >
-                          Catatan
-                        </button>
+                        {canEditDapur && (
+                          <button
+                            type="button"
+                            onClick={() => openEditSesiModal(s)}
+                            className="min-h-[36px] px-3 py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold font-sans"
+                          >
+                            Catatan
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1830,15 +2115,17 @@ export default function DapurPage() {
                 </p>
               </div>
               <div className="print:hidden flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyLastWeekMenu}
-                  disabled={saving}
-                  className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  Salin Minggu Lalu
-                </button>
+                {canEditDapur && (
+                  <button
+                    type="button"
+                    onClick={handleCopyLastWeekMenu}
+                    disabled={saving}
+                    className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin Minggu Lalu
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleCopyMenuWa}
@@ -1904,31 +2191,33 @@ export default function DapurPage() {
                         </p>
                       )}
                     </div>
-                    <div className="print:hidden flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => openMenuModal(selectedDate, shift, item)}
-                        className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
-                      >
-                        {item ? <Edit3 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                        {item ? 'Edit Menu' : 'Tambah Menu'}
-                      </button>
-                      {item && (
+                    {canEditDapur && (
+                      <div className="print:hidden flex items-center gap-2 pt-1">
                         <button
                           type="button"
-                          onClick={() =>
-                            setDeleteDialog({
-                              kind: 'menu',
-                              id: item.id,
-                              label: `Menu ${shift} (${formatTanggalPendek(item.tanggal)})`,
-                            })
-                          }
-                          className="min-h-[40px] px-3 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold"
+                          onClick={() => openMenuModal(selectedDate, shift, item)}
+                          className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
                         >
-                          Hapus
+                          {item ? <Edit3 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                          {item ? 'Edit Menu' : 'Tambah Menu'}
                         </button>
-                      )}
-                    </div>
+                        {item && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteDialog({
+                                kind: 'menu',
+                                id: item.id,
+                                label: `Menu ${shift} (${formatTanggalPendek(item.tanggal)})`,
+                              })
+                            }
+                            className="min-h-[40px] px-3 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold"
+                          >
+                            Hapus
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1989,13 +2278,15 @@ export default function DapurPage() {
                             : 'Belum diatur'}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openMenuModal(day, 'pagi', pagi)}
-                        className="print:hidden px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 whitespace-nowrap shrink-0"
-                      >
-                        {pagi ? 'Edit' : '+ Atur'}
-                      </button>
+                      {canEditDapur && (
+                        <button
+                          type="button"
+                          onClick={() => openMenuModal(day, 'pagi', pagi)}
+                          className="print:hidden px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 whitespace-nowrap shrink-0"
+                        >
+                          {pagi ? 'Edit' : '+ Atur'}
+                        </button>
+                      )}
                     </div>
 
                     <div className="md:col-span-5 flex items-start justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70">
@@ -2011,13 +2302,15 @@ export default function DapurPage() {
                             : 'Belum diatur'}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openMenuModal(day, 'sore', sore)}
-                        className="print:hidden px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 whitespace-nowrap shrink-0"
-                      >
-                        {sore ? 'Edit' : '+ Atur'}
-                      </button>
+                      {canEditDapur && (
+                        <button
+                          type="button"
+                          onClick={() => openMenuModal(day, 'sore', sore)}
+                          className="print:hidden px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 whitespace-nowrap shrink-0"
+                        >
+                          {sore ? 'Edit' : '+ Atur'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -2044,16 +2337,18 @@ export default function DapurPage() {
                   Catat kehadiran setiap kali masak Shift Pagi dan Shift Sore secara terpisah.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPetugasModal(true)}
-                  className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  Kelola Petugas ({petugasList.filter((p) => p.aktif !== false).length})
-                </button>
-              </div>
+              {canEditDapur && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPetugasModal(true)}
+                    className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    Kelola Petugas ({petugasList.filter((p) => p.aktif !== false).length})
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Shift Switcher + Search + Mark All */}
@@ -2096,7 +2391,7 @@ export default function DapurPage() {
                     className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500"
                   />
                 </div>
-                {rosterFiltered.length > 0 && (
+                {canEditDapur && rosterFiltered.length > 0 && (
                   <button
                     type="button"
                     disabled={saving}
@@ -2190,8 +2485,9 @@ export default function DapurPage() {
                             <button
                               key={opt.val}
                               type="button"
-                              onClick={() => handleMarkAbsen(p, absenShiftView, opt.val)}
-                              className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap shrink-0 ${
+                              disabled={!canEditDapur}
+                              onClick={() => canEditDapur && handleMarkAbsen(p, absenShiftView, opt.val)}
+                              className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap shrink-0 disabled:opacity-60 ${
                                 isSelected
                                   ? opt.activeCls
                                   : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
@@ -2202,20 +2498,22 @@ export default function DapurPage() {
                           );
                         })}
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingKetTarget({
-                              petugas: p,
-                              shift: absenShiftView,
-                              currentKet: rec?.keterangan || '',
-                            });
-                            setKetInput(rec?.keterangan || '');
-                          }}
-                          className="min-h-[40px] px-2.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium whitespace-nowrap shrink-0"
-                        >
-                          Catatan
-                        </button>
+                        {canEditDapur && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingKetTarget({
+                                petugas: p,
+                                shift: absenShiftView,
+                                currentKet: rec?.keterangan || '',
+                              });
+                              setKetInput(rec?.keterangan || '');
+                            }}
+                            className="min-h-[40px] px-2.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium whitespace-nowrap shrink-0"
+                          >
+                            Catatan
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -2610,268 +2908,497 @@ export default function DapurPage() {
       )}
 
       {/* ========================================================= */}
-      {/* TAB 4: BUKU KAS SEDERHANA DAPUR (KELUAR MASUK UANG)       */}
+      {/* TAB 4: KEUANGAN DAPUR (2 PEMBUKUAN TERHUBUNG)             */}
       {/* ========================================================= */}
       {activeTab === 'kas' && (
-        <div className="space-y-5">
-          {/* 3 Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Uang Masuk ({kasFilterPeriode === 'bulan_ini' ? formatMonthLabel(selectedMonth) : 'Total'})
-                </span>
-                <TrendingUp className="w-4 h-4 text-emerald-600" />
+        <div className="space-y-6">
+          {/* RINGKASAN 2 PEMBUKUAN TERHUBUNG */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* KARTU BUKU 1: DOMPET BELANJA MASAK HARIAN */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4">
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                      Buku 1 &bull; Anggaran Pondok
+                    </span>
+                    <h2 className="text-lg font-extrabold text-slate-900 mt-0.5">
+                      Dompet Belanja Masak Harian
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Sisa jatah belanja tidak hangus dan otomatis mengendap menambah saldo hari berikutnya (tidak dipindah ke kas jualan).
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div
+                  className={`p-4 rounded-xl border ${
+                    bukuMasakSummary.isMinus
+                      ? 'bg-rose-50 border-rose-300'
+                      : 'bg-emerald-50/60 border-emerald-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Saldo Tersedia (Carry-Forward)
+                    </span>
+                    {bukuMasakSummary.isMinus ? (
+                      <span className="text-[11px] font-bold text-rose-700">
+                        Kurang / Minus
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold text-emerald-700">
+                        Sisa Mengendap Aman
+                      </span>
+                    )}
+                  </div>
+                  <strong
+                    className={`text-2xl sm:text-3xl font-extrabold font-mono tabular-nums block mt-1 ${
+                      bukuMasakSummary.isMinus ? 'text-rose-700' : 'text-emerald-800'
+                    }`}
+                  >
+                    {formatRupiah(bukuMasakSummary.saldoAkhir)}
+                  </strong>
+                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-200/70 text-[11px] tabular-nums">
+                    <div>
+                      <span className="text-slate-500 block">Jatah Hari Ini</span>
+                      <strong className="text-slate-900 font-mono">
+                        {formatRupiah(bukuMasakSummary.jatahHariIni)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Belanja Hari Ini</span>
+                      <strong className="text-rose-700 font-mono">
+                        {formatRupiah(bukuMasakSummary.belanjaHariIni)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Subsidi Masuk</span>
+                      <strong className="text-indigo-700 font-mono">
+                        {formatRupiah(bukuMasakSummary.totalSubsidiMasuk)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <strong className="text-xl sm:text-2xl font-extrabold text-emerald-700 tabular-nums mt-2 block">
-                {formatRupiah(kasPeriodeSummary.masuk)}
-              </strong>
+
+              {canEditDapur && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openBuku1Modal('jatah_harian')}
+                    className="flex-1 min-h-[44px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    Terima Jatah Harian
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openBuku1Modal('belanja_pagi')}
+                    className="min-h-[44px] px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                  >
+                    <Sun className="w-3.5 h-3.5 shrink-0" />
+                    Belanja Pagi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openBuku1Modal('belanja_sore')}
+                    className="min-h-[44px] px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                  >
+                    <Sunset className="w-3.5 h-3.5 shrink-0" />
+                    Belanja Sore
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Belanja Keluar ({kasFilterPeriode === 'bulan_ini' ? formatMonthLabel(selectedMonth) : 'Total'})
-                </span>
-                <TrendingDown className="w-4 h-4 text-rose-600" />
-              </div>
-              <strong className="text-xl sm:text-2xl font-extrabold text-rose-700 tabular-nums mt-2 block">
-                {formatRupiah(kasPeriodeSummary.keluar)}
-              </strong>
-            </div>
+            {/* KARTU BUKU 2: DOMPET KAS JUALAN MALAM DAPUR */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4">
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                      Buku 2 &bull; Usaha Jualan Malam
+                    </span>
+                    <h2 className="text-lg font-extrabold text-slate-900 mt-0.5">
+                      Dompet Kas Jualan Malam Dapur
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Dana jualan malam HANYA boleh ditarik untuk menutup kekurangan apabila Dompet Belanja Masak Harian minus.
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center shrink-0">
+                    <Moon className="w-5 h-5" />
+                  </div>
+                </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">Saldo Kas Dapur Saat Ini</span>
-                <Wallet className="w-4 h-4 text-slate-700" />
+                <div className="p-4 rounded-xl border bg-indigo-50/50 border-indigo-200">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Saldo Kas Jualan Malam
+                    </span>
+                    <span className="text-[11px] font-bold text-indigo-800 tabular-nums">
+                      Laba Bersih: {formatRupiah(jualanMalamSummary.labaBersihTotal)}
+                    </span>
+                  </div>
+                  <strong className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-indigo-950 block mt-1">
+                    {formatRupiah(jualanMalamSummary.saldoAkhir)}
+                  </strong>
+                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-indigo-200/60 text-[11px] tabular-nums">
+                    <div>
+                      <span className="text-slate-500 block">Total Omzet</span>
+                      <strong className="text-emerald-700 font-mono">
+                        {formatRupiah(jualanMalamSummary.totalOmzet)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Total Modal</span>
+                      <strong className="text-rose-700 font-mono">
+                        {formatRupiah(jualanMalamSummary.totalModal)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Subsidi Keluar</span>
+                      <strong className="text-amber-700 font-mono">
+                        {formatRupiah(jualanMalamSummary.totalSubsidiKeluar)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <strong
-                className={`text-xl sm:text-2xl font-extrabold tabular-nums mt-2 block ${
-                  kasAllChrono.saldoAkhir < 0 ? 'text-rose-700' : 'text-slate-900'
-                }`}
-              >
-                {formatRupiah(kasAllChrono.saldoAkhir)}
-              </strong>
+
+              {canEditDapur && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openBuku2Modal('omzet_jualan')}
+                      className="flex-1 min-h-[44px] px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Plus className="w-4 h-4 shrink-0" />
+                      Catat Omzet Malam
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openBuku2Modal('modal_belanja')}
+                      className="flex-1 min-h-[44px] px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <TrendingDown className="w-4 h-4 shrink-0" />
+                      Belanja / Modal Malam
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openSubsidiModal}
+                    disabled={!bukuMasakSummary.isMinus || jualanMalamSummary.saldoAkhir <= 0}
+                    className={`w-full min-h-[44px] px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+                      bukuMasakSummary.isMinus && jualanMalamSummary.saldoAkhir > 0
+                        ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                    }`}
+                  >
+                    <ArrowRightLeft className="w-4 h-4 shrink-0" />
+                    {bukuMasakSummary.isMinus
+                      ? `Tutup Kekurangan ${formatRupiah(bukuMasakSummary.kekurangan)} dari Kas Jualan Malam`
+                      : 'Tutup Kekurangan dari Kas Jualan Malam (Nonaktif — Buku 1 Tidak Minus)'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Action Bar & Filters */}
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => openKasModal('masuk')}
-                  className="min-h-[42px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  Catat Uang Masuk
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openKasModal('keluar')}
-                  className="min-h-[42px] px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  Catat Pengeluaran Belanja
-                </button>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 sm:w-48">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={kasSearch}
-                    onChange={(e) => setKasSearch(e.target.value)}
-                    placeholder="Cari uraian / belanja..."
-                    className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500"
-                  />
+          {/* TABEL RIWAYAT 2 BUKU TERHUBUNG */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Riwayat Buku 1 */}
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Mutasi Buku 1 &mdash; Belanja Masak ({formatMonthLabel(selectedMonth)})
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Jatah harian masuk, belanja pagi/sore, dan subsidi penutup kekurangan.
+                  </p>
                 </div>
-                <select
-                  value={kasFilterPeriode}
-                  onChange={(e) => setKasFilterPeriode(e.target.value as 'bulan_ini' | 'semua')}
-                  className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                >
-                  <option value="bulan_ini">Bulan {formatMonthLabel(selectedMonth)}</option>
-                  <option value="semua">Semua Riwayat</option>
-                </select>
-                <select
-                  value={kasFilterJenis}
-                  onChange={(e) => setKasFilterJenis(e.target.value as 'semua' | JenisKasDapur)}
-                  className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                >
-                  <option value="semua">Semua Jenis</option>
-                  <option value="masuk">Uang Masuk</option>
-                  <option value="keluar">Pengeluaran</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={handleExportKasExcel}
-                  disabled={kasFiltered.length === 0}
-                  className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="print:hidden min-h-[38px] px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Cetak
-                </button>
+                <span className="text-xs font-mono font-bold text-emerald-700 tabular-nums">
+                  {bukuMasakDisplay.length} entri
+                </span>
               </div>
-            </div>
 
-            {kasFiltered.length === 0 ? (
-              <div className="p-8 text-center space-y-2">
-                <Wallet className="w-8 h-8 text-slate-300 mx-auto" />
-                <p className="text-sm font-semibold text-slate-700">
-                  Belum ada catatan uang dapur pada filter ini
-                </p>
-                <p className="text-xs text-slate-500">
-                  Gunakan tombol Catat Uang Masuk atau Catat Pengeluaran Belanja untuk memulai buku kas dapur.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Tanggal</th>
-                        <th className="px-4 py-3 font-semibold">Jenis &amp; Kategori</th>
-                        <th className="px-4 py-3 font-semibold">Uraian &amp; PJ</th>
-                        <th className="px-4 py-3 font-semibold text-right">Nominal</th>
-                        <th className="px-4 py-3 font-semibold text-right">Saldo Berjalan</th>
-                        <th className="print:hidden px-4 py-3 font-semibold text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {kasFiltered.map((k) => (
-                        <tr key={k.id} className="hover:bg-slate-50/70">
-                          <td className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap tabular-nums">
-                            {formatTanggalPendek(k.tanggal)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold border ${
-                                k.jenis === 'masuk'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-rose-50 text-rose-700 border-rose-200'
-                              }`}
-                            >
-                              {k.jenis === 'masuk' ? 'Masuk' : 'Keluar'}
-                            </span>
-                            <p className="text-[11px] text-slate-500 mt-0.5">{k.kategori}</p>
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="font-bold text-slate-900">{k.uraian}</p>
-                            <p className="text-[11px] text-slate-500">
-                              PJ: {k.penanggung_jawab || '-'}
-                              {k.catatan ? ` · ${k.catatan}` : ''}
-                            </p>
-                          </td>
-                          <td
-                            className={`px-4 py-3 text-right font-mono tabular-nums font-bold whitespace-nowrap ${
-                              k.jenis === 'masuk' ? 'text-emerald-700' : 'text-rose-700'
+              {bukuMasakDisplay.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  Belum ada catatan Buku 1 pada periode ini. Klik <strong>Terima Jatah Harian</strong> untuk memulai.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
+                  {bukuMasakDisplay.map((item) => (
+                    <div key={item.id} className="p-3.5 flex items-start justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                            {formatTanggalPendek(item.tanggal)}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              item.tipe === 'jatah_harian'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : item.tipe === 'subsidi_jualan_malam'
+                                ? 'bg-indigo-50 text-indigo-700'
+                                : item.tipe === 'belanja_pagi'
+                                ? 'bg-amber-50 text-amber-800'
+                                : 'bg-rose-50 text-rose-700'
                             }`}
                           >
-                            {k.jenis === 'masuk' ? '+' : '-'} {formatRupiah(k.nominal)}
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums font-bold text-slate-800 whitespace-nowrap">
-                            {formatRupiah(k.saldoBerjalan)}
-                          </td>
-                          <td className="print:hidden px-4 py-3 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => openKasModal(k.jenis, k)}
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDeleteDialog({
-                                    kind: 'kas',
-                                    id: k.id,
-                                    label: `${k.uraian} (${formatRupiah(k.nominal)})`,
-                                  })
-                                }
-                                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
-                                aria-label="Hapus kas"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile Cards */}
-                <div className="md:hidden divide-y divide-slate-100">
-                  {kasFiltered.map((k) => (
-                    <div key={k.id} className="p-4 space-y-2 text-xs">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <span className="text-[11px] text-slate-500 tabular-nums block">
-                            {formatTanggalPendek(k.tanggal)} &bull; {k.kategori}
-                          </span>
-                          <strong className="text-sm text-slate-900 block mt-0.5">{k.uraian}</strong>
-                        </div>
-                        <div className="text-right shrink-0 font-mono tabular-nums">
-                          <strong
-                            className={`text-sm font-extrabold block ${
-                              k.jenis === 'masuk' ? 'text-emerald-700' : 'text-rose-700'
-                            }`}
-                          >
-                            {k.jenis === 'masuk' ? '+' : '-'} {formatRupiah(k.nominal)}
-                          </strong>
-                          <span className="text-[10px] text-slate-500">
-                            Saldo {formatRupiah(k.saldoBerjalan)}
+                            {item.tipe === 'jatah_harian'
+                              ? 'Jatah Harian'
+                              : item.tipe === 'subsidi_jualan_malam'
+                              ? 'Subsidi Jualan Malam'
+                              : item.tipe === 'belanja_pagi'
+                              ? 'Belanja Pagi'
+                              : 'Belanja Sore'}
                           </span>
                         </div>
+                        <p className="font-semibold text-slate-900 mt-1">{item.uraian}</p>
+                        <p className="text-[11px] text-slate-500">
+                          PJ: {item.penanggung_jawab || '-'}
+                          {item.catatan ? ` · ${item.catatan}` : ''}
+                        </p>
                       </div>
-                      <div className="flex items-center justify-between gap-2 pt-1">
-                        <span className="text-[11px] text-slate-500">
-                          PJ: {k.penanggung_jawab || '-'}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openKasModal(k.jenis, k)}
-                            className="min-h-[36px] px-3 py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold"
+                      <div className="text-right shrink-0 flex items-start gap-2">
+                        <div>
+                          <strong
+                            className={`font-mono tabular-nums block ${
+                              item.arah === 'masuk' ? 'text-emerald-700' : 'text-rose-700'
+                            }`}
                           >
-                            Edit
-                          </button>
+                            {item.arah === 'masuk' ? '+' : '-'} {formatRupiah(item.nominal)}
+                          </strong>
+                          <span className="text-[10px] text-slate-500 font-mono tabular-nums">
+                            Saldo {formatRupiah(item.saldoBerjalan)}
+                          </span>
+                        </div>
+                        {canEditDapur && (
                           <button
                             type="button"
                             onClick={() =>
                               setDeleteDialog({
-                                kind: 'kas',
-                                id: k.id,
-                                label: `${k.uraian} (${formatRupiah(k.nominal)})`,
+                                kind: 'buku_masak',
+                                id: item.id,
+                                label: `${item.uraian} (${formatRupiah(item.nominal)})`,
                               })
                             }
-                            className="min-h-[36px] px-2.5 py-1 text-rose-600 border border-rose-200 rounded-lg"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                            aria-label="Hapus entri Buku 1"
                           >
-                            Hapus
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        </div>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
-              </>
-            )}
+              )}
+            </div>
+
+            {/* Riwayat Buku 2 */}
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Mutasi Buku 2 &mdash; Kas Jualan Malam ({formatMonthLabel(selectedMonth)})
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Omzet penjualan malam, belanja modal, dan penarikan subsidi jika Buku 1 minus.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-indigo-700 tabular-nums">
+                  {jualanMalamDisplay.length} entri
+                </span>
+              </div>
+
+              {jualanMalamDisplay.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  Belum ada catatan Buku 2 pada periode ini. Klik <strong>Catat Omzet Malam</strong> untuk memulai.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
+                  {jualanMalamDisplay.map((item) => (
+                    <div key={item.id} className="p-3.5 flex items-start justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                            {formatTanggalPendek(item.tanggal)}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              item.tipe === 'omzet_jualan'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : item.tipe === 'subsidi_ke_masak'
+                                ? 'bg-amber-50 text-amber-800'
+                                : 'bg-rose-50 text-rose-700'
+                            }`}
+                          >
+                            {item.tipe === 'omzet_jualan'
+                              ? 'Omzet Malam'
+                              : item.tipe === 'subsidi_ke_masak'
+                              ? 'Subsidi ke Buku 1'
+                              : 'Modal / Belanja'}
+                          </span>
+                        </div>
+                        <p className="font-semibold text-slate-900 mt-1">{item.uraian}</p>
+                        <p className="text-[11px] text-slate-500">
+                          PJ: {item.penanggung_jawab || '-'}
+                          {item.catatan ? ` · ${item.catatan}` : ''}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 flex items-start gap-2">
+                        <div>
+                          <strong
+                            className={`font-mono tabular-nums block ${
+                              item.arah === 'masuk' ? 'text-emerald-700' : 'text-rose-700'
+                            }`}
+                          >
+                            {item.arah === 'masuk' ? '+' : '-'} {formatRupiah(item.nominal)}
+                          </strong>
+                          <span className="text-[10px] text-slate-500 font-mono tabular-nums">
+                            Saldo {formatRupiah(item.saldoBerjalan)}
+                          </span>
+                        </div>
+                        {canEditDapur && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteDialog({
+                                kind: 'jualan_malam',
+                                id: item.id,
+                                label: `${item.uraian} (${formatRupiah(item.nominal)})`,
+                              })
+                            }
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                            aria-label="Hapus entri Buku 2"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* ARSIP BUKU KAS DAPUR UMUM (JIKA ADA DATA LAMA) */}
+          {(kasList.length > 0 || canEditDapur) && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Catatan Kas Dapur Umum / Arsip
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Saldo arsip kas umum: <strong className="font-mono">{formatRupiah(kasAllChrono.saldoAkhir)}</strong>
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {canEditDapur && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openKasModal('masuk')}
+                        className="min-h-[38px] px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Kas Masuk Lain
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openKasModal('keluar')}
+                        className="min-h-[38px] px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Belanja Lain
+                      </button>
+                    </>
+                  )}
+                  <div className="relative sm:w-44">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={kasSearch}
+                      onChange={(e) => setKasSearch(e.target.value)}
+                      placeholder="Cari arsip..."
+                      className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <select
+                    value={kasFilterPeriode}
+                    onChange={(e) => setKasFilterPeriode(e.target.value as 'bulan_ini' | 'semua')}
+                    className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                  >
+                    <option value="bulan_ini">Bulan {formatMonthLabel(selectedMonth)}</option>
+                    <option value="semua">Semua Riwayat</option>
+                  </select>
+                  <select
+                    value={kasFilterJenis}
+                    onChange={(e) => setKasFilterJenis(e.target.value as 'semua' | JenisKasDapur)}
+                    className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                  >
+                    <option value="semua">Semua Jenis</option>
+                    <option value="masuk">Uang Masuk</option>
+                    <option value="keluar">Pengeluaran</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleExportKasExcel}
+                    disabled={kasFiltered.length === 0}
+                    className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    Excel
+                  </button>
+                </div>
+              </div>
+
+              {kasFiltered.length > 0 && (
+                <div className="divide-y divide-slate-100">
+                  {kasFiltered.map((k) => (
+                    <div key={k.id} className="px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <span className="text-[11px] text-slate-500 tabular-nums">
+                          {formatTanggalPendek(k.tanggal)} &bull; {k.kategori}
+                        </span>
+                        <p className="font-semibold text-slate-900 truncate">{k.uraian}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right font-mono tabular-nums">
+                          <strong className={k.jenis === 'masuk' ? 'text-emerald-700' : 'text-rose-700'}>
+                            {k.jenis === 'masuk' ? '+' : '-'} {formatRupiah(k.nominal)}
+                          </strong>
+                          <span className="text-[10px] text-slate-500 block">
+                            Saldo {formatRupiah(k.saldoBerjalan)}
+                          </span>
+                        </div>
+                        {canEditDapur && (
+                          <button
+                            type="button"
+                            onClick={() => openKasModal(k.jenis, k)}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg font-semibold text-slate-700"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -3427,6 +3954,278 @@ export default function DapurPage() {
                 }`}
               >
                 Simpan Transaksi
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Buku 1: Dompet Belanja Masak Harian */}
+      {showBuku1Modal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveBuku1}
+            className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl border border-slate-200 text-xs"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-slate-900">
+                {buku1Tipe === 'jatah_harian'
+                  ? 'Terima Jatah Belanja Harian'
+                  : buku1Tipe === 'belanja_pagi'
+                  ? 'Catat Belanja Masak Pagi'
+                  : 'Catat Belanja Masak Sore'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowBuku1Modal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Tanggal</label>
+                <input
+                  type="date"
+                  required
+                  value={buku1Tanggal}
+                  onChange={(e) => setBuku1Tanggal(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Nominal (Rp) *</label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={buku1Nominal}
+                  onChange={(e) => setBuku1Nominal(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl font-mono tabular-nums"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">Uraian *</label>
+              <input
+                type="text"
+                required
+                value={buku1Uraian}
+                onChange={(e) => setBuku1Uraian(e.target.value)}
+                className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Penanggung Jawab</label>
+                <input
+                  type="text"
+                  value={buku1Pj}
+                  onChange={(e) => setBuku1Pj(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Catatan</label>
+                <input
+                  type="text"
+                  value={buku1Catatan}
+                  onChange={(e) => setBuku1Catatan(e.target.value)}
+                  placeholder="Opsional..."
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBuku1Modal(false)}
+                className="min-h-[40px] px-4 py-2 border border-slate-200 rounded-xl font-semibold text-slate-700"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold"
+              >
+                Simpan ke Buku 1
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Buku 2: Dompet Kas Jualan Malam */}
+      {showBuku2Modal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveBuku2}
+            className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl border border-slate-200 text-xs"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-slate-900">
+                {buku2Tipe === 'omzet_jualan'
+                  ? 'Catat Omzet Jualan Malam'
+                  : 'Catat Modal / Belanja Jualan Malam'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowBuku2Modal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Tanggal</label>
+                <input
+                  type="date"
+                  required
+                  value={buku2Tanggal}
+                  onChange={(e) => setBuku2Tanggal(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Nominal (Rp) *</label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={buku2Nominal}
+                  onChange={(e) => setBuku2Nominal(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl font-mono tabular-nums"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">Uraian *</label>
+              <input
+                type="text"
+                required
+                value={buku2Uraian}
+                onChange={(e) => setBuku2Uraian(e.target.value)}
+                className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Penanggung Jawab</label>
+                <input
+                  type="text"
+                  value={buku2Pj}
+                  onChange={(e) => setBuku2Pj(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Catatan</label>
+                <input
+                  type="text"
+                  value={buku2Catatan}
+                  onChange={(e) => setBuku2Catatan(e.target.value)}
+                  placeholder="Opsional..."
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBuku2Modal(false)}
+                className="min-h-[40px] px-4 py-2 border border-slate-200 rounded-xl font-semibold text-slate-700"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="min-h-[40px] px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl font-bold"
+              >
+                Simpan ke Buku 2
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Tutup Kekurangan dari Kas Jualan Malam */}
+      {showSubsidiModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmSubsidi}
+            className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl border border-slate-200 text-xs"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-slate-900">
+                Tutup Kekurangan dari Kas Jualan Malam
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowSubsidiModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Kekurangan Buku 1 (Belanja Masak):</span>
+                <strong className="font-mono text-rose-700">
+                  -{formatRupiah(bukuMasakSummary.kekurangan)}
+                </strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Saldo Buku 2 (Kas Jualan Malam):</span>
+                <strong className="font-mono text-indigo-800">
+                  {formatRupiah(jualanMalamSummary.saldoAkhir)}
+                </strong>
+              </div>
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">
+                Nominal Subsidi Penutup (Rp) *
+              </label>
+              <input
+                type="number"
+                required
+                min={1}
+                max={jualanMalamSummary.saldoAkhir}
+                value={subsidiNominal}
+                onChange={(e) => setSubsidiNominal(e.target.value)}
+                className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl font-mono tabular-nums font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">Keterangan</label>
+              <input
+                type="text"
+                value={subsidiCatatan}
+                onChange={(e) => setSubsidiCatatan(e.target.value)}
+                className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowSubsidiModal(false)}
+                className="min-h-[40px] px-4 py-2 border border-slate-200 rounded-xl font-semibold text-slate-700"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="min-h-[40px] px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-bold"
+              >
+                Pindahkan &amp; Seimbangkan
               </button>
             </div>
           </form>

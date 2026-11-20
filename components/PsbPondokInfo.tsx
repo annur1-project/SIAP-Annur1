@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   UserPlus,
 } from 'lucide-react';
+import { DEFAULT_PROFIL_PONDOK_PSB, type ProfilPondokPsbConfig } from '@/lib/pengaturan';
 import { PSB_PROFIL_PONDOK } from '@/lib/psb';
 
 export function PsbPublicHeader({
@@ -50,7 +51,7 @@ export function PsbPublicHeader({
           </div>
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300 leading-tight">
-              PSB 1 Pintu
+              PSB · Penerimaan Santri Baru
             </p>
             <h1 className="text-xs sm:text-base font-bold leading-snug line-clamp-2 sm:truncate">
               {namaPesantren || PSB_PROFIL_PONDOK.namaResmi}
@@ -90,9 +91,16 @@ export function PsbPublicHeader({
   );
 }
 
-export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boolean }) {
+export function PsbPondokInfoCard({
+  defaultOpen = false,
+  profil,
+}: {
+  defaultOpen?: boolean;
+  profil?: ProfilPondokPsbConfig;
+}) {
   const [open, setOpen] = useState(defaultOpen);
   const [tab, setTab] = useState<'profil' | 'syarat' | 'jadwal'>('profil');
+  const p = profil || DEFAULT_PROFIL_PONDOK_PSB;
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
@@ -159,16 +167,16 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
                 <p className="font-bold text-emerald-950 text-sm mb-1">
                   {PSB_PROFIL_PONDOK.namaArab} · {PSB_PROFIL_PONDOK.namaResmi}
                 </p>
-                <p className="text-slate-700">{PSB_PROFIL_PONDOK.sejarahSingkat}</p>
+                <p className="text-slate-700">{p.sejarahSingkat}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
                   <p className="font-bold text-slate-900 mb-1">Visi Pesantren</p>
-                  <p className="text-slate-700">&ldquo;{PSB_PROFIL_PONDOK.visi}&rdquo;</p>
+                  <p className="text-slate-700">&ldquo;{p.visi}&rdquo;</p>
                 </div>
                 <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
                   <p className="font-bold text-slate-900 mb-1">Misi Pesantren</p>
-                  <p className="text-slate-700">&ldquo;{PSB_PROFIL_PONDOK.misi}&rdquo;</p>
+                  <p className="text-slate-700">&ldquo;{p.misi}&rdquo;</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-4 text-[11px] text-slate-600 pt-1">
@@ -178,7 +186,7 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-emerald-700" />
-                  Kantor: {PSB_PROFIL_PONDOK.telepon} ({PSB_PROFIL_PONDOK.jamKantorOffline})
+                  Kantor: {PSB_PROFIL_PONDOK.telepon} ({p.jamKantorOffline})
                 </span>
               </div>
             </div>
@@ -189,10 +197,10 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
               <div className="border border-slate-200 rounded-xl p-3.5 space-y-2">
                 <p className="font-bold text-slate-900 flex items-center gap-1.5">
                   <ClipboardCheck className="w-4 h-4 text-emerald-700" />
-                  Berkas Fisik Dibawa Saat Kedatangan / Sowan
+                  Berkas Fisik Wajib Dibawa Saat Kedatangan
                 </p>
                 <ul className="space-y-1.5">
-                  {PSB_PROFIL_PONDOK.berkasFisikWajib.map((item) => (
+                  {p.berkasFisikWajib.map((item) => (
                     <li key={item} className="flex items-start gap-2">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                       <span>{item}</span>
@@ -206,13 +214,13 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
                   Ringkasan Tata Tertib &amp; Kewajiban Wali
                 </p>
                 <ul className="space-y-1.5">
-                  {PSB_PROFIL_PONDOK.ketentuanWali.map((item) => (
+                  {p.ketentuanWali.map((item) => (
                     <li key={item} className="flex items-start gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0 mt-1.5" />
                       <span>{item}</span>
                     </li>
                   ))}
-                  {PSB_PROFIL_PONDOK.peraturanRingkas.larangan.map((item) => (
+                  {p.laranganTataTertib.map((item) => (
                     <li key={item} className="flex items-start gap-2 text-rose-800">
                       <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5" />
                       <span>Larangan: {item}</span>
@@ -231,8 +239,8 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
                   Jadwal Harian (Sabtu – Kamis)
                 </p>
                 <div className="space-y-1.5">
-                  {PSB_PROFIL_PONDOK.jadwalHarian.map((row) => (
-                    <div key={row.waktu} className="flex gap-2.5 border-b border-slate-100 pb-1.5 last:border-0">
+                  {p.jadwalHarian.map((row) => (
+                    <div key={`${row.waktu}-${row.kegiatan}`} className="flex gap-2.5 border-b border-slate-100 pb-1.5 last:border-0">
                       <span className="font-mono font-bold text-emerald-800 w-24 shrink-0">
                         {row.waktu}
                       </span>
@@ -247,8 +255,8 @@ export function PsbPondokInfoCard({ defaultOpen = false }: { defaultOpen?: boole
                   Agenda Rutin Malam Jum&apos;at &amp; Hari Jum&apos;at
                 </p>
                 <div className="space-y-1.5">
-                  {PSB_PROFIL_PONDOK.jadwalJumat.map((row) => (
-                    <div key={row.waktu} className="flex gap-2.5 border-b border-slate-100 pb-1.5 last:border-0">
+                  {p.jadwalJumat.map((row) => (
+                    <div key={`${row.waktu}-${row.kegiatan}`} className="flex gap-2.5 border-b border-slate-100 pb-1.5 last:border-0">
                       <span className="font-mono font-bold text-emerald-800 w-28 shrink-0">
                         {row.waktu}
                       </span>

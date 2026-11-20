@@ -50,6 +50,26 @@ export interface SkemaPendaftaranConfig {
   syahriyah_reguler: number;
   kuota_gratis_uang_pangkal: number;
   promo_aktif: boolean;
+  tahun_psb?: number;
+  tahun_ajaran_psb?: string;
+  kuota_promo_tampil_awal?: number;
+}
+
+export interface ProfilPondokJadwalItem {
+  waktu: string;
+  kegiatan: string;
+}
+
+export interface ProfilPondokPsbConfig {
+  sejarahSingkat: string;
+  visi: string;
+  misi: string;
+  jamKantorOffline: string;
+  berkasFisikWajib: string[];
+  ketentuanWali: string[];
+  laranganTataTertib: string[];
+  jadwalHarian: ProfilPondokJadwalItem[];
+  jadwalJumat: ProfilPondokJadwalItem[];
 }
 
 export type ThemePresetKey =
@@ -87,6 +107,7 @@ export interface AturanOperasional {
   keamanan: AturanKeamanan;
   jadwal: AturanJadwalRutin;
   pendaftaran: SkemaPendaftaranConfig;
+  profil_pondok?: ProfilPondokPsbConfig;
   tema: TemaAplikasiConfig;
   menu_cepat_ids: string[];
 }
@@ -152,6 +173,50 @@ export const DEFAULT_SKEMA_PENDAFTARAN: SkemaPendaftaranConfig = {
   syahriyah_reguler: 450000,
   kuota_gratis_uang_pangkal: 100,
   promo_aktif: true,
+  tahun_psb: 2027,
+  tahun_ajaran_psb: '2027/2028',
+  kuota_promo_tampil_awal: 28,
+};
+
+export const DEFAULT_PROFIL_PONDOK_PSB: ProfilPondokPsbConfig = {
+  sejarahSingkat:
+    'Didirikan oleh KH. Anwar Noer pada tahun 1940 berawal dari langgar mengaji di desa Bululawang. Kini di bawah bimbingan Dr. KH. A. Fahrur Rozi Burhan, S.Ag., M.Pd., An-Nur 1 memadukan ketajaman intelektual, pengajian kitab & Al-Qur’an, serta pembinaan akhlaqul karimah.',
+  visi:
+    'Mewujudkan insan kamil yang berimbang dalam kapasitas intelektual dan moralitas serta mencetak pribadi yang shalihin dan shalihat.',
+  misi:
+    'Menyediakan akses pendidikan sesuai dengan tingkatan, membimbing santri dalam penguatan kajian keagamaan, serta membina santri dalam keberagamaan.',
+  jamKantorOffline: 'Setiap Hari, Pukul 07.00 – 16.00 WIB',
+  berkasFisikWajib: [
+    'Fotocopy / Scan Kartu Keluarga (KK) — 2 lembar',
+    'Fotocopy / Scan KTP Orang Tua — 2 lembar',
+    'Fotocopy / Scan Akta Kelahiran — 2 lembar',
+    'Fotocopy / Scan Ijazah / SKL terakhir — 2 lembar',
+    'Pas Foto ukuran 3×4 — 2 lembar',
+    'Wajib diantar Wali Santri & Sowan Pengasuh saat masuk pondok',
+  ],
+  ketentuanWali: [
+    'Santri wajib menaati peraturan pondok pesantren dan prosedur perizinan.',
+    'Wali tidak menjenguk santri saat kegiatan belajar/mengaji sedang berlangsung.',
+    'Wali tidak menjemput santri keluar lingkungan pondok kecuali sesuai prosedur resmi.',
+    'Pembayaran Syahriyah bulanan dilunasi paling lambat tanggal 10 setiap bulan.',
+  ],
+  laranganTataTertib: [
+    'Membawa atau menggunakan alat elektronik terlarang (HP, MP3, MP4, radio, dll.).',
+    'Merokok, mencuri/ghosob, serta keluar area pondok tanpa izin resmi.',
+    'Pulang ke rumah kecuali hari libur pondok atau izin mendesak yang disahkan Pengasuh.',
+  ],
+  jadwalHarian: [
+    { waktu: '03.00 – 05.40', kegiatan: 'Bangun, Sholat Malam, Subuh Berjamaah, Istighotsah & Pengajian Pengasuh' },
+    { waktu: '06.00 – 12.00', kegiatan: 'Sholat Duha & Sekolah Formal sesuai tingkatan' },
+    { waktu: '12.30 – 15.00', kegiatan: 'Jamaah Dzuhur, Madrasah Murottilil Qur’an & Istirahat' },
+    { waktu: '15.30 – 17.30', kegiatan: 'Jamaah Ashar, Jam Belajar & Makan Sore' },
+    { waktu: '18.00 – 22.30', kegiatan: 'Jamaah Maghrib, Yasin/Waqi’ah/Al-Mulk/Rotib, Isya, Madrasah Diniyah & Tidur' },
+  ],
+  jadwalJumat: [
+    { waktu: 'Kamis 18.00 – 21.00', kegiatan: 'Tahlil, Yasin, Waqi’ah, Al-Mulk, Mushofahah, Muhadloroh/Manaqib/Diba’' },
+    { waktu: 'Jum’at 04.15 – 08.00', kegiatan: 'Subuh & Surah Al-Kahfi, Sholat Duha, Ro’an Bersama, Khotmil Qur’an' },
+    { waktu: 'Jum’at 11.30 – 16.00', kegiatan: 'Sholat Jum’at (Masjid An-Nur Al-Burhany), Ashar, Yasin & Tahlil di Maqbaroh' },
+  ],
 };
 
 export const THEME_PRESETS: Array<{
@@ -184,9 +249,9 @@ export const DEFAULT_TEMA_APLIKASI: TemaAplikasiConfig = {
   fontFamily: 'jakarta',
   radius: 'medium',
   density: 'comfortable',
-  sidebarShowLogo: false,
-  appShortTitle: 'e-Pondok An-Nur 1',
-  appSubtitle: 'Bululawang - Malang',
+  sidebarShowLogo: true,
+  appShortTitle: 'e-annursatu',
+  appSubtitle: 'An-Nur 1 Bululawang',
 };
 
 export const DEFAULT_ATURAN_OPERASIONAL: AturanOperasional = {
@@ -211,6 +276,7 @@ export const DEFAULT_ATURAN_OPERASIONAL: AturanOperasional = {
     koreksi_hijriyah: 0,
   },
   pendaftaran: { ...DEFAULT_SKEMA_PENDAFTARAN },
+  profil_pondok: { ...DEFAULT_PROFIL_PONDOK_PSB },
   tema: { ...DEFAULT_TEMA_APLIKASI },
   menu_cepat_ids: ['keuangan', 'absen-jamaah', 'perizinan', 'santri', 'kesehatan', 'keamanan', 'kalender', 'laporan'],
 };
@@ -235,6 +301,8 @@ export interface QuickMenuCatalogItem {
     | 'calendar-days'
     | 'calendar'
     | 'shirt'
+    | 'sparkles'
+    | 'store'
     | 'file-spreadsheet'
     | 'settings';
   tone: 'emerald' | 'blue' | 'amber' | 'rose' | 'indigo' | 'teal' | 'violet' | 'slate';
@@ -243,6 +311,8 @@ export interface QuickMenuCatalogItem {
 export const QUICK_MENU_CATALOG: QuickMenuCatalogItem[] = [
   { id: 'beranda', href: '/', label: 'Beranda Utama', shortLabel: 'Beranda', iconKey: 'home', tone: 'emerald' },
   { id: 'keuangan', href: '/keuangan', label: 'Keuangan & Loket', shortLabel: 'Keuangan', iconKey: 'wallet', tone: 'emerald' },
+  { id: 'koperasi', href: '/koperasi', label: 'Koperasi Pondok', shortLabel: 'Koperasi', iconKey: 'store', tone: 'teal' },
+  { id: 'kebersihan', href: '/kebersihan', label: 'Kebersihan & Piket', shortLabel: 'Kebersihan', iconKey: 'sparkles', tone: 'emerald' },
   { id: 'absen-jamaah', href: '/absen-jamaah', label: 'Absen Jamaah', shortLabel: 'Jamaah', iconKey: 'check-square', tone: 'blue' },
   { id: 'kalender', href: '/kalender', label: 'Kalender & Sholat', shortLabel: 'Kalender', iconKey: 'calendar-days', tone: 'teal' },
   { id: 'pendaftaran', href: '/pendaftaran', label: 'Pendaftaran PSB', shortLabel: 'PSB', iconKey: 'user-plus', tone: 'emerald' },
@@ -486,6 +556,38 @@ export function getTahunAjaranForDate(isoDate: string): string {
   return `${startYr}/${startYr + 1}`;
 }
 
+/**
+ * Menghasilkan NIS berurutan per 2-digit tahun masuk (`YYXXXX`),
+ * sehingga santri PSB TA 2027/2028 memakai awalan `27` sementara santri Mutasi
+ * yang masuk di tahun berjalan memakai awalan tahun tanggal masuknya tanpa bentrok urutan.
+ */
+export function generateNextNisForYear(
+  tglMasukOrYear: string | number,
+  existingList: Array<{ nis?: string | null }>,
+  offset = 1
+): string {
+  let yearPrefix = '27';
+  if (typeof tglMasukOrYear === 'number') {
+    yearPrefix = String(tglMasukOrYear).slice(-2).padStart(2, '0');
+  } else {
+    const clean = String(tglMasukOrYear || '').trim();
+    if (/^\d{4}/.test(clean)) {
+      yearPrefix = clean.slice(2, 4);
+    } else if (/^\d{2}$/.test(clean)) {
+      yearPrefix = clean;
+    }
+  }
+
+  const maxSeq = existingList.reduce((max, s) => {
+    const raw = String(s.nis || '').trim();
+    if (!raw.startsWith(yearPrefix)) return max;
+    const seq = parseInt(raw.slice(2), 10);
+    return !Number.isNaN(seq) && seq > max ? seq : max;
+  }, 0);
+
+  return `${yearPrefix}${String(maxSeq + offset).padStart(4, '0')}`;
+}
+
 export function getTarifAktifFromRiwayat(
   riwayatList: TarifRiwayatItem[] | undefined,
   todayStr: string
@@ -674,9 +776,69 @@ export function mergeAturanOperasional(raw: unknown): AturanOperasional {
         typeof obj.pendaftaran?.promo_aktif === 'boolean'
           ? obj.pendaftaran.promo_aktif
           : DEFAULT_SKEMA_PENDAFTARAN.promo_aktif,
+      tahun_psb: Number(obj.pendaftaran?.tahun_psb ?? DEFAULT_SKEMA_PENDAFTARAN.tahun_psb ?? 2027),
+      tahun_ajaran_psb:
+        typeof obj.pendaftaran?.tahun_ajaran_psb === 'string' &&
+        obj.pendaftaran.tahun_ajaran_psb.trim()
+          ? obj.pendaftaran.tahun_ajaran_psb.trim()
+          : DEFAULT_SKEMA_PENDAFTARAN.tahun_ajaran_psb,
+      kuota_promo_tampil_awal: Math.max(
+        1,
+        Number(
+          obj.pendaftaran?.kuota_promo_tampil_awal ??
+            DEFAULT_SKEMA_PENDAFTARAN.kuota_promo_tampil_awal ??
+            28
+        )
+      ),
     },
+    profil_pondok: mergeProfilPondokPsb(obj.profil_pondok),
     tema: mergeTemaAplikasi(obj.tema),
     menu_cepat_ids: normalizeMenuCepatIds(obj.menu_cepat_ids),
+  };
+}
+
+export function mergeProfilPondokPsb(raw: unknown): ProfilPondokPsbConfig {
+  const obj = raw && typeof raw === 'object' ? (raw as Partial<ProfilPondokPsbConfig>) : {};
+  const strArr = (val: unknown, fallback: string[]) =>
+    Array.isArray(val) && val.map((x) => String(x || '').trim()).filter(Boolean).length > 0
+      ? val.map((x) => String(x || '').trim()).filter(Boolean)
+      : [...fallback];
+  const jadwalArr = (val: unknown, fallback: ProfilPondokJadwalItem[]) => {
+    if (!Array.isArray(val)) return fallback.map((j) => ({ ...j }));
+    const cleaned = val
+      .map((item) => ({
+        waktu: String((item as Partial<ProfilPondokJadwalItem>)?.waktu || '').trim(),
+        kegiatan: String((item as Partial<ProfilPondokJadwalItem>)?.kegiatan || '').trim(),
+      }))
+      .filter((item) => item.waktu || item.kegiatan);
+    return cleaned.length > 0 ? cleaned : fallback.map((j) => ({ ...j }));
+  };
+
+  return {
+    sejarahSingkat:
+      typeof obj.sejarahSingkat === 'string' && obj.sejarahSingkat.trim()
+        ? obj.sejarahSingkat.trim()
+        : DEFAULT_PROFIL_PONDOK_PSB.sejarahSingkat,
+    visi:
+      typeof obj.visi === 'string' && obj.visi.trim()
+        ? obj.visi.trim()
+        : DEFAULT_PROFIL_PONDOK_PSB.visi,
+    misi:
+      typeof obj.misi === 'string' && obj.misi.trim()
+        ? obj.misi.trim()
+        : DEFAULT_PROFIL_PONDOK_PSB.misi,
+    jamKantorOffline:
+      typeof obj.jamKantorOffline === 'string' && obj.jamKantorOffline.trim()
+        ? obj.jamKantorOffline.trim()
+        : DEFAULT_PROFIL_PONDOK_PSB.jamKantorOffline,
+    berkasFisikWajib: strArr(obj.berkasFisikWajib, DEFAULT_PROFIL_PONDOK_PSB.berkasFisikWajib),
+    ketentuanWali: strArr(obj.ketentuanWali, DEFAULT_PROFIL_PONDOK_PSB.ketentuanWali),
+    laranganTataTertib: strArr(
+      obj.laranganTataTertib,
+      DEFAULT_PROFIL_PONDOK_PSB.laranganTataTertib
+    ),
+    jadwalHarian: jadwalArr(obj.jadwalHarian, DEFAULT_PROFIL_PONDOK_PSB.jadwalHarian),
+    jadwalJumat: jadwalArr(obj.jadwalJumat, DEFAULT_PROFIL_PONDOK_PSB.jadwalJumat),
   };
 }
 

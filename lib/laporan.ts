@@ -934,6 +934,11 @@ function getActiveTahunAjaran(refIsoDate: string): string {
   return `${startYear}/${startYear + 1}`;
 }
 
+function isBisyarohTx(tx: KeuanganTransaksiRaw): boolean {
+  const hay = `${tx.kategori || ''} ${tx.keterangan || ''}`.toLowerCase();
+  return hay.includes('bisyaroh');
+}
+
 export function buildKeuanganReport(
   transaksiList: KeuanganTransaksiRaw[],
   pembayaranDetails: PembayaranDetailRaw[],
@@ -943,14 +948,19 @@ export function buildKeuanganReport(
   pengurusList: PengurusRaw[],
   pengaturan: PengaturanAplikasiRaw,
   window: PeriodWindow,
-  todayStr: string
+  todayStr: string,
+  options?: { canViewBisyaroh?: boolean }
 ): KeuanganReport {
+  const canViewBisyaroh = options?.canViewBisyaroh !== false;
+  const visibleTransaksiList = canViewBisyaroh
+    ? transaksiList
+    : transaksiList.filter((tx) => !isBisyarohTx(tx));
   const santriMap = new Map<string, SantriRaw>(santriList.map((s) => [s.id, s]));
   const localLampiranMap = readKeuanganLampiranMap();
 
-  // 1. Saldo 4 dompet (KHUSUS TUNAI) & kartu laporan terpisah `Syahriyah Transfer`
+  // 1. Saldo 4 dompet (KHUSUS TUNAI) & kartu laporan terpisah `Pemasukan Transfer`
   const walletSplitSummary = computeWalletAndTransferSummary(
-    transaksiList,
+    visibleTransaksiList,
     {
       pendaftaran: Number(pengaturan.saldo_awal_pendaftaran || 0),
       operasional: Number(pengaturan.saldo_awal_operasional || 0),
@@ -969,10 +979,10 @@ export function buildKeuanganReport(
   };
 
   // 2. Arus kas periode ini vs periode lalu
-  const currTx = transaksiList.filter((tx) =>
+  const currTx = visibleTransaksiList.filter((tx) =>
     inRange(tx.tgl_transaksi, window.startDate, window.endDate)
   );
-  const prevTx = transaksiList.filter((tx) =>
+  const prevTx = visibleTransaksiList.filter((tx) =>
     inRange(tx.tgl_transaksi, window.prevStartDate, window.prevEndDate)
   );
 
@@ -1015,7 +1025,7 @@ export function buildKeuanganReport(
     Number(pengaturan.saldo_awal_kas_pondok || 0) +
     Number(pengaturan.saldo_awal_mda || 0);
 
-  for (const tx of transaksiList) {
+  for (const tx of visibleTransaksiList) {
     if ((tx.tgl_transaksi || '') < window.startDate && tx.metode_pembayaran !== 'transfer') {
       const nom = Number(tx.nominal || 0);
       saldoTunaiSebelumPeriode += tx.tipe === 'masuk' ? nom : -nom;
@@ -1309,17 +1319,19 @@ export function buildKeuanganReport(
       keterangan: s.catatan_keringanan || 'Penerima Beasiswa LAZIZ',
     }));
 
-  const bisyarohList = pengurusList
-    .filter((p) => (p.status || 'aktif') === 'aktif' && Number(p.nominal_bisyaroh || 0) > 0)
-    .map((p, idx) => {
-      const utama = p.jabatan_list?.find((j) => j.is_utama) || p.jabatan_list?.[0];
-      return {
-        no: idx + 1,
-        struktur: utama ? `${utama.nama_jabatan || utama.divisi}` : 'Pengurus Pondok',
-        nama: p.nama_lengkap,
-        jumlah: Number(p.nominal_bisyaroh || 0),
-      };
-    });
+  const bisyarohList = canViewBisyaroh
+    ? pengurusList
+        .filter((p) => (p.status || 'aktif') === 'aktif' && Number(p.nominal_bisyaroh || 0) > 0)
+        .map((p, idx) => {
+          const utama = p.jabatan_list?.find((j) => j.is_utama) || p.jabatan_list?.[0];
+          return {
+            no: idx + 1,
+            struktur: utama ? `${utama.nama_jabatan || utama.divisi}` : 'Pengurus Pondok',
+            nama: p.nama_lengkap,
+            jumlah: Number(p.nominal_bisyaroh || 0),
+          };
+        })
+    : [];
   const totalBisyaroh = bisyarohList.reduce((sum, b) => sum + b.jumlah, 0);
 
   const dompetLabelMap: Record<string, string> = {
@@ -1343,7 +1355,7 @@ export function buildKeuanganReport(
         : tx.keterangan || tx.bulan_tagihan || '-',
       dompetLabel:
         tx.metode_pembayaran === 'transfer'
-          ? 'Syahriyah Transfer'
+          ? 'Pemasukan Transfer'
           : dompetLabelMap[tx.dompet || 'operasional'] || 'Dompet Syahriyah',
       metode: tx.metode_pembayaran === 'transfer' ? 'transfer' : 'tunai',
       tipe: tx.tipe,
@@ -1886,8 +1898,10 @@ export function buildTrendPoints(
 export function buildAllDivisionReports(
   raw: AllLaporanRawData,
   window: PeriodWindow,
-  todayStr: string
+  todayStr: string,
+  options?: { canViewBisyaroh?: boolean }
 ): LaporanBundle {
+  const canViewBisyaroh = options?.canViewBisyaroh !== false;
   const santriMap = new Map<string, SantriRaw>(raw.santri.map((s) => [s.id, s]));
 
   const personalia = buildPersonaliaSummary(raw.pengurus);
@@ -1901,7 +1915,8 @@ export function buildAllDivisionReports(
     raw.pengurus,
     raw.pengaturan,
     window,
-    todayStr
+    todayStr,
+    { canViewBisyaroh }
   );
   const kegiatan = buildKegiatanReport(raw.kegiatanAgenda, window);
   const perizinan = buildPerizinanReport(raw.izinPulang, santriMap, window);
@@ -2024,10 +2039,14 @@ export function buildAllDivisionReports(
   };
 }
 
-export async function fetchAllLaporanRawData(): Promise<AllLaporanRawData> {
+export async function fetchAllLaporanRawData(options?: {
+  canViewBisyaroh?: boolean;
+}): Promise<AllLaporanRawData> {
+  const canViewBisyaroh = options?.canViewBisyaroh !== false;
   const [
     pengaturanRes,
-    santriRes,
+    santriViewRes,
+    santriFallbackRes,
     pengurusViewRes,
     pengurusFallbackRes,
     transaksiRes,
@@ -2051,8 +2070,11 @@ export async function fetchAllLaporanRawData(): Promise<AllLaporanRawData> {
     laundryJadwal,
   ] = await Promise.all([
     supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
+    supabase.from('v_santri_aman').select('*').order('nama_lengkap', { ascending: true }),
     supabase.from('santri').select('*').order('nama_lengkap', { ascending: true }),
-    supabase.from('v_pengurus_lengkap').select('*').order('nama_lengkap', { ascending: true }),
+    canViewBisyaroh
+      ? supabase.from('v_pengurus_lengkap').select('*').order('nama_lengkap', { ascending: true })
+      : Promise.resolve({ data: null, error: null }),
     supabase.from('pengurus').select('*').order('nama_lengkap', { ascending: true }),
     supabase.from('keuangan_transaksi').select('*').order('tgl_transaksi', { ascending: true }),
     supabase.from('pembayaran_santri_detail').select('*'),
@@ -2091,12 +2113,24 @@ export async function fetchAllLaporanRawData(): Promise<AllLaporanRawData> {
     fetchLaundryJadwal(),
   ]);
 
-  const pengurusRows =
-    !pengurusViewRes.error && Array.isArray(pengurusViewRes.data) && pengurusViewRes.data.length > 0
+  const santriData =
+    !santriViewRes.error && Array.isArray(santriViewRes.data)
+      ? santriViewRes.data
+      : santriFallbackRes.data;
+
+  const rawPengurusRows =
+    canViewBisyaroh &&
+    !pengurusViewRes.error &&
+    Array.isArray(pengurusViewRes.data) &&
+    pengurusViewRes.data.length > 0
       ? (pengurusViewRes.data as PengurusRaw[])
       : Array.isArray(pengurusFallbackRes.data)
       ? (pengurusFallbackRes.data as PengurusRaw[])
       : [];
+
+  const pengurusRows = canViewBisyaroh
+    ? rawPengurusRows
+    : rawPengurusRows.map((p) => ({ ...p, nominal_bisyaroh: 0 }));
 
   const rawPengaturan: PengaturanAplikasiRaw = (pengaturanRes.data as PengaturanAplikasiRaw) || {
     nama_pesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
@@ -2121,13 +2155,15 @@ export async function fetchAllLaporanRawData(): Promise<AllLaporanRawData> {
     }
   }
 
+  const rawTransaksi = Array.isArray(transaksiRes.data)
+    ? (transaksiRes.data as KeuanganTransaksiRaw[])
+    : [];
+
   return {
     pengaturan: rawPengaturan,
-    santri: Array.isArray(santriRes.data) ? (santriRes.data as SantriRaw[]) : [],
+    santri: Array.isArray(santriData) ? (santriData as SantriRaw[]) : [],
     pengurus: pengurusRows,
-    transaksi: Array.isArray(transaksiRes.data)
-      ? (transaksiRes.data as KeuanganTransaksiRaw[])
-      : [],
+    transaksi: canViewBisyaroh ? rawTransaksi : rawTransaksi.filter((tx) => !isBisyarohTx(tx)),
     pembayaranDetails: Array.isArray(pembayaranRes.data)
       ? (pembayaranRes.data as PembayaranDetailRaw[])
       : [],
@@ -2267,13 +2303,13 @@ export function exportLaporanToExcel(
   if (includeDiv('keuangan')) {
     const kasRows: unknown[][] = [
       ...titleHeader,
-      ['POSISI SALDO 4 DOMPET TUNAI & SYAHRIYAH TRANSFER'],
+      ['POSISI SALDO 4 DOMPET TUNAI & PEMASUKAN TRANSFER'],
       ['1. Dompet Pendaftaran (Tunai)', bundle.keuangan.saldoDompetSaatIni.pendaftaran],
       ['2. Dompet Syahriyah & Operasional (Tunai)', bundle.keuangan.saldoDompetSaatIni.operasional],
       ['3. Dompet Kas Umum (Tunai)', bundle.keuangan.saldoDompetSaatIni.kas_pondok],
       ['4. Dompet MDA / Madin (Tunai)', bundle.keuangan.saldoDompetSaatIni.mda],
       ['Total 4 Dompet Tunai', bundle.keuangan.saldoDompetSaatIni.total],
-      ['Syahriyah Transfer (Laporan Bank Terpisah)', bundle.keuangan.syahriyahTransfer.netAllTime],
+      ['Pemasukan Transfer (Laporan Bank Terpisah)', bundle.keuangan.syahriyahTransfer.netAllTime],
       [],
       ['BUKU KAS TUNAI & MUTASI PERIODE INI'],
       ['Kelompok', 'Tanggal', 'Uraian / Nama', 'Bulan', 'Debit (Rp)', 'Kredit (Rp)', 'Keterangan', 'Saldo (Rp)'],
@@ -2289,7 +2325,7 @@ export function exportLaporanToExcel(
 
     const tfRows: unknown[][] = [
       ...titleHeader,
-      ['SYAHRIYAH TRANSFER (LAPORAN REKENING BANK)'],
+      ['PEMASUKAN TRANSFER (LAPORAN REKENING BANK)'],
       ['Kelompok', 'Tanggal', 'Nama / Uraian', 'Nominal (Rp)', 'Keterangan', 'Bukti'],
     ];
     for (const wk of bundle.keuangan.weeklyBuckets) {
@@ -2297,7 +2333,7 @@ export function exportLaporanToExcel(
         tfRows.push([wk.label, r.tanggal, r.nama, r.nominal, r.keterangan, r.bukti]);
       }
     }
-    appendSheetAoa(wb, 'Syahriyah Transfer', tfRows);
+    appendSheetAoa(wb, 'Pemasukan Transfer', tfRows);
 
     const tunggakanRows: unknown[][] = [
       ...titleHeader,
@@ -2333,14 +2369,16 @@ export function exportLaporanToExcel(
     ];
     appendSheetAoa(wb, 'Tunggakan Santri', tunggakanRows);
 
-    const bisRows: unknown[][] = [
-      ...titleHeader,
-      ['ANGGARAN BISYAROH PENGURUS'],
-      ['No', 'Struktur / Jabatan', 'Nama', 'Nominal (Rp)'],
-      ...bundle.keuangan.bisyarohList.map((b) => [b.no, b.struktur, b.nama, b.jumlah]),
-      ['', '', 'TOTAL', bundle.keuangan.totalBisyaroh],
-    ];
-    appendSheetAoa(wb, 'Bisyaroh Pengurus', bisRows);
+    if (bundle.keuangan.bisyarohList.length > 0) {
+      const bisRows: unknown[][] = [
+        ...titleHeader,
+        ['ANGGARAN BISYAROH PENGURUS'],
+        ['No', 'Struktur / Jabatan', 'Nama', 'Nominal (Rp)'],
+        ...bundle.keuangan.bisyarohList.map((b) => [b.no, b.struktur, b.nama, b.jumlah]),
+        ['', '', 'TOTAL', bundle.keuangan.totalBisyaroh],
+      ];
+      appendSheetAoa(wb, 'Bisyaroh Pengurus', bisRows);
+    }
   }
 
   if (includeDiv('kegiatan')) {

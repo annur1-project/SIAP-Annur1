@@ -75,6 +75,34 @@ export interface DapurKasItem {
   created_at?: string;
 }
 
+export type TipeBukuMasak = 'jatah_harian' | 'belanja_pagi' | 'belanja_sore' | 'subsidi_jualan_malam';
+export type TipeJualanMalam = 'omzet_jualan' | 'modal_belanja' | 'subsidi_ke_masak';
+
+export interface DapurBukuMasakItem {
+  id: string;
+  tanggal: string; // YYYY-MM-DD
+  tipe: TipeBukuMasak;
+  arah: 'masuk' | 'keluar';
+  nominal: number;
+  uraian: string;
+  penanggung_jawab: string;
+  catatan: string;
+  created_at?: string;
+}
+
+export interface DapurJualanMalamItem {
+  id: string;
+  tanggal: string; // YYYY-MM-DD
+  tipe: TipeJualanMalam;
+  arah: 'masuk' | 'keluar';
+  nominal: number;
+  uraian: string;
+  penanggung_jawab: string;
+  catatan: string;
+  linked_masak_id?: string | null;
+  created_at?: string;
+}
+
 export interface CookingTimelinessStats {
   totalSelesai: number;
   tepatWaktuCount: number;
@@ -135,11 +163,15 @@ export const SHIFT_TARGET_TIME: Record<DapurShift, '05:45' | '16:45'> = {
   sore: '16:45',
 };
 
+export const DEFAULT_JATAH_MASAK_HARIAN = 250000;
+
 export const LS_DAPUR_SESI_KEY = 'siap_dapur_sesi_v1';
 export const LS_DAPUR_MENU_KEY = 'siap_dapur_menu_v1';
 export const LS_DAPUR_PETUGAS_KEY = 'siap_dapur_petugas_v1';
 export const LS_DAPUR_ABSEN_KEY = 'siap_dapur_absen_v1';
 export const LS_DAPUR_KAS_KEY = 'siap_dapur_kas_v1';
+export const LS_DAPUR_BUKU_MASAK_KEY = 'eannur_dapur_buku_masak_v1';
+export const LS_DAPUR_JUALAN_MALAM_KEY = 'eannur_dapur_jualan_malam_v1';
 
 export const KATEGORI_KAS_MASUK = [
   'Dropping Dana Pondok',
@@ -156,6 +188,95 @@ export const KATEGORI_KAS_KELUAR = [
   'Perlengkapan / Alat Masak',
   'Lainnya',
 ];
+
+export function computeBukuMasakSummary(rows: DapurBukuMasakItem[], tanggal?: string) {
+  const sortedAsc = [...rows].sort((a, b) => {
+    if (a.tanggal !== b.tanggal) return a.tanggal < b.tanggal ? -1 : 1;
+    return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+  });
+
+  let saldo = 0;
+  let totalJatah = 0;
+  let totalSubsidiMasuk = 0;
+  let totalBelanjaPagi = 0;
+  let totalBelanjaSore = 0;
+  let jatahHariIni = 0;
+  let belanjaHariIni = 0;
+
+  const withBalance: Array<DapurBukuMasakItem & { saldoBerjalan: number }> = [];
+  for (const row of sortedAsc) {
+    const nom = Number(row.nominal || 0);
+    saldo += row.arah === 'masuk' ? nom : -nom;
+    if (row.tipe === 'jatah_harian') totalJatah += nom;
+    if (row.tipe === 'subsidi_jualan_malam') totalSubsidiMasuk += nom;
+    if (row.tipe === 'belanja_pagi') totalBelanjaPagi += nom;
+    if (row.tipe === 'belanja_sore') totalBelanjaSore += nom;
+
+    if (tanggal && row.tanggal === tanggal) {
+      if (row.tipe === 'jatah_harian') jatahHariIni += nom;
+      if (row.tipe === 'belanja_pagi' || row.tipe === 'belanja_sore') belanjaHariIni += nom;
+    }
+
+    withBalance.push({ ...row, saldoBerjalan: saldo });
+  }
+
+  return {
+    ascWithBalance: withBalance,
+    saldoAkhir: saldo,
+    isMinus: saldo < 0,
+    kekurangan: saldo < 0 ? Math.abs(saldo) : 0,
+    totalJatah,
+    totalSubsidiMasuk,
+    totalBelanjaPagi,
+    totalBelanjaSore,
+    totalBelanjaSemua: totalBelanjaPagi + totalBelanjaSore,
+    jatahHariIni,
+    belanjaHariIni,
+  };
+}
+
+export function computeJualanMalamSummary(rows: DapurJualanMalamItem[], tanggal?: string) {
+  const sortedAsc = [...rows].sort((a, b) => {
+    if (a.tanggal !== b.tanggal) return a.tanggal < b.tanggal ? -1 : 1;
+    return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+  });
+
+  let saldoAkhir = 0;
+  let totalOmzet = 0;
+  let totalModal = 0;
+  let totalSubsidiKeluar = 0;
+  let omzetHariIni = 0;
+  let modalHariIni = 0;
+
+  const withBalance: Array<DapurJualanMalamItem & { saldoBerjalan: number }> = [];
+  for (const row of sortedAsc) {
+    const nom = Number(row.nominal || 0);
+    saldoAkhir += row.arah === 'masuk' ? nom : -nom;
+    if (row.tipe === 'omzet_jualan') totalOmzet += nom;
+    if (row.tipe === 'modal_belanja') totalModal += nom;
+    if (row.tipe === 'subsidi_ke_masak') totalSubsidiKeluar += nom;
+
+    if (tanggal && row.tanggal === tanggal) {
+      if (row.tipe === 'omzet_jualan') omzetHariIni += nom;
+      if (row.tipe === 'modal_belanja') modalHariIni += nom;
+    }
+
+    withBalance.push({ ...row, saldoBerjalan: saldoAkhir });
+  }
+
+  const labaBersihTotal = totalOmzet - totalModal;
+  return {
+    ascWithBalance: withBalance,
+    saldoAkhir,
+    totalOmzet,
+    totalModal,
+    totalSubsidiKeluar,
+    labaBersihTotal,
+    omzetHariIni,
+    modalHariIni,
+    labaHariIni: omzetHariIni - modalHariIni,
+  };
+}
 
 export const DAPUR_TABLES_SQL = `CREATE TABLE IF NOT EXISTS dapur_sesi_masak (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,

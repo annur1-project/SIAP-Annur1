@@ -20,6 +20,8 @@ import {
   ShieldAlert,
   Shirt,
   Smartphone,
+  Sparkles,
+  Store,
   UserCheck,
   UserPlus,
   Users,
@@ -67,6 +69,10 @@ export function renderQuickMenuIcon(
       return <Calendar className={className} />;
     case 'shirt':
       return <Shirt className={className} />;
+    case 'sparkles':
+      return <Sparkles className={className} />;
+    case 'store':
+      return <Store className={className} />;
     case 'file-spreadsheet':
       return <FileSpreadsheet className={className} />;
     case 'settings':

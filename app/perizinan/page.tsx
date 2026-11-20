@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import {
   FileText,
@@ -306,6 +307,9 @@ function computeOverdueInfo(
 }
 
 export default function PerizinanPage() {
+  const { canEditModule, pengurus } = useAuth();
+  const canEdit = canEditModule('perizinan');
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('daftar');
   const [todayStr, setTodayStr] = useState<string>('');
   const [currentHm, setCurrentHm] = useState<string>('');
@@ -676,6 +680,7 @@ export default function PerizinanPage() {
   }, [pengurusList, formPetugasText]);
 
   const openCreateModal = () => {
+    if (!canEdit) return;
     const baseDate = todayStr || getLocalTodayStr();
     setSantriSearch('');
     setSantriDropdownOpen(false);
@@ -689,8 +694,8 @@ export default function PerizinanPage() {
     setFormPenjemput('');
     setFormWaPenjemput('');
     setFormSuratDokter(false);
-    setFormPetugasId('');
-    setFormPetugasText('');
+    setFormPetugasId(pengurus?.id || '');
+    setFormPetugasText(pengurus?.nama_lengkap || '');
     setPetugasDropdownOpen(false);
     setShowCreateModal(true);
   };
@@ -732,6 +737,7 @@ export default function PerizinanPage() {
 
   const handleCreateIzin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!formSantriId) {
       showToast('error', 'Santri Belum Dipilih', 'Pilih santri yang mengajukan izin pulang.');
       return;
@@ -843,6 +849,7 @@ export default function PerizinanPage() {
   };
 
   const openReturnModal = (item: IzinViewItem) => {
+    if (!canEdit) return;
     const t = todayStr || getLocalTodayStr();
     const hm = currentHm || getLocalTimeHm();
     const batasJam = item.meta.b || '17:00';
@@ -868,7 +875,7 @@ export default function PerizinanPage() {
 
   const handleConfirmReturn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!returnTarget) return;
+    if (!canEdit || !returnTarget) return;
 
     setSaving(true);
     try {
@@ -927,6 +934,7 @@ export default function PerizinanPage() {
   };
 
   const handleToggleDendaLunas = async (item: IzinViewItem) => {
+    if (!canEdit) return;
     setSaving(true);
     try {
       const nextStatusDenda: StatusDenda = item.meta.ds === 'lunas' ? 'belum_bayar' : 'lunas';
@@ -956,7 +964,7 @@ export default function PerizinanPage() {
   };
 
   const handleDeleteIzin = async () => {
-    if (!deleteTarget) return;
+    if (!canEdit || !deleteTarget) return;
     setDeleting(true);
     try {
       const { error } = await supabase.from('izin_pulang').delete().eq('id', deleteTarget.id);
@@ -1377,14 +1385,16 @@ export default function PerizinanPage() {
               <FileSpreadsheet className="w-4 h-4" />
               Ekspor Excel
             </button>
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="col-span-2 sm:col-span-1 px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-xs transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Buat Izin Pulang Baru
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className="col-span-2 sm:col-span-1 px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-xs transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Buat Izin Pulang Baru
+              </button>
+            )}
           </div>
         </div>
 
@@ -1416,6 +1426,8 @@ export default function PerizinanPage() {
           </button>
         </div>
       </div>
+
+      <TransparencyBanner moduleLabel="Perizinan Pulang Santri" isReadOnly={!canEdit} />
 
       {/* ERROR BANNER */}
       {fetchError && (
@@ -1538,14 +1550,16 @@ export default function PerizinanPage() {
                 <p className="text-slate-500">
                   Belum ada data izin pulang yang sesuai filter saat ini.
                 </p>
-                <button
-                  type="button"
-                  onClick={openCreateModal}
-                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  Catat Izin Pulang Pertama
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Catat Izin Pulang Pertama
+                  </button>
+                )}
               </div>
             ) : (
               filteredItems.map((item, idx) => {
@@ -1633,24 +1647,36 @@ export default function PerizinanPage() {
                           <span className="text-[11px] font-bold text-rose-700 tabular-nums">
                             + Denda {formatRupiah(item.meta.dn)}
                           </span>
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => handleToggleDendaLunas(item)}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
-                              item.meta.ds === 'lunas'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                : 'bg-rose-50 text-rose-700 border-rose-300'
-                            }`}
-                          >
-                            {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Tandai Lunas'}
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => handleToggleDendaLunas(item)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                                item.meta.ds === 'lunas'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  : 'bg-rose-50 text-rose-700 border-rose-300'
+                              }`}
+                            >
+                              {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Tandai Lunas'}
+                            </button>
+                          ) : (
+                            <span
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                                item.meta.ds === 'lunas'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Belum Bayar'}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      {item.status === 'disetujui' && (
+                      {canEdit && item.status === 'disetujui' && (
                         <button
                           type="button"
                           onClick={() => openReturnModal(item)}
@@ -1704,14 +1730,16 @@ export default function PerizinanPage() {
                         Cetak Surat
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(item)}
-                        className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl font-semibold flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Hapus
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(item)}
+                          className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Hapus
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1746,14 +1774,16 @@ export default function PerizinanPage() {
                       <p className="text-slate-500">
                         Belum ada data izin pulang yang sesuai filter saat ini.
                       </p>
-                      <button
-                        type="button"
-                        onClick={openCreateModal}
-                        className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Catat Izin Pulang Pertama
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={openCreateModal}
+                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Catat Izin Pulang Pertama
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -1826,18 +1856,30 @@ export default function PerizinanPage() {
                               <div className="text-[11px] font-bold text-rose-700">
                                 + Denda {formatRupiah(item.meta.dn)}
                               </div>
-                              <button
-                                type="button"
-                                disabled={saving}
-                                onClick={() => handleToggleDendaLunas(item)}
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap transition-colors ${
-                                  item.meta.ds === 'lunas'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                    : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                                }`}
-                              >
-                                {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Tandai Lunas'}
-                              </button>
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() => handleToggleDendaLunas(item)}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap transition-colors ${
+                                    item.meta.ds === 'lunas'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                                  }`}
+                                >
+                                  {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Tandai Lunas'}
+                                </button>
+                              ) : (
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap ${
+                                    item.meta.ds === 'lunas'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                  }`}
+                                >
+                                  {item.meta.ds === 'lunas' ? 'Denda Lunas' : 'Belum Bayar'}
+                                </span>
+                              )}
                             </div>
                           )}
                           {item.meta.ds === 'dibebaskan' && (
@@ -1891,7 +1933,7 @@ export default function PerizinanPage() {
                         </td>
                         <td className="py-3.5 px-3.5 align-top">
                           <div className="flex flex-col items-end gap-1.5">
-                            {item.status === 'disetujui' && (
+                            {canEdit && item.status === 'disetujui' && (
                               <button
                                 type="button"
                                 onClick={() => openReturnModal(item)}
@@ -1944,15 +1986,17 @@ export default function PerizinanPage() {
                                 Surat
                               </button>
 
-                              <button
-                                type="button"
-                                onClick={() => setDeleteTarget(item)}
-                                title="Hapus catatan izin"
-                                aria-label={`Hapus izin ${item.santri?.nama_lengkap || 'santri'}`}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget(item)}
+                                  title="Hapus catatan izin"
+                                  aria-label={`Hapus izin ${item.santri?.nama_lengkap || 'santri'}`}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         </td>

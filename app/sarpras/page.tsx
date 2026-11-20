@@ -50,6 +50,7 @@ import {
   updateSarprasLaporanRow,
   deleteSarprasLaporanRow,
 } from '@/lib/sarpras';
+import { TransparencyBanner, useAuth } from '@/lib/auth';
 
 type ActiveTab = 'laporan' | 'inventaris' | 'rekap';
 
@@ -122,6 +123,8 @@ function subtractMonthsIso(todayIso: string, monthsAgo: number): string {
 }
 
 export default function SarprasPage() {
+  const { canEditModule } = useAuth();
+  const canEditSarpras = canEditModule('sarpras');
   const [activeTab, setActiveTab] = useState<ActiveTab>('laporan');
   const [todayStr, setTodayStr] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
@@ -436,6 +439,7 @@ export default function SarprasPage() {
   }, [laporanList, todayStr, cleanupAgeMonths]);
 
   const openExecModal = (mode: 'proses' | 'selesai', ticket: SarprasLaporanItem) => {
+    if (!canEditSarpras) return;
     setExecModal({ mode, ticket });
     setExecPetugas(ticket.petugas_sarpras || '');
     setExecCatatan(mode === 'proses' ? ticket.catatan_proses || '' : ticket.catatan_selesai || '');
@@ -469,7 +473,7 @@ export default function SarprasPage() {
 
   const handleExecSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!execModal) return;
+    if (!canEditSarpras || !execModal) return;
     const { mode, ticket } = execModal;
 
     setSaving(true);
@@ -554,6 +558,7 @@ export default function SarprasPage() {
   // ==========================================
 
   const openAddInvModal = () => {
+    if (!canEditSarpras) return;
     const defaultRoom =
       invRoomFilter !== 'semua' ? invRoomFilter : SARPRAS_RUANGAN_DEFAULT[0];
     const isPreset = roomFilterOptions.includes(defaultRoom);
@@ -575,6 +580,7 @@ export default function SarprasPage() {
   };
 
   const openEditInvModal = (item: SarprasInventarisItem) => {
+    if (!canEditSarpras) return;
     const isPreset = roomFilterOptions.includes(item.ruangan);
     setEditingInv(item);
     setInvRuanganMode(isPreset ? 'preset' : 'custom');
@@ -595,6 +601,7 @@ export default function SarprasPage() {
 
   const handleSaveInventaris = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditSarpras) return;
     const ruangan =
       invRuanganMode === 'custom' ? invRuanganCustom.trim() : invRuanganPreset;
     if (!ruangan) {
@@ -655,6 +662,7 @@ export default function SarprasPage() {
     item: SarprasInventarisItem,
     nextKondisi: KondisiAsetSarpras
   ) => {
+    if (!canEditSarpras) return;
     const updated: SarprasInventarisItem = {
       ...item,
       kondisi: nextKondisi,
@@ -720,7 +728,7 @@ export default function SarprasPage() {
   // ==========================================
 
   const handleExecuteDelete = async () => {
-    if (!deleteConfirm) return;
+    if (!canEditSarpras || !deleteConfirm) return;
     setSaving(true);
     try {
       if (deleteConfirm.kind === 'inventaris') {
@@ -739,7 +747,7 @@ export default function SarprasPage() {
   };
 
   const handleExecuteCleanupPhotos = async () => {
-    if (cleanupCandidates.length === 0) {
+    if (!canEditSarpras || cleanupCandidates.length === 0) {
       setCleanupConfirmOpen(false);
       return;
     }
@@ -828,6 +836,12 @@ export default function SarprasPage() {
           </div>
         )}
 
+        <TransparencyBanner
+          moduleLabel="Sarpras & Inventaris Pondok"
+          isReadOnly={!canEditSarpras}
+          extraNote="Tombol cepat Lapor Kerusakan Sarpras tetap terbuka bagi seluruh pengurus aktif."
+        />
+
         {/* PAGE HEADER */}
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -851,14 +865,16 @@ export default function SarprasPage() {
               Muat Ulang
             </button>
 
-            <button
-              type="button"
-              onClick={openAddInvModal}
-              className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-emerald-600 text-emerald-700 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              Tambah Inventaris
-            </button>
+            {canEditSarpras && (
+              <button
+                type="button"
+                onClick={openAddInvModal}
+                className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-emerald-600 text-emerald-700 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                Tambah Inventaris
+              </button>
+            )}
 
             <button
               type="button"
@@ -1141,65 +1157,67 @@ export default function SarprasPage() {
                         </div>
 
                         {/* Action Buttons */}
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
-                          {ticket.status === 'menunggu' && (
-                            <button
-                              type="button"
-                              onClick={() => openExecModal('proses', ticket)}
-                              className="min-h-[40px] px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                            >
-                              <Wrench className="w-3.5 h-3.5" />
-                              Proses Pengerjaan
-                            </button>
-                          )}
+                        {canEditSarpras && (
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {ticket.status === 'menunggu' && (
+                              <button
+                                type="button"
+                                onClick={() => openExecModal('proses', ticket)}
+                                className="min-h-[40px] px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                              >
+                                <Wrench className="w-3.5 h-3.5" />
+                                Proses Pengerjaan
+                              </button>
+                            )}
 
-                          {ticket.status === 'diproses' && (
-                            <button
-                              type="button"
-                              onClick={() => openExecModal('proses', ticket)}
-                              className="min-h-[40px] px-3 py-2 bg-white hover:bg-amber-50 border border-amber-300 text-amber-800 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              Update Proses
-                            </button>
-                          )}
+                            {ticket.status === 'diproses' && (
+                              <button
+                                type="button"
+                                onClick={() => openExecModal('proses', ticket)}
+                                className="min-h-[40px] px-3 py-2 bg-white hover:bg-amber-50 border border-amber-300 text-amber-800 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                Update Proses
+                              </button>
+                            )}
 
-                          {ticket.status !== 'selesai' ? (
-                            <button
-                              type="button"
-                              onClick={() => openExecModal('selesai', ticket)}
-                              className="min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Tandai Selesai
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => openExecModal('selesai', ticket)}
-                              className="min-h-[40px] px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              Edit Selesai / Biaya
-                            </button>
-                          )}
+                            {ticket.status !== 'selesai' ? (
+                              <button
+                                type="button"
+                                onClick={() => openExecModal('selesai', ticket)}
+                                className="min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Tandai Selesai
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openExecModal('selesai', ticket)}
+                                className="min-h-[40px] px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                Edit Selesai / Biaya
+                              </button>
+                            )}
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDeleteConfirm({
-                                kind: 'laporan',
-                                id: ticket.id,
-                                label: ticket.kode_tiket,
-                                laporanObj: ticket,
-                              })
-                            }
-                            aria-label={`Hapus tiket ${ticket.kode_tiket}`}
-                            className="min-h-[40px] min-w-[40px] px-2.5 py-2 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-rose-600 rounded-xl inline-flex items-center justify-center shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDeleteConfirm({
+                                  kind: 'laporan',
+                                  id: ticket.id,
+                                  label: ticket.kode_tiket,
+                                  laporanObj: ticket,
+                                })
+                              }
+                              aria-label={`Hapus tiket ${ticket.kode_tiket}`}
+                              className="min-h-[40px] min-w-[40px] px-2.5 py-2 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-rose-600 rounded-xl inline-flex items-center justify-center shrink-0"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* 3-STAGE PHOTO TIMELINE: RUSAK -> PROSES -> SELESAI */}
@@ -1476,14 +1494,16 @@ export default function SarprasPage() {
                     Catat aset per ruangan (kipas angin, kasur, lemari, sound masjid, dispenser, dll.) agar mudah dicek kondisinya dan dicetak Kartu Inventaris Ruangan (KIR).
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={openAddInvModal}
-                  className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  Tambah Inventaris Pertama
-                </button>
+                {canEditSarpras && (
+                  <button
+                    type="button"
+                    onClick={openAddInvModal}
+                    className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Tambah Inventaris Pertama
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -1527,6 +1547,7 @@ export default function SarprasPage() {
                           <td className="py-3 px-4">
                             <select
                               value={item.kondisi}
+                              disabled={!canEditSarpras}
                               onChange={(e) =>
                                 void handleQuickKondisiChange(
                                   item,
@@ -1534,7 +1555,7 @@ export default function SarprasPage() {
                                 )
                               }
                               aria-label={`Ubah kondisi ${item.nama_barang}`}
-                              className={`px-2 py-1 rounded-lg border text-[11px] font-bold cursor-pointer focus:outline-none ${KONDISI_META[item.kondisi].badge}`}
+                              className={`px-2 py-1 rounded-lg border text-[11px] font-bold focus:outline-none ${KONDISI_META[item.kondisi].badge} ${canEditSarpras ? 'cursor-pointer' : 'opacity-80 cursor-not-allowed'}`}
                             >
                               <option value="baik">Baik</option>
                               <option value="rusak_ringan">Rusak Ringan</option>
@@ -1552,29 +1573,33 @@ export default function SarprasPage() {
                             </span>
                           </td>
                           <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => openEditInvModal(item)}
-                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg inline-flex items-center gap-1"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" /> Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDeleteConfirm({
-                                    kind: 'inventaris',
-                                    id: item.id,
-                                    label: `${item.kode_aset} (${item.nama_barang})`,
-                                  })
-                                }
-                                aria-label={`Hapus ${item.nama_barang}`}
-                                className="p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-rose-600 rounded-lg"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                            {canEditSarpras ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditInvModal(item)}
+                                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg inline-flex items-center gap-1"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteConfirm({
+                                      kind: 'inventaris',
+                                      id: item.id,
+                                      label: `${item.kode_aset} (${item.nama_barang})`,
+                                    })
+                                  }
+                                  aria-label={`Hapus ${item.nama_barang}`}
+                                  className="p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-rose-600 rounded-lg"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">Hanya Lihat</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1622,43 +1647,45 @@ export default function SarprasPage() {
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2 pt-1">
-                        <select
-                          value={item.kondisi}
-                          onChange={(e) =>
-                            void handleQuickKondisiChange(
-                              item,
-                              e.target.value as KondisiAsetSarpras
-                            )
-                          }
-                          className="flex-1 min-h-[40px] px-2.5 py-1.5 border border-slate-300 rounded-xl bg-white text-slate-800 font-semibold text-xs"
-                        >
-                          <option value="baik">Kondisi: Baik</option>
-                          <option value="rusak_ringan">Kondisi: Rusak Ringan</option>
-                          <option value="rusak_berat">Kondisi: Rusak Berat</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => openEditInvModal(item)}
-                          className="min-h-[40px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-xl inline-flex items-center gap-1"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setDeleteConfirm({
-                              kind: 'inventaris',
-                              id: item.id,
-                              label: `${item.kode_aset} (${item.nama_barang})`,
-                            })
-                          }
-                          aria-label={`Hapus ${item.nama_barang}`}
-                          className="min-h-[40px] min-w-[40px] bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl inline-flex items-center justify-center"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {canEditSarpras && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <select
+                            value={item.kondisi}
+                            onChange={(e) =>
+                              void handleQuickKondisiChange(
+                                item,
+                                e.target.value as KondisiAsetSarpras
+                              )
+                            }
+                            className="flex-1 min-h-[40px] px-2.5 py-1.5 border border-slate-300 rounded-xl bg-white text-slate-800 font-semibold text-xs"
+                          >
+                            <option value="baik">Kondisi: Baik</option>
+                            <option value="rusak_ringan">Kondisi: Rusak Ringan</option>
+                            <option value="rusak_berat">Kondisi: Rusak Berat</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => openEditInvModal(item)}
+                            className="min-h-[40px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-xl inline-flex items-center gap-1"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteConfirm({
+                                kind: 'inventaris',
+                                id: item.id,
+                                label: `${item.kode_aset} (${item.nama_barang})`,
+                              })
+                            }
+                            aria-label={`Hapus ${item.nama_barang}`}
+                            className="min-h-[40px] min-w-[40px] bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl inline-flex items-center justify-center"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1673,36 +1700,38 @@ export default function SarprasPage() {
         {activeTab === 'rekap' && (
           <div className="space-y-6">
             {/* PEMELIHARAAN ARSIP FOTO LAMA */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
-              <div className="space-y-1">
-                <h2 className="text-sm sm:text-base font-bold text-slate-900">
-                  Pemeliharaan Arsip Foto Laporan Selesai
-                </h2>
-                <p className="text-slate-500">
-                  Bersihkan file foto dari laporan perbaikan yang sudah selesai lama agar penyimpanan tetap ringan. Catatan kerusakan, tanggal, petugas, dan biaya perbaikan tetap tersimpan utuh.
-                </p>
-              </div>
+            {canEditSarpras && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
+                <div className="space-y-1">
+                  <h2 className="text-sm sm:text-base font-bold text-slate-900">
+                    Pemeliharaan Arsip Foto Laporan Selesai
+                  </h2>
+                  <p className="text-slate-500">
+                    Bersihkan file foto dari laporan perbaikan yang sudah selesai lama agar penyimpanan tetap ringan. Catatan kerusakan, tanggal, petugas, dan biaya perbaikan tetap tersimpan utuh.
+                  </p>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <select
-                  value={cleanupAgeMonths}
-                  onChange={(e) => setCleanupAgeMonths(Number(e.target.value))}
-                  className="min-h-[40px] px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-800 font-semibold"
-                >
-                  <option value={6}>Selesai &gt; 6 Bulan Lalu</option>
-                  <option value={3}>Selesai &gt; 3 Bulan Lalu</option>
-                  <option value={0}>Semua Laporan Selesai</option>
-                </select>
-                <button
-                  type="button"
-                  disabled={cleanupCandidates.length === 0 || saving}
-                  onClick={() => setCleanupConfirmOpen(true)}
-                  className="min-h-[40px] px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold rounded-xl whitespace-nowrap"
-                >
-                  Bersihkan Foto ({cleanupCandidates.length} tiket)
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <select
+                    value={cleanupAgeMonths}
+                    onChange={(e) => setCleanupAgeMonths(Number(e.target.value))}
+                    className="min-h-[40px] px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-800 font-semibold"
+                  >
+                    <option value={6}>Selesai &gt; 6 Bulan Lalu</option>
+                    <option value={3}>Selesai &gt; 3 Bulan Lalu</option>
+                    <option value={0}>Semua Laporan Selesai</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={cleanupCandidates.length === 0 || saving}
+                    onClick={() => setCleanupConfirmOpen(true)}
+                    className="min-h-[40px] px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold rounded-xl whitespace-nowrap"
+                  >
+                    Bersihkan Foto ({cleanupCandidates.length} tiket)
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* PANEL REKAP BIAYA PERBAIKAN (TERISOLASI DI SARPRAS) */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">

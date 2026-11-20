@@ -640,7 +640,7 @@ export default function LaporanDocument({
               <DeltaText delta={bundle.keuangan.keluarTotal} isCurrency invertGood />
             </div>
             <div className="border border-slate-200 rounded-lg p-3">
-              <p className="text-slate-500">Syahriyah Transfer (Periode)</p>
+              <p className="text-slate-500">Pemasukan Transfer (Periode)</p>
               <p className="text-base font-extrabold text-sky-900 tabular-nums font-mono mt-0.5">
                 {formatRupiah(bundle.keuangan.masukTransfer.current)}
               </p>
@@ -677,7 +677,7 @@ export default function LaporanDocument({
             </div>
           )}
 
-          {/* Ringkasan Saldo 4 Dompet Tunai + Syahriyah Transfer & Rekap Tunggakan */}
+          {/* Ringkasan Saldo 4 Dompet Tunai + Pemasukan Transfer & Rekap Tunggakan */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 text-xs">
             <div className="border border-slate-200 rounded-lg p-3.5">
               <h5 className="font-bold text-slate-900 mb-2">Posisi Saldo 4 Dompet (Kas Tunai)</h5>
@@ -715,7 +715,7 @@ export default function LaporanDocument({
                   </tr>
                   <tr className="bg-sky-50/70">
                     <td className="py-1.5 px-1.5 font-bold text-sky-900">
-                      Syahriyah Transfer (Laporan Bank Terpisah)
+                      Pemasukan Transfer (Laporan Bank Terpisah)
                     </td>
                     <td className="py-1.5 px-1.5 text-right font-extrabold text-sky-900 tabular-nums font-mono">
                       {formatRupiah(bundle.keuangan.syahriyahTransfer.netAllTime)}
@@ -876,7 +876,7 @@ export default function LaporanDocument({
               {wk.transferRows.length > 0 && (
                 <div>
                   <p className="text-[11px] font-bold text-slate-700 mb-1">
-                    Rincian Syahriyah Transfer — {wk.label} ({wk.transferRows.length} transaksi · Total{' '}
+                    Rincian Pemasukan Transfer — {wk.label} ({wk.transferRows.length} transaksi · Total{' '}
                     {formatRupiah(wk.transferDebit)})
                   </p>
                   <table className="w-full text-[11px] border-collapse border border-slate-300">

@@ -1,7 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  supabase,
+  isSupabaseConfigured,
+  normalizeUsername,
+  setMockAccountPassword,
+} from "@/lib/supabase";
+import { useAuth, TransparencyBanner } from "@/lib/auth";
 import {
   Users,
   Plus,
@@ -26,6 +32,8 @@ import {
   GraduationCap,
   DoorOpen,
   RotateCcw,
+  KeyRound,
+  UserCog,
 } from "lucide-react";
 
 // ============================================================
@@ -52,6 +60,9 @@ interface PengurusItem {
   status: "aktif" | "nonaktif" | "boyong";
   masa_khidmat: string;
   catatan: string | null;
+  username: string | null;
+  auth_user_id: string | null;
+  must_change_password: boolean;
   jabatan_list: JabatanItem[];
 }
 
@@ -374,6 +385,9 @@ function getRowHierarchyStyle(
 }
 
 export default function DataPengurusPage() {
+  const { canEditModule, canViewBisyaroh, canManageAccounts, refreshAuth, pengurus: currentPengurus } = useAuth();
+  const canEditPengurus = canEditModule("pengurus");
+
   // State Data Utama
   const [pengurusList, setPengurusList] = useState<PengurusItem[]>([]);
   const [kamarOptions, setKamarOptions] = useState<string[]>(DEFAULT_KAMAR_SANTRI);
@@ -394,12 +408,19 @@ export default function DataPengurusPage() {
   const [filterDivisi, setFilterDivisi] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("aktif");
   const [masaKhidmat, setMasaKhidmat] = useState("2026/2027");
-  const [showBisyaroh, setShowBisyaroh] = useState(true);
+  const [showBisyaroh, setShowBisyaroh] = useState(false);
 
   // State Modal Tambah / Edit
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // State Modal Manajemen Akun Login Pengurus (Terpusat)
+  const [accountTarget, setAccountTarget] = useState<PengurusItem | null>(null);
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountTempPassword, setAccountTempPassword] = useState("");
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountFeedback, setAccountFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
 
   // State Form Pengurus
   const [namaLengkap, setNamaLengkap] = useState("");
@@ -425,9 +446,9 @@ export default function DataPengurusPage() {
   ]);
 
   // ============================================================
-  // FETCH DATA DARI SUPABASE
+  // FETCH DATA DARI SUPABASE (DENGAN PRIVASI BISYAROH KETAT)
   // ============================================================
-  const fetchAllData = async () => {
+  const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
       const { data: settingData } = await supabase
@@ -464,26 +485,90 @@ export default function DataPengurusPage() {
         setKamarOptions(mergedRooms);
       }
 
-      const { data: pengurusData, error } = await supabase
-        .from("v_pengurus_lengkap")
-        .select("*")
-        .order("created_at", { ascending: true });
+      interface RawJabatanRow {
+        id: string;
+        pengurus_id?: string;
+        divisi?: string | null;
+        nama_jabatan?: string | null;
+        is_utama?: boolean | null;
+        urutan_struktur?: number | null;
+      }
+      interface RawPengurusRow {
+        id: string;
+        nama_lengkap: string;
+        no_wa?: string | null;
+        alamat?: string | null;
+        foto_url?: string | null;
+        ttd_url?: string | null;
+        nominal_bisyaroh?: number | null;
+        status?: "aktif" | "nonaktif" | "boyong" | null;
+        masa_khidmat?: string | null;
+        catatan?: string | null;
+        username?: string | null;
+        auth_user_id?: string | null;
+        must_change_password?: boolean | null;
+        jabatan_list?: RawJabatanRow[] | null;
+      }
 
-      if (error) throw error;
+      // Gunakan view aman v_pengurus_aman + pengurus_jabatan (fallback ke v_pengurus_lengkap jika view belum dimigrasi)
+      let baseRows: RawPengurusRow[] = [];
+      const [amanRes, jabatanRes] = await Promise.all([
+        supabase.from("v_pengurus_aman").select("*").order("created_at", { ascending: true }),
+        supabase.from("pengurus_jabatan").select("*"),
+      ]);
 
-      const normalized: PengurusItem[] = (pengurusData || []).map((item: any) => ({
+      if (!amanRes.error && Array.isArray(amanRes.data)) {
+        const jabMap = new Map<string, RawJabatanRow[]>();
+        ((jabatanRes.data || []) as RawJabatanRow[]).forEach((j) => {
+          if (!j.pengurus_id) return;
+          const list = jabMap.get(j.pengurus_id) || [];
+          list.push(j);
+          jabMap.set(j.pengurus_id, list);
+        });
+        baseRows = (amanRes.data as RawPengurusRow[]).map((p) => ({
+          ...p,
+          jabatan_list: jabMap.get(p.id) || [],
+        }));
+      } else {
+        const { data: pengurusData, error } = await supabase
+          .from("v_pengurus_lengkap")
+          .select("*")
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        baseRows = (pengurusData || []) as RawPengurusRow[];
+      }
+
+      // Ambil nominal bisyaroh HANYA jika user adalah Pimpinan Inti / Bendahara
+      const bisyarohMap = new Map<string, number>();
+      if (canViewBisyaroh) {
+        const { data: rpcRows } = await supabase.rpc("get_pengurus_bisyaroh_map");
+        if (Array.isArray(rpcRows)) {
+          (rpcRows as Array<{ pengurus_id: string; nominal_bisyaroh: number }>).forEach((r) => {
+            bisyarohMap.set(r.pengurus_id, Number(r.nominal_bisyaroh || 0));
+          });
+        }
+      }
+
+      const normalized: PengurusItem[] = baseRows.map((item) => ({
         id: item.id,
         nama_lengkap: item.nama_lengkap,
-        no_wa: item.no_wa,
-        alamat: item.alamat,
-        foto_url: item.foto_url,
-        ttd_url: item.ttd_url,
-        nominal_bisyaroh: Number(item.nominal_bisyaroh || 0),
+        no_wa: item.no_wa ?? null,
+        alamat: item.alamat ?? null,
+        foto_url: item.foto_url ?? null,
+        ttd_url: item.ttd_url ?? null,
+        nominal_bisyaroh: canViewBisyaroh
+          ? bisyarohMap.has(item.id)
+            ? (bisyarohMap.get(item.id) as number)
+            : Number(item.nominal_bisyaroh || 0)
+          : 0,
         status: item.status || "aktif",
         masa_khidmat: item.masa_khidmat || "2026/2027",
-        catatan: item.catatan,
+        catatan: item.catatan ?? null,
+        username: item.username || null,
+        auth_user_id: item.auth_user_id || null,
+        must_change_password: Boolean(item.must_change_password),
         jabatan_list: Array.isArray(item.jabatan_list)
-          ? item.jabatan_list.map((j: any) => ({
+          ? item.jabatan_list.map((j) => ({
               id: j.id,
               divisi: normalizeDivisi(j.divisi || ""),
               nama_jabatan: j.nama_jabatan || "",
@@ -499,11 +584,14 @@ export default function DataPengurusPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canViewBisyaroh]);
 
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    const timer = setTimeout(() => {
+      void fetchAllData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchAllData]);
 
   // ============================================================
   // KALKULASI STATISTIK & DATA TERFILTER (URUT SESUAI HIRARKI)
@@ -962,19 +1050,22 @@ export default function DataPengurusPage() {
 
     setSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         nama_lengkap: namaLengkap.trim(),
         no_wa: noWa.trim() || null,
         kamar_tugas: null,
         alamat: alamatAsal.trim() || null,
         foto_url: fotoUrl,
         ttd_url: ttdUrl,
-        nominal_bisyaroh: Number(nominalBisyaroh) || 0,
         status: statusPengurus,
         masa_khidmat: formMasaKhidmat,
         catatan: catatan.trim() || null,
         updated_at: new Date().toISOString(),
       };
+
+      if (canViewBisyaroh) {
+        payload.nominal_bisyaroh = Number(nominalBisyaroh) || 0;
+      }
 
       let targetPengurusId = editingId;
 
@@ -1015,6 +1106,29 @@ export default function DataPengurusPage() {
         if (jabInsertError) throw jabInsertError;
       }
 
+      // Sinkronkan status nonaktif/boyong ke Supabase Auth agar akun otomatis diblokir
+      if (editingId && canManageAccounts && isSupabaseConfigured()) {
+        const targetObj = pengurusList.find((p) => p.id === editingId);
+        if (targetObj?.auth_user_id) {
+          const { data: sessData } = await supabase.auth.getSession();
+          const token = sessData?.session?.access_token;
+          if (token) {
+            await fetch("/api/admin/pengurus-akun", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                action: "sync_status",
+                pengurus_id: editingId,
+                status: statusPengurus,
+              }),
+            });
+          }
+        }
+      }
+
       const isPengasuhUtama = validJabatan.some((j) => j.divisi === "Pengasuh Pondok");
       if (isPengasuhUtama && statusPengurus === "aktif") {
         await supabase
@@ -1028,15 +1142,20 @@ export default function DataPengurusPage() {
 
       setIsModalOpen(false);
       await fetchAllData();
-    } catch (err: any) {
+      if (currentPengurus && editingId === currentPengurus.id) {
+        await refreshAuth();
+      }
+    } catch (err: unknown) {
       console.error("Gagal menyimpan pengurus:", err);
-      alert("Terjadi kesalahan saat menyimpan data: " + (err?.message || "Unknown error"));
+      const message = err instanceof Error ? err.message : "Unknown error";
+      alert("Terjadi kesalahan saat menyimpan data: " + message);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeletePengurus = async (id: string, nama: string) => {
+    if (!canEditPengurus) return;
     if (!confirm(`Hapus data pengurus "${nama}" beserta seluruh jabatannya?`)) return;
     try {
       const { error } = await supabase.from("pengurus").delete().eq("id", id);
@@ -1045,6 +1164,118 @@ export default function DataPengurusPage() {
     } catch (err) {
       console.error("Gagal menghapus pengurus:", err);
       alert("Gagal menghapus data pengurus.");
+    }
+  };
+
+  // ============================================================
+  // MANAJEMEN AKUN LOGIN TERPUSAT (CREATE / RESET PASSWORD)
+  // ============================================================
+  const openAccountModal = (item: PengurusItem) => {
+    if (!canManageAccounts) return;
+    const suggested = normalizeUsername(
+      item.username ||
+        item.nama_lengkap
+          .replace(/^(dr\.|kh\.|ust\.|h\.|hj\.|agus|nyai)\s+/gi, "")
+          .split(" ")
+          .slice(0, 2)
+          .join(".")
+    );
+    setAccountTarget(item);
+    setAccountUsername(item.username || suggested);
+    setAccountTempPassword("");
+    setAccountFeedback(null);
+  };
+
+  const handleAccountAction = async (mode: "create_account" | "reset_password") => {
+    if (!accountTarget || !canManageAccounts) return;
+    const cleanUname = normalizeUsername(accountUsername);
+    const tempPw = accountTempPassword.trim();
+
+    if (mode === "create_account" && cleanUname.length < 3) {
+      setAccountFeedback({ type: "err", msg: "Username minimal 3 karakter (huruf/angka/titik)." });
+      return;
+    }
+    if (tempPw.length < 6) {
+      setAccountFeedback({ type: "err", msg: "Password sementara minimal 6 karakter." });
+      return;
+    }
+
+    setAccountSaving(true);
+    setAccountFeedback(null);
+    try {
+      if (!isSupabaseConfigured()) {
+        // Mode Preview / Mock lokal
+        await supabase
+          .from("pengurus")
+          .update({
+            username: mode === "create_account" ? cleanUname : accountTarget.username || cleanUname,
+            auth_user_id: accountTarget.auth_user_id || `auth-${accountTarget.id}`,
+            must_change_password: true,
+          })
+          .eq("id", accountTarget.id);
+        setMockAccountPassword(
+          mode === "create_account" ? cleanUname : accountTarget.username || cleanUname,
+          tempPw
+        );
+        setAccountFeedback({
+          type: "ok",
+          msg:
+            mode === "create_account"
+              ? `Akun login "${cleanUname}" berhasil dibuat (Mode Pratinjau).`
+              : "Password sementara berhasil direset. Pengurus wajib mengganti password saat login.",
+        });
+        await fetchAllData();
+        return;
+      }
+
+      const { data: sessData } = await supabase.auth.getSession();
+      const token = sessData?.session?.access_token;
+      if (!token) {
+        setAccountFeedback({
+          type: "err",
+          msg: "Sesi Supabase Anda tidak ditemukan. Silakan login ulang terlebih dahulu.",
+        });
+        return;
+      }
+
+      const res = await fetch("/api/admin/pengurus-akun", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: mode,
+          pengurus_id: accountTarget.id,
+          username: cleanUname,
+          temporary_password: tempPw,
+        }),
+      });
+
+      const json = (await res.json()) as { error?: string; username?: string };
+      if (!res.ok) {
+        setAccountFeedback({
+          type: "err",
+          msg: json.error || "Gagal memproses akun pengurus.",
+        });
+        return;
+      }
+
+      setAccountFeedback({
+        type: "ok",
+        msg:
+          mode === "create_account"
+            ? `Akun "${json.username || cleanUname}" siap digunakan. Berikan username & password sementara ini kepada yang bersangkutan.`
+            : "Password sementara berhasil direset. Pengurus wajib mengganti password saat login berikutnya.",
+      });
+      await fetchAllData();
+    } catch (err) {
+      setAccountFeedback({
+        type: "err",
+        msg: err instanceof Error ? err.message : "Terjadi kendala saat menghubungi server.",
+      });
+    } finally {
+      setAccountSaving(false);
     }
   };
 
@@ -1194,15 +1425,23 @@ export default function DataPengurusPage() {
         }
       `}</style>
 
+      <div className="no-print">
+        <TransparencyBanner
+          moduleLabel="Data Pengurus & Struktur Divisi"
+          isReadOnly={!canEditPengurus}
+          extraNote={!canViewBisyaroh ? "Informasi nominal bisyaroh dikunci khusus Pimpinan Inti & Bendahara." : undefined}
+        />
+      </div>
+
       {/* HEADER HALAMAN */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 no-print">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2.5">
             <Users className="w-7 h-7 text-emerald-700" />
-            Data Pengurus & Struktur Divisi
+            Data Pengurus &amp; Struktur Divisi
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Manajemen personel pengurus pondok (mendukung rangkap jabatan dalam 1 profil terpadu).
+            Manajemen personel pengurus pondok, multi-jabatan, dan akun pribadi terpusat.
           </p>
         </div>
 
@@ -1219,19 +1458,25 @@ export default function DataPengurusPage() {
             Cetak Bagan (A4)
           </button>
 
-          <button
-            type="button"
-            onClick={openAddModal}
-            className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs sm:text-sm font-semibold hover:bg-emerald-800 shadow-sm transition whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4 shrink-0" />
-            Tambah Pengurus
-          </button>
+          {canEditPengurus && (
+            <button
+              type="button"
+              onClick={openAddModal}
+              className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs sm:text-sm font-semibold hover:bg-emerald-800 shadow-sm transition whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              Tambah Pengurus
+            </button>
+          )}
         </div>
       </div>
 
       {/* KARTU RINGKASAN STATISTIK */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
+      <div
+        className={`grid grid-cols-1 sm:grid-cols-2 ${
+          canViewBisyaroh ? "lg:grid-cols-4" : "lg:grid-cols-3"
+        } gap-4 no-print`}
+      >
         <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
             <Users className="w-6 h-6" />
@@ -1239,7 +1484,7 @@ export default function DataPengurusPage() {
           <div>
             <p className="text-xs font-medium text-slate-500">Total Personel Aktif</p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800">{stats.totalPersonel}</span>
+              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPersonel}</span>
               <span className="text-xs text-slate-400">Orang</span>
             </div>
           </div>
@@ -1252,7 +1497,7 @@ export default function DataPengurusPage() {
           <div>
             <p className="text-xs font-medium text-slate-500">Total Posisi Terisi</p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800">{stats.totalPosisi}</span>
+              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPosisi}</span>
               <span className="text-xs text-slate-400">Jabatan</span>
             </div>
           </div>
@@ -1265,33 +1510,35 @@ export default function DataPengurusPage() {
           <div>
             <p className="text-xs font-medium text-slate-500">Rangkap Jabatan</p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800">{stats.rangkapJabatan}</span>
+              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.rangkapJabatan}</span>
               <span className="text-xs text-slate-400">Personel</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5 min-w-0">
-            <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-              <Wallet className="w-6 h-6" />
+        {canViewBisyaroh && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+                <Wallet className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-slate-500">Total Bisyaroh / Bulan</p>
+                <p className="text-lg font-bold text-slate-800 truncate mt-0.5 tabular-nums">
+                  {showBisyaroh ? formatRupiah(stats.totalBisyaroh) : "Rp ••••••••"}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-slate-500">Total Bisyaroh / Bulan</p>
-              <p className="text-lg font-bold text-slate-800 truncate mt-0.5">
-                {showBisyaroh ? formatRupiah(stats.totalBisyaroh) : "Rp ••••••••"}
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowBisyaroh(!showBisyaroh)}
+              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              title={showBisyaroh ? "Sembunyikan Nominal" : "Tampilkan Nominal"}
+            >
+              {showBisyaroh ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowBisyaroh(!showBisyaroh)}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
-            title={showBisyaroh ? "Sembunyikan Nominal" : "Tampilkan Nominal"}
-          >
-            {showBisyaroh ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
+        )}
       </div>
 
       {/* BAR NAVIGASI TAB & FILTER MASA KHIDMAT */}
@@ -1503,29 +1750,46 @@ export default function DataPengurusPage() {
                           <span className="text-slate-400">WA: -</span>
                         )}
                       </div>
-                      <div className="font-bold text-slate-800">
-                        Bisyaroh: {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
-                      </div>
+                      {canViewBisyaroh && (
+                        <div className="font-bold text-slate-800">
+                          Bisyaroh: {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(item)}
-                        className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-white text-slate-700 hover:text-emerald-700 border border-slate-200 font-bold inline-flex items-center justify-center gap-1.5"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" /> Edit Profil &amp; Jabatan
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
-                        title="Hapus Pengurus"
-                        aria-label={`Hapus ${item.nama_lengkap}`}
-                        className="min-h-[40px] min-w-[40px] rounded-xl bg-white text-slate-500 hover:text-rose-600 border border-slate-200 inline-flex items-center justify-center"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {(canEditPengurus || canManageAccounts) && (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        {canManageAccounts && (
+                          <button
+                            type="button"
+                            onClick={() => openAccountModal(item)}
+                            className="min-h-[40px] px-3 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold inline-flex items-center justify-center gap-1.5"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" /> {item.username ? `@${item.username}` : "Buat Akun"}
+                          </button>
+                        )}
+                        {canEditPengurus && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-white text-slate-700 hover:text-emerald-700 border border-slate-200 font-bold inline-flex items-center justify-center gap-1.5"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
+                              title="Hapus Pengurus"
+                              aria-label={`Hapus ${item.nama_lengkap}`}
+                              className="min-h-[40px] min-w-[40px] rounded-xl bg-white text-slate-500 hover:text-rose-600 border border-slate-200 inline-flex items-center justify-center"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1540,9 +1804,11 @@ export default function DataPengurusPage() {
                   <th className="py-3 px-3.5 min-w-[195px]">Profil Pengurus</th>
                   <th className="py-3 px-3.5 min-w-[230px]">Amanah &amp; Jabatan (Rangkap)</th>
                   <th className="py-3 px-3.5 w-36 whitespace-nowrap">Kontak WA</th>
-                  <th className="py-3 px-3.5 w-28 whitespace-nowrap">Bisyaroh</th>
+                  {canViewBisyaroh && <th className="py-3 px-3.5 w-28 whitespace-nowrap">Bisyaroh</th>}
                   <th className="py-3 px-3.5 w-24 whitespace-nowrap">Status</th>
-                  <th className="py-3 px-3.5 w-24 text-right whitespace-nowrap">Aksi</th>
+                  {(canEditPengurus || canManageAccounts) && (
+                    <th className="py-3 px-3.5 w-32 text-right whitespace-nowrap">Aksi</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/60 text-xs sm:text-sm">
@@ -1641,12 +1907,14 @@ export default function DataPengurusPage() {
                           )}
                         </td>
 
-                        {/* Bisyaroh */}
-                        <td className="py-3 px-3.5 font-semibold text-slate-700 whitespace-nowrap tabular-nums text-xs sm:text-sm">
-                          {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
-                        </td>
+                        {/* Bisyaroh (Khusus Pimpinan Inti & Bendahara) */}
+                        {canViewBisyaroh && (
+                          <td className="py-3 px-3.5 font-semibold text-slate-700 whitespace-nowrap tabular-nums text-xs sm:text-sm">
+                            {showBisyaroh ? formatRupiah(item.nominal_bisyaroh) : "Rp ••••••"}
+                          </td>
+                        )}
 
-                        {/* Status */}
+                        {/* Status & Username Akun */}
                         <td className="py-3 px-3.5 whitespace-nowrap">
                           <span
                             className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize whitespace-nowrap ${
@@ -1659,31 +1927,57 @@ export default function DataPengurusPage() {
                           >
                             {item.status}
                           </span>
+                          {item.username && (
+                            <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                              @{item.username}
+                            </p>
+                          )}
                         </td>
 
                         {/* Aksi */}
-                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                          <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(item)}
-                              className="p-2 rounded-lg bg-white/80 text-slate-600 hover:text-emerald-700 hover:bg-white border border-slate-200/70 transition shrink-0"
-                              title="Edit Profil & Jabatan"
-                              aria-label={`Edit ${item.nama_lengkap}`}
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
-                              className="p-2 rounded-lg bg-white/80 text-slate-500 hover:text-rose-600 hover:bg-white border border-slate-200/70 transition shrink-0"
-                              title="Hapus Pengurus"
-                              aria-label={`Hapus ${item.nama_lengkap}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
+                        {(canEditPengurus || canManageAccounts) && (
+                          <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                            <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+                              {canManageAccounts && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAccountModal(item)}
+                                  className={`p-2 rounded-lg border transition shrink-0 ${
+                                    item.username
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                  }`}
+                                  title={item.username ? `Kelola Akun (@${item.username})` : "Buat Akun Login"}
+                                  aria-label={`Akun ${item.nama_lengkap}`}
+                                >
+                                  <KeyRound className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canEditPengurus && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(item)}
+                                    className="p-2 rounded-lg bg-white/80 text-slate-600 hover:text-emerald-700 hover:bg-white border border-slate-200/70 transition shrink-0"
+                                    title="Edit Profil & Jabatan"
+                                    aria-label={`Edit ${item.nama_lengkap}`}
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
+                                    className="p-2 rounded-lg bg-white/80 text-slate-500 hover:text-rose-600 hover:bg-white border border-slate-200/70 transition shrink-0"
+                                    title="Hapus Pengurus"
+                                    aria-label={`Hapus ${item.nama_lengkap}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -2127,19 +2421,21 @@ export default function DataPengurusPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nominal Bisyaroh / Bulan (Rp)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={5000}
-                      value={nominalBisyaroh}
-                      onChange={(e) => setNominalBisyaroh(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    />
-                  </div>
+                  {canViewBisyaroh && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Nominal Bisyaroh / Bulan (Rp)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={5000}
+                        value={nominalBisyaroh}
+                        onChange={(e) => setNominalBisyaroh(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -2147,7 +2443,7 @@ export default function DataPengurusPage() {
                     </label>
                     <select
                       value={statusPengurus}
-                      onChange={(e) => setStatusPengurus(e.target.value as any)}
+                      onChange={(e) => setStatusPengurus(e.target.value as "aktif" | "nonaktif" | "boyong")}
                       className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     >
                       <option value="aktif">Aktif</option>
@@ -2446,6 +2742,122 @@ export default function DataPengurusPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+          MODAL MANAJEMEN AKUN LOGIN TERPUSAT (TANPA LOGOUT ADMIN)
+      ============================================================ */}
+      {accountTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 no-print">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200">
+            <div className="bg-emerald-800 text-white px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <UserCog className="w-5 h-5 text-emerald-200 shrink-0" />
+                <div>
+                  <h3 className="text-sm font-bold">Kelola Akun Login Pengurus</h3>
+                  <p className="text-[11px] text-emerald-200 truncate max-w-[260px]">
+                    {accountTarget.nama_lengkap}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAccountTarget(null)}
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Status Akun:</span>
+                  <strong className={accountTarget.auth_user_id ? "text-emerald-700" : "text-amber-700"}>
+                    {accountTarget.auth_user_id ? "Aktif / Terhubung" : "Belum Memiliki Akun"}
+                  </strong>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Status Pengurus:</span>
+                  <strong className="uppercase text-slate-800">{accountTarget.status}</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Username Login (huruf kecil / tanpa spasi)
+                </label>
+                <input
+                  type="text"
+                  value={accountUsername}
+                  onChange={(e) => setAccountUsername(normalizeUsername(e.target.value))}
+                  placeholder="misal: ahmad.zaini"
+                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Password Sementara (minimal 6 karakter)
+                </label>
+                <input
+                  type="text"
+                  value={accountTempPassword}
+                  onChange={(e) => setAccountTempPassword(e.target.value)}
+                  placeholder="Contoh: annur2026"
+                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Saat login pertama kali, pengurus wajib mengganti password sementara ini di menu Profil Saya.
+                </p>
+              </div>
+
+              {accountFeedback && (
+                <div
+                  className={`p-3 rounded-xl border text-xs ${
+                    accountFeedback.type === "ok"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : "bg-rose-50 border-rose-200 text-rose-900"
+                  }`}
+                >
+                  {accountFeedback.msg}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAccountTarget(null)}
+                  className="min-h-[40px] px-4 py-2 rounded-xl border border-slate-200 font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Tutup
+                </button>
+                {accountTarget.auth_user_id && (
+                  <button
+                    type="button"
+                    disabled={accountSaving}
+                    onClick={() => handleAccountAction("reset_password")}
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold disabled:opacity-60"
+                  >
+                    {accountSaving ? "Memproses..." : "Reset Password"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={accountSaving}
+                  onClick={() => handleAccountAction("create_account")}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold disabled:opacity-60"
+                >
+                  {accountSaving
+                    ? "Menyimpan..."
+                    : accountTarget.auth_user_id
+                    ? "Simpan / Perbarui Akun"
+                    : "Buat Akun Login"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

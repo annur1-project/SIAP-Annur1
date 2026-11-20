@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useAuth, TransparencyBanner } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import {
   HeartPulse,
@@ -380,6 +381,9 @@ function createLocalId(prefix: string): string {
 }
 
 export default function KesehatanPage() {
+  const { canEditModule, pengurus } = useAuth();
+  const canEdit = canEditModule('kesehatan');
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('pantauan');
   const [todayStr, setTodayStr] = useState<string>('');
 
@@ -792,6 +796,7 @@ export default function KesehatanPage() {
   // HANDLERS MODAL SAKIT & POSKESTREN
   // ==========================
   const openCreateSakitModal = () => {
+    if (!canEdit) return;
     const baseDate = todayStr || getLocalTodayStr();
     setEditingSakit(null);
     setSantriSearch('');
@@ -810,7 +815,7 @@ export default function KesehatanPage() {
     setFormTempatRujukan('');
     setFormCatatanRujukan('');
     setFormBiaya('0');
-    setFormPetugasText('');
+    setFormPetugasText(pengurus?.nama_lengkap || '');
     setPetugasDropdownOpen(false);
     setFormObatItems([]);
     setSelectedObatIdToAdd('');
@@ -821,6 +826,7 @@ export default function KesehatanPage() {
   };
 
   const openEditSakitModal = (item: SakitViewItem) => {
+    if (!canEdit) return;
     setEditingSakit(item);
     setSantriSearch(item.santri?.nama_lengkap || '');
     setSantriDropdownOpen(false);
@@ -909,6 +915,7 @@ export default function KesehatanPage() {
 
   const handleSaveSakit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!formSantriId) {
       showToast('error', 'Santri Belum Dipilih', 'Pilih santri yang sakit atau diperiksa.');
       return;
@@ -1003,6 +1010,7 @@ export default function KesehatanPage() {
   };
 
   const handleMarkSembuh = async (item: SakitViewItem) => {
+    if (!canEdit) return;
     setSaving(true);
     try {
       const t = todayStr || getLocalTodayStr();
@@ -1030,6 +1038,7 @@ export default function KesehatanPage() {
   };
 
   const handleMarkWaliNotified = async (item: SakitViewItem) => {
+    if (!canEdit) return;
     try {
       const nextMeta: KesehatanMeta = { ...item.meta, wl: true };
       await supabase
@@ -1044,7 +1053,7 @@ export default function KesehatanPage() {
   };
 
   const handleDeleteSakit = async () => {
-    if (!deleteTarget) return;
+    if (!canEdit || !deleteTarget) return;
     setDeleting(true);
     try {
       const { error } = await supabase.from('santri_sakit').delete().eq('id', deleteTarget.id);
@@ -1064,6 +1073,7 @@ export default function KesehatanPage() {
   // HANDLERS OBAT POSKESTREN
   // ==========================
   const openCreateObatModal = () => {
+    if (!canEdit) return;
     setEditingObat(null);
     setObatNama('');
     setObatKategori('Obat Bebas');
@@ -1077,6 +1087,7 @@ export default function KesehatanPage() {
   };
 
   const openEditObatModal = (item: ObatItem) => {
+    if (!canEdit) return;
     setEditingObat(item);
     setObatNama(item.nama_obat);
     setObatKategori(item.kategori);
@@ -1090,6 +1101,7 @@ export default function KesehatanPage() {
   };
 
   const handleSeedStarterObat = async () => {
+    if (!canEdit) return;
     setSaving(true);
     try {
       if (obatLocalFallback) {
@@ -1116,6 +1128,7 @@ export default function KesehatanPage() {
 
   const handleSaveObat = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!obatNama.trim()) {
       showToast('error', 'Nama Obat Wajib Diisi', 'Masukkan nama obat atau perlengkapan P3K.');
       return;
@@ -1169,6 +1182,7 @@ export default function KesehatanPage() {
   };
 
   const handleRestockObat = async (item: ObatItem, delta: number) => {
+    if (!canEdit) return;
     const nextStok = Math.max(0, item.stok + delta);
     if (obatLocalFallback) {
       const next = obatList.map((o) => (o.id === item.id ? { ...o, stok: nextStok } : o));
@@ -1186,6 +1200,7 @@ export default function KesehatanPage() {
   };
 
   const handleDeleteObat = async (item: ObatItem) => {
+    if (!canEdit) return;
     if (obatLocalFallback) {
       const next = obatList.filter((o) => o.id !== item.id);
       setObatList(next);
@@ -1204,6 +1219,7 @@ export default function KesehatanPage() {
   // HANDLERS PENYULUHAN
   // ==========================
   const openCreatePenyuluhanModal = () => {
+    if (!canEdit) return;
     setEditingPenyuluhan(null);
     setPyTanggal(todayStr || getLocalTodayStr());
     setPyJudul('');
@@ -1216,6 +1232,7 @@ export default function KesehatanPage() {
   };
 
   const openEditPenyuluhanModal = (item: PenyuluhanItem) => {
+    if (!canEdit) return;
     setEditingPenyuluhan(item);
     setPyTanggal(item.tanggal);
     setPyJudul(item.judul);
@@ -1229,6 +1246,7 @@ export default function KesehatanPage() {
 
   const handleSavePenyuluhan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     if (!pyJudul.trim() || !pyTanggal) {
       showToast('error', 'Data Belum Lengkap', 'Tanggal dan tema penyuluhan wajib diisi.');
       return;
@@ -1280,6 +1298,7 @@ export default function KesehatanPage() {
   };
 
   const handleTogglePenyuluhanStatus = async (item: PenyuluhanItem) => {
+    if (!canEdit) return;
     const nextStatus: StatusPenyuluhan =
       item.status === 'terlaksana' ? 'terjadwal' : 'terlaksana';
     if (penyuluhanLocalFallback) {
@@ -1302,6 +1321,7 @@ export default function KesehatanPage() {
   };
 
   const handleDeletePenyuluhan = async (item: PenyuluhanItem) => {
+    if (!canEdit) return;
     if (penyuluhanLocalFallback) {
       const next = penyuluhanList.filter((p) => p.id !== item.id);
       setPenyuluhanList(next);
@@ -1698,16 +1718,23 @@ export default function KesehatanPage() {
             Ekspor Excel
           </button>
 
-          <button
-            type="button"
-            onClick={openCreateSakitModal}
-            className="col-span-2 sm:col-span-1 px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Catat Santri Sakit
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={openCreateSakitModal}
+              className="col-span-2 sm:col-span-1 px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Catat Santri Sakit
+            </button>
+          )}
         </div>
       </div>
+
+      <TransparencyBanner
+        moduleLabel="Poskestren & Kesehatan Santri"
+        isReadOnly={!canEdit}
+      />
 
       {fetchError && (
         <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3 text-rose-900 text-xs print:hidden">
@@ -1966,14 +1993,16 @@ export default function KesehatanPage() {
             ) : filteredItems.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-400 space-y-3">
                 <p>Belum ada catatan santri sakit sesuai filter saat ini.</p>
-                <button
-                  type="button"
-                  onClick={openCreateSakitModal}
-                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  Catat Santri Sakit Pertama
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={openCreateSakitModal}
+                    className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Catat Santri Sakit Pertama
+                  </button>
+                )}
               </div>
             ) : (
               filteredItems.map((item, idx) => {
@@ -2074,15 +2103,17 @@ export default function KesehatanPage() {
 
                     {/* Grid Aksi Mobile Ramah Sentuh */}
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => openEditSakitModal(item)}
-                        className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold text-center"
-                      >
-                        Periksa / Update
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => openEditSakitModal(item)}
+                          className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold text-center"
+                        >
+                          Periksa / Update
+                        </button>
+                      )}
 
-                      {item.status !== 'sembuh' ? (
+                      {item.status !== 'sembuh' && canEdit ? (
                         <button
                           type="button"
                           onClick={() => handleMarkSembuh(item)}
@@ -2096,7 +2127,9 @@ export default function KesehatanPage() {
                         <button
                           type="button"
                           onClick={() => setPrintTarget(item)}
-                          className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                          className={`min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold flex items-center justify-center gap-1.5 ${
+                            !canEdit ? 'col-span-2' : ''
+                          }`}
                         >
                           <Printer className="w-3.5 h-3.5" />
                           Cetak Surat
@@ -2139,7 +2172,7 @@ export default function KesehatanPage() {
                         Salin Teks WA
                       </button>
 
-                      {item.status !== 'sembuh' && (
+                      {item.status !== 'sembuh' && canEdit && (
                         <Link
                           href={`/perizinan?santri_id=${item.santri_id}&kategori=sakit`}
                           className="min-h-[40px] px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl font-semibold flex items-center justify-center text-center"
@@ -2148,26 +2181,28 @@ export default function KesehatanPage() {
                         </Link>
                       )}
 
-                      <div className={`flex items-center gap-2 ${item.status === 'sembuh' ? 'col-span-2 justify-end' : ''}`}>
-                        {item.status !== 'sembuh' && (
+                      {canEdit && (
+                        <div className={`flex items-center gap-2 ${item.status === 'sembuh' ? 'col-span-2 justify-end' : ''}`}>
+                          {item.status !== 'sembuh' && (
+                            <button
+                              type="button"
+                              onClick={() => setPrintTarget(item)}
+                              className="flex-1 min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              Surat
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setPrintTarget(item)}
-                            className="flex-1 min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold flex items-center justify-center gap-1.5"
+                            onClick={() => setDeleteTarget(item)}
+                            title="Hapus catatan sakit"
+                            className="min-h-[40px] min-w-[40px] px-3 bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
                           >
-                            <Printer className="w-3.5 h-3.5" />
-                            Surat
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(item)}
-                          title="Hapus catatan sakit"
-                          className="min-h-[40px] min-w-[40px] px-3 bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -2199,14 +2234,16 @@ export default function KesehatanPage() {
                   <tr>
                     <td colSpan={6} className="p-10 text-center text-slate-400 space-y-2">
                       <p>Belum ada catatan santri sakit sesuai filter saat ini.</p>
-                      <button
-                        type="button"
-                        onClick={openCreateSakitModal}
-                        className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Catat Santri Sakit Pertama
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={openCreateSakitModal}
+                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Catat Santri Sakit Pertama
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -2322,36 +2359,38 @@ export default function KesehatanPage() {
                         <td className="py-3.5 px-3.5 align-top">
                           <div className="flex flex-col items-end gap-1.5">
                             {/* Baris 1: Aksi Klinis & Izin */}
-                            <div className="flex flex-nowrap items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => openEditSakitModal(item)}
-                                className="px-2.5 py-1.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors"
-                              >
-                                Periksa
-                              </button>
-
-                              {item.status !== 'sembuh' && (
+                            {canEdit && (
+                              <div className="flex flex-nowrap items-center justify-end gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() => handleMarkSembuh(item)}
-                                  disabled={saving}
-                                  className="px-2.5 py-1.5 text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                                  onClick={() => openEditSakitModal(item)}
+                                  className="px-2.5 py-1.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors"
                                 >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  Sembuh
+                                  Periksa
                                 </button>
-                              )}
 
-                              {item.status !== 'sembuh' && (
-                                <Link
-                                  href={`/perizinan?santri_id=${item.santri_id}&kategori=sakit`}
-                                  className="px-2.5 py-1.5 text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors"
-                                >
-                                  Izin Pulang
-                                </Link>
-                              )}
-                            </div>
+                                {item.status !== 'sembuh' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkSembuh(item)}
+                                    disabled={saving}
+                                    className="px-2.5 py-1.5 text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Sembuh
+                                  </button>
+                                )}
+
+                                {item.status !== 'sembuh' && (
+                                  <Link
+                                    href={`/perizinan?santri_id=${item.santri_id}&kategori=sakit`}
+                                    className="px-2.5 py-1.5 text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors"
+                                  >
+                                    Izin Pulang
+                                  </Link>
+                                )}
+                              </div>
+                            )}
 
                             {/* Baris 2: WA Wali, Salin WA Terformat, Surat & Hapus */}
                             <div className="flex flex-nowrap items-center justify-end gap-1.5">
@@ -2398,15 +2437,17 @@ export default function KesehatanPage() {
                                 Surat
                               </button>
 
-                              <button
-                                type="button"
-                                onClick={() => setDeleteTarget(item)}
-                                title="Hapus catatan sakit"
-                                aria-label={`Hapus catatan sakit ${item.santri?.nama_lengkap || 'santri'}`}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors shrink-0"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget(item)}
+                                  title="Hapus catatan sakit"
+                                  aria-label={`Hapus catatan sakit ${item.santri?.nama_lengkap || 'santri'}`}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors shrink-0"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -2434,26 +2475,28 @@ export default function KesehatanPage() {
                 className="w-full pl-10 pr-4 py-2.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {obatList.length === 0 && (
+            {canEdit && (
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {obatList.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleSeedStarterObat}
+                    disabled={saving}
+                    className="px-3.5 py-2.5 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0"
+                  >
+                    Isi Paket Obat Dasar P3K
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleSeedStarterObat}
-                  disabled={saving}
-                  className="px-3.5 py-2.5 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0"
+                  onClick={openCreateObatModal}
+                  className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
                 >
-                  Isi Paket Obat Dasar P3K
+                  <PackagePlus className="w-4 h-4" />
+                  Tambah Obat Poskestren
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={openCreateObatModal}
-                className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
-              >
-                <PackagePlus className="w-4 h-4" />
-                Tambah Obat Poskestren
-              </button>
-            </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -2504,30 +2547,32 @@ export default function KesehatanPage() {
                         </span>
                         <span>ED: {o.kadaluarsa ? formatTanggalIndo(o.kadaluarsa) : '-'}</span>
                       </div>
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleRestockObat(o, 10)}
-                          className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-semibold"
-                        >
-                          +10 Stok
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditObatModal(o)}
-                          className="flex-1 min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteObat(o)}
-                          title="Hapus obat"
-                          className="min-h-[40px] min-w-[40px] bg-slate-100 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRestockObat(o, 10)}
+                            className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-semibold"
+                          >
+                            +10 Stok
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditObatModal(o)}
+                            className="flex-1 min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteObat(o)}
+                            title="Hapus obat"
+                            className="min-h-[40px] min-w-[40px] bg-slate-100 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -2595,31 +2640,35 @@ export default function KesehatanPage() {
                             {o.kadaluarsa ? formatTanggalIndo(o.kadaluarsa) : '-'}
                           </td>
                           <td className="py-3 px-3.5">
-                            <div className="flex flex-nowrap items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleRestockObat(o, 10)}
-                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold whitespace-nowrap shrink-0"
-                              >
-                                +10 Stok
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openEditObatModal(o)}
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold whitespace-nowrap shrink-0"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteObat(o)}
-                                title="Hapus obat"
-                                aria-label="Hapus obat"
-                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                            {canEdit ? (
+                              <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestockObat(o, 10)}
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold whitespace-nowrap shrink-0"
+                                >
+                                  +10 Stok
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditObatModal(o)}
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold whitespace-nowrap shrink-0"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteObat(o)}
+                                  title="Hapus obat"
+                                  aria-label="Hapus obat"
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="text-right text-[11px] text-slate-400">Hanya Lihat</div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -2641,14 +2690,16 @@ export default function KesehatanPage() {
               <strong>Mengadakan penyuluhan yang dibutuhkan bersama Poskestren</strong> (PHBS,
               kesehatan kulit, gizi &amp; pencegahan penyakit menular).
             </div>
-            <button
-              type="button"
-              onClick={openCreatePenyuluhanModal}
-              className="px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              Agenda Penyuluhan Baru
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openCreatePenyuluhanModal}
+                className="px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                Agenda Penyuluhan Baru
+              </button>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -2682,30 +2733,32 @@ export default function KesehatanPage() {
                       <span>Sasaran: {py.sasaran}</span>
                       <span>Peserta: {py.jumlah_peserta || 0} santri</span>
                     </div>
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleTogglePenyuluhanStatus(py)}
-                        className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-semibold"
-                      >
-                        {py.status === 'terlaksana' ? 'Set Terjadwal' : 'Tandai Terlaksana'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openEditPenyuluhanModal(py)}
-                        className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePenyuluhan(py)}
-                        title="Hapus penyuluhan"
-                        className="min-h-[40px] min-w-[40px] bg-slate-100 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePenyuluhanStatus(py)}
+                          className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-semibold"
+                        >
+                          {py.status === 'terlaksana' ? 'Set Terjadwal' : 'Tandai Terlaksana'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditPenyuluhanModal(py)}
+                          className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePenyuluhan(py)}
+                          title="Hapus penyuluhan"
+                          className="min-h-[40px] min-w-[40px] bg-slate-100 text-slate-500 hover:text-rose-600 rounded-xl flex items-center justify-center"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -2766,31 +2819,35 @@ export default function KesehatanPage() {
                           </span>
                         </td>
                         <td className="py-3 px-3.5">
-                          <div className="flex flex-nowrap items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleTogglePenyuluhanStatus(py)}
-                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold whitespace-nowrap shrink-0"
-                            >
-                              {py.status === 'terlaksana' ? 'Set Terjadwal' : 'Tandai Terlaksana'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditPenyuluhanModal(py)}
-                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold whitespace-nowrap shrink-0"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePenyuluhan(py)}
-                              title="Hapus penyuluhan"
-                              aria-label="Hapus penyuluhan"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
+                          {canEdit ? (
+                            <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePenyuluhanStatus(py)}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold whitespace-nowrap shrink-0"
+                              >
+                                {py.status === 'terlaksana' ? 'Set Terjadwal' : 'Tandai Terlaksana'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openEditPenyuluhanModal(py)}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold whitespace-nowrap shrink-0"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePenyuluhan(py)}
+                                title="Hapus penyuluhan"
+                                aria-label="Hapus penyuluhan"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-right text-[11px] text-slate-400">Hanya Lihat</div>
+                          )}
                         </td>
                       </tr>
                     ))
