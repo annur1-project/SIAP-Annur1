@@ -2916,10 +2916,10 @@ export default function KeamananPage() {
                   1–24 Poin: Pembinaan &middot; 25–49 Poin: SP 1 &middot; 50–99 Poin: SP 2 &middot; &ge; 100 Poin: SP 3
                 </p>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="grid grid-cols-3 sm:inline-flex gap-1.5 w-full sm:w-auto">
                 {(
                   [
-                    { id: 'berpoin', label: 'Santri Berpoin (>0)' },
+                    { id: 'berpoin', label: 'Berpoin (>0)' },
                     { id: 'ambang_sp', label: 'Ambang SP (≥25)' },
                     { id: 'semua', label: 'Semua Santri' },
                   ] as const
@@ -2928,7 +2928,7 @@ export default function KeamananPage() {
                     key={opt.id}
                     type="button"
                     onClick={() => setFilterSpScope(opt.id)}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap ${
+                    className={`min-h-[36px] px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold border transition-colors whitespace-nowrap truncate ${
                       filterSpScope === opt.id
                         ? 'bg-emerald-800 text-white border-emerald-800'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'

@@ -244,13 +244,13 @@ export default function LaporanDocument({
   return (
     <div
       id="pusat-laporan-dokumen"
-      className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 sm:p-8 md:p-10 print:border-0 print:rounded-none print:shadow-none print:p-0 text-slate-900 overflow-x-auto max-w-full"
+      className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 sm:p-8 md:p-10 print:border-0 print:rounded-none print:shadow-none print:p-0 text-slate-900 overflow-x-auto print:overflow-visible max-w-full print:max-w-none"
     >
       {/* ================================================================= */}
       {/* HALAMAN 1: SAMPUL RESMI (COVER)                                   */}
       {/* ================================================================= */}
       {showCoverAndApproval && (
-        <section className="print:min-h-[250mm] flex flex-col justify-between border border-slate-200 print:border-0 rounded-xl p-6 sm:p-8 print:p-12 bg-gradient-to-br from-white via-white to-emerald-50/40 print:bg-white mb-8 print:mb-0 print:break-after-page">
+        <section className="print:min-h-[235mm] flex flex-col justify-between border border-slate-200 print:border-0 rounded-xl p-6 sm:p-8 print:p-8 bg-gradient-to-br from-white via-white to-emerald-50/40 print:bg-white mb-8 print:mb-0 print:break-after-page">
           <div className="flex items-center justify-between border-b-2 border-emerald-700 pb-4">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-xl border border-emerald-200 bg-white flex items-center justify-center overflow-hidden shrink-0">
@@ -422,44 +422,107 @@ export default function LaporanDocument({
           />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="border border-slate-200 rounded-lg p-3.5">
-              <h4 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">
-                I. Dewan Harian
+              <h4 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1 uppercase tracking-wide">
+                I. DEWAN HARIAN
               </h4>
               {bundle.personalia.dewanHarian.length === 0 ? (
                 <p className="text-slate-500">Belum ada data Dewan Harian di modul Pengurus.</p>
               ) : (
-                <table className="w-full text-xs">
+                <table className="w-full text-xs border-collapse">
                   <tbody>
-                    {bundle.personalia.dewanHarian.map((d, i) => (
-                      <tr key={`${d.nama}-${i}`} className="border-b border-slate-100 last:border-0">
-                        <td className="py-1 font-medium text-slate-600 w-40">{d.jabatan}</td>
-                        <td className="py-1 font-semibold text-slate-900">: {d.nama}</td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const dewanBuckets: Array<{ label: string; names: string[] }> = [
+                        { label: 'A. Ketua', names: [] },
+                        { label: 'B. Wakil Ketua', names: [] },
+                        { label: 'C. Sekretaris', names: [] },
+                        { label: 'Wakil Sekretaris', names: [] },
+                        { label: 'D. Bendahara', names: [] },
+                        { label: 'Wakil Bendahara', names: [] },
+                      ];
+                      const extras: Array<{ label: string; names: string[] }> = [];
+
+                      for (const item of bundle.personalia.dewanHarian) {
+                        const low = item.jabatan.toLowerCase();
+                        let bucketIdx = -1;
+                        if (low.includes('wakil ketua')) bucketIdx = 1;
+                        else if (low.includes('ketua') || low.includes('kepala pondok')) bucketIdx = 0;
+                        else if (low.includes('wakil sekretaris')) bucketIdx = 3;
+                        else if (low.includes('sekretaris')) bucketIdx = 2;
+                        else if (low.includes('wakil bendahara')) bucketIdx = 5;
+                        else if (low.includes('bendahara')) bucketIdx = 4;
+
+                        if (bucketIdx >= 0) {
+                          if (!dewanBuckets[bucketIdx].names.includes(item.nama)) {
+                            dewanBuckets[bucketIdx].names.push(item.nama);
+                          }
+                        } else {
+                          let ex = extras.find((e) => e.label.toLowerCase() === low);
+                          if (!ex) {
+                            ex = { label: item.jabatan, names: [] };
+                            extras.push(ex);
+                          }
+                          if (!ex.names.includes(item.nama)) ex.names.push(item.nama);
+                        }
+                      }
+
+                      return [...dewanBuckets, ...extras].map((row, i) => (
+                        <tr key={`${row.label}-${i}`} className="border-b border-slate-100 last:border-0 align-top">
+                          <td className="py-1.5 font-semibold text-slate-700 w-36 whitespace-nowrap">
+                            {row.label}
+                          </td>
+                          <td className="py-1.5 w-3 text-slate-600">:</td>
+                          <td className="py-1.5 font-semibold text-slate-900">
+                            {row.names.length > 0 ? (
+                              row.names.length === 1 ? (
+                                row.names[0]
+                              ) : (
+                                <ul className="space-y-0.5">
+                                  {row.names.map((nm) => (
+                                    <li key={nm}>- {nm}</li>
+                                  ))}
+                                </ul>
+                              )
+                            ) : (
+                              <span className="text-slate-400 font-normal">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
                   </tbody>
                 </table>
               )}
             </div>
 
             <div className="border border-slate-200 rounded-lg p-3.5">
-              <h4 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">
-                II. Pleno / Koordinator Divisi
+              <h4 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1 uppercase tracking-wide">
+                II. PLENO
               </h4>
               {bundle.personalia.plenoDivisi.length === 0 ? (
                 <p className="text-slate-500">Belum ada penugasan divisi tercatat.</p>
               ) : (
-                <div className="space-y-1.5">
-                  {bundle.personalia.plenoDivisi.map((grp) => (
-                    <div key={grp.divisi} className="flex gap-2">
-                      <span className="font-semibold text-slate-700 w-36 shrink-0">
-                        {grp.divisi}
-                      </span>
-                      <span className="text-slate-800">
-                        : {grp.anggota.map((a) => a.nama).join(', ')}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <table className="w-full text-xs border-collapse">
+                  <tbody>
+                    {bundle.personalia.plenoDivisi.map((grp, idx) => {
+                      const letter = String.fromCharCode(65 + idx);
+                      return (
+                        <tr key={grp.divisi} className="border-b border-slate-100 last:border-0 align-top">
+                          <td className="py-1.5 font-semibold text-slate-700 w-36 whitespace-nowrap">
+                            {letter}. {grp.divisi}
+                          </td>
+                          <td className="py-1.5 w-3 text-slate-600">:</td>
+                          <td className="py-1.5 text-slate-900">
+                            <ul className="space-y-0.5 font-medium">
+                              {grp.anggota.map((a) => (
+                                <li key={`${grp.divisi}-${a.nama}`}>- {a.nama}</li>
+                              ))}
+                            </ul>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
@@ -1784,7 +1847,8 @@ export default function LaporanDocument({
           {scope === 'keuangan' ? (
             <div className="grid grid-cols-3 gap-4 text-center text-xs">
               <div>
-                <p className="text-slate-600">Mengetahui, Pengasuh</p>
+                <p className="text-slate-600">Mengetahui,</p>
+                <p className="text-slate-700 font-medium">Pengasuh</p>
                 <div className="min-h-[4.5cm] flex items-center justify-center my-1">
                   <div className="relative inline-flex items-center justify-center">
                     {bundle.pengaturan.stempel_url && (
@@ -1886,9 +1950,9 @@ export default function LaporanDocument({
                 </div>
               </div>
               <div className="text-center text-xs">
-                <p className="text-slate-600">
-                  Mengetahui, Pengasuh{' '}
-                  {bundle.pengaturan.nama_pesantren || 'Pondok Pesantren An-Nur 1 Bululawang'}
+                <p className="text-slate-600">Mengetahui,</p>
+                <p className="text-slate-700 font-medium">
+                  Pengasuh {bundle.pengaturan.nama_pesantren || 'Pondok Pesantren An-Nur 1 Bululawang'}
                 </p>
                 <div className="min-h-[4.5cm] flex items-center justify-center my-1">
                   <div className="relative inline-flex items-center justify-center">

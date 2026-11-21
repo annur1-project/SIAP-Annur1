@@ -85,24 +85,21 @@ export default function PusatLaporanPage() {
     };
   }, [loadData]);
 
-  const effectiveToday = todayStr || '2026-11-17';
-
-  const periodWindow = useMemo(
-    () =>
-      computePeriodWindow(mode, {
-        anchorDate: anchorDate || getNearestFridayIso(effectiveToday),
-        monthStr: monthStr || effectiveToday.slice(0, 7),
-        startDate: rangeStart || addDaysIso(effectiveToday, -6),
-        endDate: rangeEnd || effectiveToday,
-        todayStr: effectiveToday,
-      }),
-    [mode, anchorDate, monthStr, rangeStart, rangeEnd, effectiveToday]
-  );
+  const periodWindow = useMemo(() => {
+    if (!todayStr) return null;
+    return computePeriodWindow(mode, {
+      anchorDate: anchorDate || getNearestFridayIso(todayStr),
+      monthStr: monthStr || todayStr.slice(0, 7),
+      startDate: rangeStart || addDaysIso(todayStr, -6),
+      endDate: rangeEnd || todayStr,
+      todayStr,
+    });
+  }, [mode, anchorDate, monthStr, rangeStart, rangeEnd, todayStr]);
 
   const bundle = useMemo(() => {
-    if (!rawData) return null;
-    return buildAllDivisionReports(rawData, periodWindow, effectiveToday, { canViewBisyaroh });
-  }, [rawData, periodWindow, effectiveToday, canViewBisyaroh]);
+    if (!rawData || !periodWindow || !todayStr) return null;
+    return buildAllDivisionReports(rawData, periodWindow, todayStr, { canViewBisyaroh });
+  }, [rawData, periodWindow, todayStr, canViewBisyaroh]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -178,12 +175,12 @@ export default function PusatLaporanPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={handleRefresh}
             disabled={refreshing || loading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             Perbarui Data
@@ -193,7 +190,7 @@ export default function PusatLaporanPage() {
             type="button"
             onClick={handleDownloadExcel}
             disabled={!bundle}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
           >
             <FileSpreadsheet className="w-4 h-4" />
             Unduh Excel (.xlsx)
@@ -203,7 +200,7 @@ export default function PusatLaporanPage() {
             type="button"
             onClick={handlePrintPdf}
             disabled={!bundle}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+            className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 text-xs font-bold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
           >
             <Printer className="w-4 h-4" />
             Cetak / Simpan PDF
@@ -264,7 +261,10 @@ export default function PusatLaporanPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    setAnchorDate((prev) => addDaysIso(prev || effectiveToday, -7))
+                    setAnchorDate((prev) => {
+                      const base = prev || todayStr;
+                      return base ? addDaysIso(base, -7) : prev;
+                    })
                   }
                   aria-label="Pekan sebelumnya"
                   className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
@@ -286,7 +286,10 @@ export default function PusatLaporanPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    setAnchorDate((prev) => addDaysIso(prev || effectiveToday, 7))
+                    setAnchorDate((prev) => {
+                      const base = prev || todayStr;
+                      return base ? addDaysIso(base, 7) : prev;
+                    })
                   }
                   aria-label="Pekan berikutnya"
                   className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
@@ -295,7 +298,9 @@ export default function PusatLaporanPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAnchorDate(getNearestFridayIso(effectiveToday))}
+                  onClick={() => {
+                    if (todayStr) setAnchorDate(getNearestFridayIso(todayStr));
+                  }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   Pekan Jum&apos;at Ini
@@ -343,10 +348,14 @@ export default function PusatLaporanPage() {
               </div>
             )}
 
-            <p className="text-xs text-slate-500">
-              Rentang aktif: <strong className="text-slate-800">{periodWindow.label}</strong> ·{' '}
-              <span>{periodWindow.comparisonLabel}</span>
-            </p>
+            {periodWindow ? (
+              <p className="text-xs text-slate-500">
+                Rentang aktif: <strong className="text-slate-800">{periodWindow.label}</strong> ·{' '}
+                <span>{periodWindow.comparisonLabel}</span>
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">Menyiapkan rentang tanggal aktif...</p>
+            )}
           </div>
 
           {/* Kanan: Jenis Laporan (Gabungan vs Per Divisi) */}
@@ -545,7 +554,7 @@ export default function PusatLaporanPage() {
               selectedDivisions={selectedDivisions}
               showCoverAndApproval={showCoverAndApproval}
               showNotaLampiran={showNotaLampiran}
-              todayStr={effectiveToday}
+              todayStr={todayStr}
             />
           </div>
         </>

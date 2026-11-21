@@ -1,8 +1,7 @@
-const CACHE_NAME = 'e-annursatu-shell-v1';
+const CACHE_NAME = 'e-annursatu-shell-v2';
 const SHELL_ASSETS = [
-  '/',
-  '/login',
   '/manifest.webmanifest',
+  '/icon.svg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-192.png',
@@ -36,28 +35,21 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/_next/')) return;
 
-  // Network-first untuk halaman HTML agar data & auth selalu segar, fallback cache saat offline
+  // Network-first untuk navigasi agar SSR HTML & auth selalu cocok dengan bundle JS terbaru
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy)).catch(() => undefined);
-          }
-          return res;
-        })
-        .catch(async () => {
-          const cached = await caches.match(req);
-          return cached || caches.match('/') || Response.error();
-        })
+      fetch(req).catch(async () => {
+        const cached = await caches.match(req);
+        return cached || Response.error();
+      })
     );
     return;
   }
 
-  // Cache-first untuk ikon & aset statis lokal
-  if (url.pathname.startsWith('/icons/') || url.pathname.startsWith('/_next/static/')) {
+  // Cache-first hanya untuk ikon statis lokal
+  if (url.pathname.startsWith('/icons/')) {
     event.respondWith(
       caches.match(req).then((cached) => {
         if (cached) return cached;

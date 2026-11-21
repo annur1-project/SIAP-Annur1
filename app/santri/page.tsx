@@ -13,6 +13,7 @@ import {
   DEFAULT_KAMAR_MASTER,
   DEFAULT_SKEMA_PENDAFTARAN,
   generateNextNisForYear,
+  getDynamicTodayIsoWib,
   getTahunAjaranForDate,
   hitungRincianPendaftaran,
   mergeAturanOperasional,
@@ -247,11 +248,9 @@ export default function DataSantriPage() {
   const [editFormData, setEditFormData] = useState<Partial<SantriRow>>({});
   const [waliSamaAyah, setWaliSamaAyah] = useState(true);
 
-  const nextNisPreview = generateNextNisForYear(
-    formData.tgl_masuk || todayStr || '2027-07-01',
-    santriList,
-    1
-  );
+  const nextNisPreview = todayStr
+    ? generateNextNisForYear(formData.tgl_masuk || todayStr, santriList, 1)
+    : '...';
 
   const maskRowIfRestricted = (row: SantriRow): SantriRow => {
     if (canViewSensitiveSantri) return row;
@@ -318,7 +317,7 @@ export default function DataSantriPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const currentDate = new Date().toISOString().split('T')[0];
+      const currentDate = getDynamicTodayIsoWib();
       setTodayStr(currentDate);
       setFormData((prev) => ({ ...prev, tgl_masuk: prev.tgl_masuk || currentDate }));
       void fetchSantri();
@@ -699,8 +698,9 @@ export default function DataSantriPage() {
       'wajib', 'tidak wajib', 'tidak wajib', 'wajib', 'wajib', 'wajib', 'wajib', 'wajib'
     ];
 
+    const contohTahun = (todayStr || getDynamicTodayIsoWib()).slice(0, 4);
     const contoh = [
-      '', '2026-07-15', 'Ahmad Fauzan', 'A1', 'Reguler',
+      '', `${contohTahun}-07-15`, 'Ahmad Fauzan', 'A1', 'Reguler',
       '0091234567', '3507123456780001', '3507123456780000', 'Malang', '2012-05-10', 'L', 'Membaca', 'Guru',
       'Hidup', 'H. Abdul Karim', '', 'S1', 'Wiraswasta', '3jt - 5jt', '081234567890',
       'Hidup', 'Hj. Siti Aminah', '', 'SMA', 'Ibu Rumah Tangga', '-', '081234567891',
@@ -734,7 +734,7 @@ export default function DataSantriPage() {
           rows,
           existingSantriList: santriList,
           skemaPendaftaran,
-          todayStr: todayStr || '2027-07-01',
+          todayStr: todayStr || getDynamicTodayIsoWib(),
         });
 
         if (plan.total === 0) {
@@ -1335,14 +1335,14 @@ export default function DataSantriPage() {
         </div>
       )}
 
-      {/* BANNER MODE TRANSPARANSI */}
+      {/* BANNER VIEW ONLY */}
       <div className="print:hidden">
         <TransparencyBanner
           moduleLabel="Data Induk Santri"
           isReadOnly={!canEditSantri}
           extraNote={
             !canViewSensitiveSantri
-              ? 'NIK dan Nomor KK santri/orang tua disamarkan pada Mode Transparansi.'
+              ? 'NIK dan Nomor KK santri/orang tua disamarkan (View Only).'
               : undefined
           }
         />
@@ -1361,31 +1361,34 @@ export default function DataSantriPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
             <button
               onClick={handleDownloadTemplate}
-              className="min-h-[40px] px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              className="min-h-[40px] px-2.5 sm:px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-[11px] sm:text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap min-w-0"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700 shrink-0" />
-              Template Excel
+              <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-700 shrink-0" />
+              <span className="truncate">Template</span>
+              <span className="hidden sm:inline">Excel</span>
             </button>
 
             {canEditSantri && (
               <button
                 onClick={() => setShowModalImport(true)}
-                className="min-h-[40px] px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+                className="min-h-[40px] px-2.5 sm:px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-[11px] sm:text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap min-w-0"
               >
-                <Upload className="w-4 h-4 shrink-0" />
-                Import Excel
+                <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Import</span>
+                <span className="hidden sm:inline">Excel</span>
               </button>
             )}
 
             <button
               onClick={handleExportExcel}
-              className="min-h-[40px] px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+              className="min-h-[40px] px-2.5 sm:px-3 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-[11px] sm:text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap min-w-0"
             >
-              <Download className="w-4 h-4 shrink-0" />
-              Export Excel
+              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span className="truncate">Export</span>
+              <span className="hidden sm:inline">Excel</span>
             </button>
 
             {canEditSantri && (
@@ -1394,7 +1397,7 @@ export default function DataSantriPage() {
                   setWilayahQuery('');
                   setShowModalForm(true);
                 }}
-                className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
+                className="col-span-3 sm:col-span-1 w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 text-white hover:bg-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap"
               >
                 <Plus className="w-4 h-4 shrink-0" />
                 Pendaftaran Santri Baru

@@ -711,7 +711,7 @@ export default function LaundryPage() {
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-fit">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('harian')}
@@ -757,7 +757,7 @@ export default function LaundryPage() {
           <div className="space-y-4">
             {/* PEMILIH TANGGAL & AKSI CEPAT */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -766,7 +766,7 @@ export default function LaundryPage() {
                     setOverrideFridayInput(false);
                   }}
                   aria-label="Hari sebelumnya"
-                  className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center"
+                  className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -777,7 +777,7 @@ export default function LaundryPage() {
                     setSelectedDate(e.target.value);
                     setOverrideFridayInput(false);
                   }}
-                  className="min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono tabular-nums border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="flex-1 min-w-[140px] sm:flex-none min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono tabular-nums border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <button
                   type="button"
@@ -787,7 +787,7 @@ export default function LaundryPage() {
                     setOverrideFridayInput(false);
                   }}
                   aria-label="Hari berikutnya"
-                  className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center"
+                  className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -803,7 +803,7 @@ export default function LaundryPage() {
                     Hari Ini
                   </button>
                 )}
-                <div className="text-xs sm:text-sm font-bold text-slate-800 pl-1">
+                <div className="w-full sm:w-auto text-xs sm:text-sm font-bold text-slate-800 sm:pl-1">
                   {selectedDate ? formatHariTanggalIndo(selectedDate) : '-'}
                   <span className="font-normal text-slate-500">
                     {' '}
@@ -884,7 +884,7 @@ export default function LaundryPage() {
                         <p className="text-xs text-slate-500 mt-0.5">
                           {canEdit
                             ? 'Masukkan jumlah potong (pcs) per kamar lalu klik Catat Masuk, atau ubah status ke Selesai jika sudah beres.'
-                            : 'Rekap setoran laundry kamar sesuai jadwal giliran hari ini (Mode Transparansi).'}
+                            : 'Rekap setoran laundry kamar sesuai jadwal giliran hari ini (View Only).'}
                         </p>
                       </div>
                       {canEdit && (
@@ -1388,12 +1388,12 @@ export default function LaundryPage() {
         {activeTab === 'laporan' && (
           <div className="space-y-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <input
                   type="month"
                   value={reportMonth}
                   onChange={(e) => setReportMonth(e.target.value)}
-                  className="min-h-[40px] px-3 py-1.5 text-xs font-mono tabular-nums border border-slate-200 rounded-xl bg-white"
+                  className="w-full sm:w-auto min-w-0 min-h-[40px] px-3 py-1.5 text-xs font-mono tabular-nums border border-slate-200 rounded-xl bg-white"
                 />
                 {reportMonth && (
                   <button

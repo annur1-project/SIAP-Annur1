@@ -22,6 +22,8 @@ import { supabase } from '@/lib/supabase';
 import {
   DEFAULT_PROFIL_PONDOK_PSB,
   DEFAULT_SKEMA_PENDAFTARAN,
+  getDynamicTahunPsbInfo,
+  getDynamicTodayIsoWib,
   mergeAturanOperasional,
   readExtendedLocal,
   type ProfilPondokPsbConfig,
@@ -77,7 +79,11 @@ export default function DaftarPublicPage() {
 
   // Form Steps Data
   const [paket, setPaket] = useState<PsbPaket>('reguler');
-  const [todayIso, setTodayIso] = useState('2026-11-19');
+  const [todayIso, setTodayIso] = useState('');
+  const [dynamicPsbInfo, setDynamicPsbInfo] = useState<{
+    tahunPsb: number;
+    tahunAjaranPsb: string;
+  }>({ tahunPsb: 0, tahunAjaranPsb: '' });
   const [setujuKetentuan, setSetujuKetentuan] = useState(false);
 
   const [namaLengkap, setNamaLengkap] = useState('');
@@ -132,12 +138,8 @@ export default function DaftarPublicPage() {
         setProfilPondok(mergedAturan.profil_pondok);
       }
 
-      const d = new Date();
-      setTodayIso(
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-          d.getDate()
-        ).padStart(2, '0')}`
-      );
+      setTodayIso(getDynamicTodayIsoWib());
+      setDynamicPsbInfo(getDynamicTahunPsbInfo());
 
       const rekNo = String(row.rekening_nomor || localExt?.rekening_nomor || '').trim();
       setPengaturan({
@@ -169,15 +171,17 @@ export default function DaftarPublicPage() {
     };
   }, []);
 
-  const tahunPsbAktif = Number(skema.tahun_psb || 2027);
-  const tahunAjaranPsbAktif = String(skema.tahun_ajaran_psb || '2027/2028');
+  const tahunPsbAktif = Number(skema.tahun_psb || dynamicPsbInfo.tahunPsb || 0);
+  const tahunAjaranPsbAktif = String(
+    skema.tahun_ajaran_psb || dynamicPsbInfo.tahunAjaranPsb || '...'
+  );
   const promoSisaTampil = useMemo(
     () =>
       computePromoDisplayRemaining({
         psbRecordsCount: existingPsb.length,
         kuotaTotal: Number(skema.kuota_gratis_uang_pangkal || 100),
         realQuotaUsed: quotaUsed,
-        promoDisplayStart: Number(skema.kuota_promo_tampil_awal || 28),
+        promoDisplayStart: Number(skema.kuota_promo_tampil_awal || 25),
       }),
     [existingPsb.length, skema.kuota_gratis_uang_pangkal, skema.kuota_promo_tampil_awal, quotaUsed]
   );

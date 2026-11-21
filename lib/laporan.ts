@@ -121,6 +121,8 @@ export interface SantriRaw {
 export interface PengurusRaw {
   id: string;
   nama_lengkap: string;
+  username?: string | null;
+  role?: string | null;
   no_wa?: string | null;
   kamar_tugas?: string | null;
   nominal_bisyaroh?: number;
@@ -695,7 +697,7 @@ export function computePeriodWindow(
     todayStr?: string;
   }
 ): PeriodWindow {
-  const today = opts.todayStr || '2026-11-17';
+  const today = opts.todayStr || getLocalTodayStr();
 
   if (mode === 'mingguan') {
     const endDate = opts.anchorDate || today;
@@ -799,9 +801,18 @@ function getKamarSortWeight(kamar: string): number {
   return 500;
 }
 
+function isSuperAdminEntry(p: PengurusRaw): boolean {
+  const uname = String(p.username || '').trim().toLowerCase();
+  const role = String(p.role || '').trim().toLowerCase();
+  const nama = String(p.nama_lengkap || '').trim().toLowerCase();
+  return uname === 'admin.utama' || role === 'super_admin' || nama === 'admin utama pondok';
+}
+
 export function buildPersonaliaSummary(pengurusList: PengurusRaw[]): PersonaliaGroup {
-  const aktif = pengurusList.filter((p) => (p.status || 'aktif') === 'aktif');
-  const dewanKeywords = ['ketua', 'wakil ketua', 'sekretaris', 'bendahara'];
+  const aktif = pengurusList.filter(
+    (p) => (p.status || 'aktif') === 'aktif' && !isSuperAdminEntry(p)
+  );
+  const dewanKeywords = ['ketua', 'wakil ketua', 'kepala pondok', 'sekretaris', 'bendahara'];
 
   const dewanHarian: PersonaliaGroup['dewanHarian'] = [];
   const divisiMap = new Map<string, Array<{ nama: string; jabatan: string }>>();
@@ -827,16 +838,44 @@ export function buildPersonaliaSummary(pengurusList: PengurusRaw[]): PersonaliaG
         });
       } else {
         if (!divisiMap.has(divisi)) divisiMap.set(divisi, []);
-        divisiMap.get(divisi)!.push({
-          nama: p.nama_lengkap,
-          jabatan,
-        });
+        const list = divisiMap.get(divisi)!;
+        if (!list.some((item) => item.nama === p.nama_lengkap)) {
+          list.push({
+            nama: p.nama_lengkap,
+            jabatan,
+          });
+        }
       }
     }
   }
 
+  const getDewanOrder = (jabatan: string): number => {
+    const low = jabatan.toLowerCase();
+    if (low.includes('wakil ketua')) return 2;
+    if (low.includes('ketua') || low.includes('kepala pondok')) return 1;
+    if (low.includes('wakil sekretaris')) return 4;
+    if (low.includes('sekretaris')) return 3;
+    if (low.includes('wakil bendahara')) return 6;
+    if (low.includes('bendahara')) return 5;
+    return 99;
+  };
+
+  dewanHarian.sort((a, b) => getDewanOrder(a.jabatan) - getDewanOrder(b.jabatan));
+
+  const plenoPriority = ['kegiatan', 'keamanan', 'kebersihan', 'kesehatan', 'poskestren', 'ibadah', 'jamaah', 'sarpras', 'dapur', 'laundry'];
+  const getPlenoOrder = (divisi: string): number => {
+    const low = divisi.toLowerCase();
+    const idx = plenoPriority.findIndex((kw) => low.includes(kw));
+    return idx >= 0 ? idx : 99;
+  };
+
   const plenoDivisi = Array.from(divisiMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], 'id'))
+    .sort((a, b) => {
+      const oa = getPlenoOrder(a[0]);
+      const ob = getPlenoOrder(b[0]);
+      if (oa !== ob) return oa - ob;
+      return a[0].localeCompare(b[0], 'id');
+    })
     .map(([divisi, anggota]) => ({ divisi, anggota }));
 
   return { dewanHarian, plenoDivisi };
@@ -886,7 +925,9 @@ export function buildAdministrasiSummary(
     })
     .map(([kamar, jumlah]) => ({ kamar, jumlah }));
 
-  const totalPengurusAktif = pengurusList.filter((p) => (p.status || 'aktif') === 'aktif').length;
+  const totalPengurusAktif = pengurusList.filter(
+    (p) => (p.status || 'aktif') === 'aktif' && !isSuperAdminEntry(p)
+  ).length;
   const santriBoyongAll = santriList
     .filter((s) => s.status === 'boyong' || s.status === 'pindah_al_burhany')
     .map((s) => ({
@@ -2049,6 +2090,7 @@ export async function fetchAllLaporanRawData(options?: {
     santriFallbackRes,
     pengurusViewRes,
     pengurusFallbackRes,
+    jabatanAllRes,
     transaksiRes,
     pembayaranRes,
     masterRes,
@@ -2076,6 +2118,10 @@ export async function fetchAllLaporanRawData(options?: {
       ? supabase.from('v_pengurus_lengkap').select('*').order('nama_lengkap', { ascending: true })
       : Promise.resolve({ data: null, error: null }),
     supabase.from('pengurus').select('*').order('nama_lengkap', { ascending: true }),
+    supabase
+      .from('pengurus_jabatan')
+      .select('pengurus_id, divisi, nama_jabatan, is_utama, urutan_struktur')
+      .order('urutan_struktur', { ascending: true }),
     supabase.from('keuangan_transaksi').select('*').order('tgl_transaksi', { ascending: true }),
     supabase.from('pembayaran_santri_detail').select('*'),
     supabase.from('master_pembayaran').select('*').order('urutan', { ascending: true }),
@@ -2128,9 +2174,34 @@ export async function fetchAllLaporanRawData(options?: {
       ? (pengurusFallbackRes.data as PengurusRaw[])
       : [];
 
-  const pengurusRows = canViewBisyaroh
-    ? rawPengurusRows
-    : rawPengurusRows.map((p) => ({ ...p, nominal_bisyaroh: 0 }));
+  const jabatanByPengurusId = new Map<
+    string,
+    Array<{ divisi?: string; nama_jabatan?: string; is_utama?: boolean }>
+  >();
+  if (!jabatanAllRes.error && Array.isArray(jabatanAllRes.data)) {
+    for (const j of jabatanAllRes.data as Array<{
+      pengurus_id: string;
+      divisi?: string;
+      nama_jabatan?: string;
+      is_utama?: boolean;
+    }>) {
+      if (!jabatanByPengurusId.has(j.pengurus_id)) jabatanByPengurusId.set(j.pengurus_id, []);
+      jabatanByPengurusId.get(j.pengurus_id)!.push({
+        divisi: j.divisi,
+        nama_jabatan: j.nama_jabatan,
+        is_utama: j.is_utama,
+      });
+    }
+  }
+
+  const pengurusRows = rawPengurusRows.map((p) => ({
+    ...p,
+    nominal_bisyaroh: canViewBisyaroh ? p.nominal_bisyaroh : 0,
+    jabatan_list:
+      Array.isArray(p.jabatan_list) && p.jabatan_list.length > 0
+        ? p.jabatan_list
+        : jabatanByPengurusId.get(p.id) || [],
+  }));
 
   const rawPengaturan: PengaturanAplikasiRaw = (pengaturanRes.data as PengaturanAplikasiRaw) || {
     nama_pesantren: 'Pondok Pesantren An-Nur 1 Bululawang',

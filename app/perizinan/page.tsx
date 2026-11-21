@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth, TransparencyBanner } from '@/lib/auth';
+import { getDynamicTahunAjaranAktif, isMissingColumnError } from '@/lib/pengaturan';
 import * as XLSX from 'xlsx';
 import {
   FileText,
@@ -88,6 +89,7 @@ interface IzinRecordRaw {
   alasan: string | null;
   status: StatusIzinDb;
   petugas_id: string | null;
+  petugas_nama?: string | null;
   created_at?: string;
 }
 
@@ -313,6 +315,7 @@ export default function PerizinanPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('daftar');
   const [todayStr, setTodayStr] = useState<string>('');
   const [currentHm, setCurrentHm] = useState<string>('');
+  const [tahunAjaranLabel, setTahunAjaranLabel] = useState<string>('');
 
   const [santriList, setSantriList] = useState<SantriRow[]>([]);
   const [pengurusList, setPengurusList] = useState<PengurusRow[]>([]);
@@ -391,6 +394,7 @@ export default function PerizinanPage() {
       const hm = getLocalTimeHm();
       setTodayStr(t);
       setCurrentHm(hm);
+      setTahunAjaranLabel(getDynamicTahunAjaranAktif());
       setRekapStartDate((prev) => prev || `${t.slice(0, 7)}-01`);
       setRekapEndDate((prev) => prev || t);
     };
@@ -494,8 +498,8 @@ export default function PerizinanPage() {
               setFormBatasJam('17:00');
               setFormPenjemput(wali.nama);
               setFormWaPenjemput(wali.wa);
-              setFormPetugasId('');
-              setFormPetugasText('');
+              setFormPetugasId(pengurus?.id || '');
+              setFormPetugasText(pengurus?.nama_lengkap || '');
               setPetugasDropdownOpen(false);
 
               if (kategoriParam === 'sakit') {
@@ -536,7 +540,7 @@ export default function PerizinanPage() {
       return {
         ...row,
         santri: santriMap.get(row.santri_id),
-        petugasNama: petugas?.nama_lengkap || meta.pt || 'Keamanan Pondok',
+        petugasNama: row.petugas_nama || petugas?.nama_lengkap || meta.pt || 'Keamanan Pondok',
         meta,
         alasanTeks,
         isOverdueNow,
@@ -762,6 +766,14 @@ export default function PerizinanPage() {
       );
       return;
     }
+    if (!formPetugasText.trim()) {
+      showToast(
+        'error',
+        'Pemberi Izin Wajib Diisi',
+        'Pilih nama pengurus aktif atau ketik nama petugas pemberi izin secara manual.'
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -791,23 +803,58 @@ export default function PerizinanPage() {
         ns: nomorSurat,
       };
 
-      const { data: inserted, error } = await supabase
+      const basePayload: Record<string, unknown> = {
+        santri_id: formSantriId,
+        jenis_izin: formJenis,
+        infaq_nominal: infaqNominal,
+        tgl_pulang: formTglPulang,
+        tgl_rencana_kembali: formTglRencanaKembali,
+        tgl_aktual_kembali: null,
+        alasan: encodeIzinAlasan(meta, formAlasanDetail),
+        status: 'disetujui',
+        petugas_id: selectedPetugas?.id || null,
+        petugas_nama: namaPetugasFinal,
+      };
+
+      let insertRes = await supabase
         .from('izin_pulang')
-        .insert({
-          santri_id: formSantriId,
-          jenis_izin: formJenis,
-          infaq_nominal: infaqNominal,
-          tgl_pulang: formTglPulang,
-          tgl_rencana_kembali: formTglRencanaKembali,
-          tgl_aktual_kembali: null,
-          alasan: encodeIzinAlasan(meta, formAlasanDetail),
-          status: 'disetujui',
-          petugas_id: selectedPetugas?.id || null,
-        })
+        .insert(basePayload)
         .select()
         .single();
 
-      if (error) throw error;
+      if (insertRes.error && isMissingColumnError(insertRes.error)) {
+        const withoutNama = { ...basePayload };
+        delete withoutNama.petugas_nama;
+        insertRes = await supabase
+          .from('izin_pulang')
+          .insert(withoutNama)
+          .select()
+          .single();
+      }
+
+      if (
+        insertRes.error &&
+        (String(insertRes.error.code || '') === '23503' ||
+          String(insertRes.error.message || '').toLowerCase().includes('petugas_id'))
+      ) {
+        const safeNoFk: Record<string, unknown> = { ...basePayload, petugas_id: null };
+        insertRes = await supabase
+          .from('izin_pulang')
+          .insert(safeNoFk)
+          .select()
+          .single();
+        if (insertRes.error && isMissingColumnError(insertRes.error)) {
+          delete safeNoFk.petugas_nama;
+          insertRes = await supabase
+            .from('izin_pulang')
+            .insert(safeNoFk)
+            .select()
+            .single();
+        }
+      }
+
+      if (insertRes.error) throw insertRes.error;
+      const inserted = insertRes.data;
 
       const refreshed = await fetchAllData();
       setSantriList(refreshed.santri);
@@ -822,7 +869,11 @@ export default function PerizinanPage() {
         setPrintTarget({
           ...createdRow,
           santri: santriObj,
-          petugasNama: selectedPetugas?.nama_lengkap || parsed.meta.pt || 'Keamanan Pondok',
+          petugasNama:
+            createdRow.petugas_nama ||
+            selectedPetugas?.nama_lengkap ||
+            parsed.meta.pt ||
+            namaPetugasFinal,
           meta: parsed.meta,
           alasanTeks: parsed.alasanTeks,
           isOverdueNow: false,
@@ -1359,7 +1410,7 @@ export default function PerizinanPage() {
               Perizinan Pulang Santri
             </h1>
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
-              <span>Pedoman Pengurus 2026/2027</span>
+              <span>Pedoman Pengurus {tahunAjaranLabel || 'Aktif'}</span>
               <span aria-hidden="true">&middot;</span>
               <span>Tidak Menginap Rp 5.000 (Default 17:00 WIB)</span>
               <span aria-hidden="true">&middot;</span>
@@ -1399,30 +1450,30 @@ export default function PerizinanPage() {
         </div>
 
         {/* BILAH TAB */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-full sm:w-fit overflow-x-auto">
+        <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-full sm:w-fit">
           <button
             type="button"
             onClick={() => setActiveTab('daftar')}
-            className={`px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
+            className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors ${
               activeTab === 'daftar'
                 ? 'bg-emerald-800 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            1. Daftar &amp; Kontrol ({kpiStats.sedangPulang})
+            <UserCheck className="w-4 h-4 shrink-0" />
+            <span className="truncate">1. Daftar &amp; Kontrol ({kpiStats.sedangPulang})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('rekap')}
-            className={`px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
+            className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors ${
               activeTab === 'rekap'
                 ? 'bg-emerald-800 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
-            <Calendar className="w-4 h-4" />
-            2. Rekap Infaq &amp; Denda
+            <Calendar className="w-4 h-4 shrink-0" />
+            <span className="truncate">2. Rekap Infaq &amp; Denda</span>
           </button>
         </div>
       </div>
@@ -2013,57 +2064,73 @@ export default function PerizinanPage() {
       {/* TAB 2: REKAP INFAQ, DENDA & RIWAYAT */}
       {activeTab === 'rekap' && (
         <div className="space-y-4 print:hidden">
-          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-slate-600">Periode Tanggal Pulang:</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={rekapStartDate}
-                  onChange={(e) => setRekapStartDate(e.target.value)}
-                  className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                />
-                <span className="text-slate-400">s/d</span>
-                <input
-                  type="date"
-                  value={rekapEndDate}
-                  onChange={(e) => setRekapEndDate(e.target.value)}
-                  className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                />
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3.5">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+              <div>
+                <span className="text-xs font-bold text-slate-800 block">
+                  Periode Tanggal Pulang
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Saring catatan infaq &amp; denda berdasarkan tanggal kepulangan santri
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block mb-1">
+                    Dari Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={rekapStartDate}
+                    onChange={(e) => setRekapStartDate(e.target.value)}
+                    className="w-full min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block mb-1">
+                    Sampai Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={rekapEndDate}
+                    onChange={(e) => setRekapEndDate(e.target.value)}
+                    className="w-full min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 tabular-nums">
-              <span>
-                Total Izin: <strong className="text-slate-900">{rekapSummary.totalIzin}</strong>
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>
-                Tidak Menginap:{' '}
-                <strong className="text-slate-900">{rekapSummary.tidakMenginapCount}</strong>
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>
-                Menginap: <strong className="text-slate-900">{rekapSummary.menginapCount}</strong>
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>
-                Infaq: <strong className="text-emerald-800">{formatRupiah(rekapSummary.infaqTotal)}</strong>
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>
-                Denda Lunas:{' '}
-                <strong className="text-emerald-800">{formatRupiah(rekapSummary.dendaLunas)}</strong>
-              </span>
-              {rekapSummary.dendaBelum > 0 && (
-                <>
-                  <span aria-hidden="true">&middot;</span>
-                  <span>
-                    Denda Belum Bayar:{' '}
-                    <strong className="text-rose-700">{formatRupiah(rekapSummary.dendaBelum)}</strong>
-                  </span>
-                </>
-              )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs tabular-nums">
+              <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+                <span className="text-[11px] text-slate-500 block">Total Izin</span>
+                <strong className="text-sm font-extrabold text-slate-900">
+                  {rekapSummary.totalIzin} Surat
+                </strong>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+                <span className="text-[11px] text-slate-500 block">Rincian Jenis</span>
+                <strong className="text-xs font-bold text-slate-800">
+                  {rekapSummary.tidakMenginapCount} Harian &middot; {rekapSummary.menginapCount} Menginap
+                </strong>
+              </div>
+              <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2">
+                <span className="text-[11px] text-emerald-800 block">Total Infaq</span>
+                <strong className="text-sm font-extrabold text-emerald-900">
+                  {formatRupiah(rekapSummary.infaqTotal)}
+                </strong>
+              </div>
+              <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2">
+                <span className="text-[11px] text-emerald-800 block">Denda Lunas</span>
+                <strong className="text-sm font-extrabold text-emerald-900">
+                  {formatRupiah(rekapSummary.dendaLunas)}
+                </strong>
+              </div>
+              <div className="col-span-2 sm:col-span-1 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2">
+                <span className="text-[11px] text-rose-800 block">Denda Belum Bayar</span>
+                <strong className="text-sm font-extrabold text-rose-700">
+                  {formatRupiah(rekapSummary.dendaBelum)}
+                </strong>
+              </div>
             </div>
           </div>
 
@@ -2212,7 +2279,7 @@ export default function PerizinanPage() {
               <div>
                 <h2 className="text-base font-bold text-slate-900">Buat Surat Izin Pulang Baru</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Mengacu Tata Tertib Perizinan Pulang Pondok Pesantren An-Nur 1 (2026/2027)
+                  Mengacu Tata Tertib Perizinan Pulang Pondok Pesantren An-Nur 1 ({tahunAjaranLabel || 'Aktif'})
                 </p>
               </div>
               <button
@@ -2459,13 +2526,14 @@ export default function PerizinanPage() {
 
                   <div className="relative">
                     <label className="font-bold text-slate-700 block mb-1">
-                      Pemberi Izin (Pengurus / Keamanan)
+                      Pemberi Izin (Pengurus / Keamanan) <span className="text-rose-600">*</span>
                     </label>
                     <div className="relative">
                       <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
-                        placeholder="Ketik nama pengurus pemberi izin..."
+                        required
+                        placeholder="Pilih pengurus aktif atau ketik manual nama petugas..."
                         value={formPetugasText}
                         onFocus={() => setPetugasDropdownOpen(true)}
                         onBlur={() => setTimeout(() => setPetugasDropdownOpen(false), 160)}

@@ -5,17 +5,25 @@ export const E_ANNURSATU_UPGRADE_SQL = `-- =====================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 1. Penyesuaian Tabel Pengurus (1 Pengurus = 1 Akun Pribadi)
+-- 1. Penyesuaian Tabel Pengurus (1 Pengurus = 1 Akun Pribadi + Hak Akses Centang Modul)
 ALTER TABLE public.pengurus
   ADD COLUMN IF NOT EXISTS auth_user_id UUID UNIQUE,
   ADD COLUMN IF NOT EXISTS username TEXT UNIQUE,
   ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT true,
-  ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'pengurus',
+  ADD COLUMN IF NOT EXISTS allowed_modules JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_pengurus_auth_user_id ON public.pengurus (auth_user_id);
 CREATE INDEX IF NOT EXISTS idx_pengurus_username ON public.pengurus (lower(username));
+CREATE INDEX IF NOT EXISTS idx_pengurus_role ON public.pengurus (lower(role));
 
--- 2. Fungsi Helper Otorisasi Multi-Jabatan & Privasi
+UPDATE public.pengurus
+SET role = 'super_admin'
+WHERE lower(coalesce(username, '')) = 'admin.utama'
+  AND lower(coalesce(role, '')) <> 'super_admin';
+
+-- 2. Fungsi Helper Otorisasi Multi-Jabatan, Super Admin & Privasi
 CREATE OR REPLACE FUNCTION public.current_pengurus_id()
 RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT p.id FROM public.pengurus p
@@ -28,9 +36,19 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
   SELECT public.current_pengurus_id() IS NOT NULL;
 $$;
 
-CREATE OR REPLACE FUNCTION public.has_jabatan_keywords(keywords TEXT[])
+CREATE OR REPLACE FUNCTION public.is_super_admin()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT EXISTS (
+    SELECT 1 FROM public.pengurus p
+    WHERE p.auth_user_id = auth.uid()
+      AND lower(coalesce(p.status, 'aktif')) = 'aktif'
+      AND (lower(coalesce(p.role, '')) = 'super_admin' OR lower(coalesce(p.username, '')) = 'admin.utama')
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_jabatan_keywords(keywords TEXT[])
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.is_super_admin() OR EXISTS (
     SELECT 1 FROM public.pengurus_jabatan pj
     WHERE pj.pengurus_id = public.current_pengurus_id()
       AND EXISTS (
@@ -41,19 +59,32 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
   );
 $$;
 
+CREATE OR REPLACE FUNCTION public.has_module_access(module_key TEXT, keywords TEXT[] DEFAULT ARRAY[]::TEXT[])
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.is_super_admin()
+    OR EXISTS (
+      SELECT 1 FROM public.pengurus p
+      WHERE p.id = public.current_pengurus_id()
+        AND p.allowed_modules IS NOT NULL
+        AND jsonb_typeof(p.allowed_modules) = 'array'
+        AND p.allowed_modules ? module_key
+    )
+    OR (cardinality(keywords) > 0 AND public.has_jabatan_keywords(keywords));
+$$;
+
 CREATE OR REPLACE FUNCTION public.is_pimpinan_atau_bendahara()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT public.has_jabatan_keywords(ARRAY['pengasuh','dzurriyah','direktur pendidikan','kepala pondok','bendahara']);
+  SELECT public.is_super_admin() OR public.has_module_access('bisyaroh', ARRAY['pengasuh','dzurriyah','direktur pendidikan','kepala pondok','bendahara']);
 $$;
 
 CREATE OR REPLACE FUNCTION public.is_admin_atau_sekretaris()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT public.has_jabatan_keywords(ARRAY['pengasuh','dzurriyah','kepala pondok','sekretaris','operator emis']);
+  SELECT public.is_super_admin() OR public.has_module_access('pengurus', ARRAY['pengasuh','dzurriyah','kepala pondok','sekretaris','operator emis']);
 $$;
 
 CREATE OR REPLACE FUNCTION public.is_sekretaris_emis_atau_pimpinan()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT public.has_jabatan_keywords(ARRAY['pengasuh','dzurriyah','direktur pendidikan','kepala pondok','sekretaris','operator emis']);
+  SELECT public.is_super_admin() OR public.has_module_access('santri', ARRAY['pengasuh','dzurriyah','direktur pendidikan','kepala pondok','sekretaris','operator emis']);
 $$;
 
 CREATE OR REPLACE FUNCTION public.mask_identity_number(val TEXT)
@@ -70,7 +101,7 @@ $$;
 CREATE OR REPLACE VIEW public.v_pengurus_aman WITH (security_invoker = false) AS
 SELECT p.id, p.nama_lengkap, p.no_wa, p.alamat, p.foto_url, p.ttd_url,
   CASE WHEN public.is_pimpinan_atau_bendahara() THEN p.nominal_bisyaroh ELSE NULL END AS nominal_bisyaroh,
-  p.status, p.masa_khidmat, p.catatan, p.username, p.auth_user_id, p.must_change_password, p.last_login_at, p.created_at
+  p.status, p.masa_khidmat, p.catatan, p.username, p.role, p.allowed_modules, p.auth_user_id, p.must_change_password, p.last_login_at, p.created_at
 FROM public.pengurus p WHERE public.is_active_pengurus();
 
 CREATE OR REPLACE FUNCTION public.get_pengurus_bisyaroh_map()
@@ -101,7 +132,11 @@ GRANT SELECT ON public.v_pengurus_aman TO authenticated;
 GRANT SELECT ON public.v_santri_aman TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_pengurus_bisyaroh_map() TO authenticated;
 
--- 4. Modul Kebersihan
+-- 4. Penyesuaian Perizinan, Keuangan & Kebersihan
+ALTER TABLE IF EXISTS public.izin_pulang ADD COLUMN IF NOT EXISTS petugas_nama TEXT DEFAULT '';
+ALTER TABLE IF EXISTS public.keuangan_transaksi ADD COLUMN IF NOT EXISTS lampiran_url TEXT DEFAULT '';
+ALTER TABLE IF EXISTS public.pembayaran_santri_detail ADD COLUMN IF NOT EXISTS petugas_nama TEXT DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS public.kebersihan_area (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   nama_area TEXT NOT NULL UNIQUE,

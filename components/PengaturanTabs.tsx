@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowDown,
   ArrowUp,
@@ -17,6 +18,7 @@ import {
   Palette,
   Plus,
   RotateCcw,
+  Save,
   ShieldAlert,
   Sparkles,
   Sun,
@@ -35,6 +37,8 @@ import {
   DEFAULT_SKEMA_PENDAFTARAN,
   DEFAULT_TEMA_APLIKASI,
   FONT_OPTIONS,
+  getDynamicTahunAjaranAktif,
+  getDynamicTahunPsbInfo,
   getTarifAktifFromRiwayat,
   hitungRincianPendaftaran,
   isKeamananThresholdValid,
@@ -672,7 +676,7 @@ export function KeuanganTarifTab({
             <input
               id="tahun_ajaran_aktif"
               type="text"
-              placeholder="2026/2027"
+              placeholder={getDynamicTahunAjaranAktif()}
               disabled={!canManageFinance}
               value={formData.aturan_operasional.tahun_ajaran_aktif}
               onChange={(e) => onUpdateTahunAjaran(e.target.value)}
@@ -1047,11 +1051,11 @@ export function KeuanganTarifTab({
               min={2025}
               max={2099}
               disabled={!canManageFinance}
-              value={psb.tahun_psb ?? 2027}
+              value={psb.tahun_psb || getDynamicTahunPsbInfo().tahunPsb}
               onChange={(e) =>
                 onUpdatePendaftaran((prev) => ({
                   ...prev,
-                  tahun_psb: Number(e.target.value || 2027),
+                  tahun_psb: Number(e.target.value || getDynamicTahunPsbInfo().tahunPsb),
                 }))
               }
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums"
@@ -1066,14 +1070,14 @@ export function KeuanganTarifTab({
               id="psb_tahun_ajaran"
               type="text"
               disabled={!canManageFinance}
-              value={psb.tahun_ajaran_psb ?? '2027/2028'}
+              value={psb.tahun_ajaran_psb || getDynamicTahunPsbInfo().tahunAjaranPsb}
               onChange={(e) =>
                 onUpdatePendaftaran((prev) => ({
                   ...prev,
                   tahun_ajaran_psb: e.target.value,
                 }))
               }
-              placeholder="2027/2028"
+              placeholder={getDynamicTahunPsbInfo().tahunAjaranPsb}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
             />
           </div>
@@ -1088,11 +1092,11 @@ export function KeuanganTarifTab({
               min={1}
               max={100}
               disabled={!canManageFinance}
-              value={psb.kuota_promo_tampil_awal ?? 28}
+              value={psb.kuota_promo_tampil_awal ?? 25}
               onChange={(e) =>
                 onUpdatePendaftaran((prev) => ({
                   ...prev,
-                  kuota_promo_tampil_awal: Number(e.target.value || 28),
+                  kuota_promo_tampil_awal: Number(e.target.value || 25),
                 }))
               }
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums"
@@ -1782,10 +1786,18 @@ export function AturanDivisiTab({ formData, onUpdateAturan }: AturanDivisiTabPro
 interface TemaAplikasiTabProps {
   tema: TemaAplikasiConfig;
   logoUrl: string;
+  isSuperAdmin?: boolean;
+  onSaveLocalTheme?: () => void;
   onUpdateTema: (updater: (prev: TemaAplikasiConfig) => TemaAplikasiConfig) => void;
 }
 
-export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTabProps) {
+export function TemaAplikasiTab({
+  tema,
+  logoUrl,
+  isSuperAdmin = false,
+  onSaveLocalTheme,
+  onUpdateTema,
+}: TemaAplikasiTabProps) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -2030,50 +2042,89 @@ export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTab
               </div>
             </div>
 
-            {/* Branding Sidebar */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
-              <div>
-                <label htmlFor="tema_app_title" className="font-semibold text-slate-700 block mb-1.5">
-                  Judul Aplikasi di Sidebar
-                </label>
-                <input
-                  id="tema_app_title"
-                  type="text"
-                  value={tema.appShortTitle}
-                  onChange={(e) =>
-                    onUpdateTema((prev) => ({ ...prev, appShortTitle: e.target.value }))
-                  }
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+            {/* Branding Sidebar & Generator Ikon PWA (Hanya Admin Utama / Super Admin) */}
+            {isSuperAdmin && (
+              <div className="space-y-4 pt-3 border-t border-slate-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="tema_app_title" className="font-semibold text-slate-700 block mb-1.5">
+                      Judul Aplikasi di Sidebar
+                    </label>
+                    <input
+                      id="tema_app_title"
+                      type="text"
+                      value={tema.appShortTitle}
+                      onChange={(e) =>
+                        onUpdateTema((prev) => ({ ...prev, appShortTitle: e.target.value }))
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="tema_app_subtitle" className="font-semibold text-slate-700 block mb-1.5">
+                      Subjudul di Sidebar
+                    </label>
+                    <input
+                      id="tema_app_subtitle"
+                      type="text"
+                      value={tema.appSubtitle}
+                      onChange={(e) =>
+                        onUpdateTema((prev) => ({ ...prev, appSubtitle: e.target.value }))
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={tema.sidebarShowLogo}
+                        onChange={(e) =>
+                          onUpdateTema((prev) => ({ ...prev, sidebarShowLogo: e.target.checked }))
+                        }
+                        className="w-4 h-4 accent-emerald-700 rounded"
+                      />
+                      Tampilkan Logo Kop Surat Pondok di pojok atas Sidebar (menggantikan inisial e1)
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-emerald-700" />
+                      Generator Paket Ikon PWA &amp; Favicon
+                    </p>
+                    <p className="text-[11px] text-emerald-800 mt-0.5">
+                      Kelola logo e1, maskable safe-zone 192/512, Apple Touch, dan monokrom Material You.
+                    </p>
+                  </div>
+                  <Link
+                    href="/tools/pwa-icon"
+                    className="min-h-[38px] px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    Buka Studio Ikon PWA
+                  </Link>
+                </div>
               </div>
-              <div>
-                <label htmlFor="tema_app_subtitle" className="font-semibold text-slate-700 block mb-1.5">
-                  Subjudul di Sidebar
-                </label>
-                <input
-                  id="tema_app_subtitle"
-                  type="text"
-                  value={tema.appSubtitle}
-                  onChange={(e) =>
-                    onUpdateTema((prev) => ({ ...prev, appSubtitle: e.target.value }))
-                  }
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+            )}
+
+            {!isSuperAdmin && onSaveLocalTheme && (
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[11px] text-slate-500">
+                  Preferensi tema ini berlaku khusus di perangkat Anda tanpa mengubah tampilan global pondok.
+                </p>
+                <button
+                  type="button"
+                  onClick={onSaveLocalTheme}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Simpan Preferensi Tema Perangkat
+                </button>
               </div>
-              <div className="sm:col-span-2">
-                <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={tema.sidebarShowLogo}
-                    onChange={(e) =>
-                      onUpdateTema((prev) => ({ ...prev, sidebarShowLogo: e.target.checked }))
-                    }
-                    className="w-4 h-4 accent-emerald-700 rounded"
-                  />
-                  Tampilkan Logo Kop Surat Pondok di pojok atas Sidebar (menggantikan inisial AN)
-                </label>
-              </div>
-            </div>
+            )}
           </section>
         </div>
 
@@ -2107,7 +2158,7 @@ export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTab
                         className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] border border-white/30 shrink-0"
                         style={{ backgroundColor: tema.primaryColor }}
                       >
-                        AN
+                        e1
                       </div>
                     )}
                     <div className="min-w-0">
@@ -2166,8 +2217,16 @@ export function TemaAplikasiTab({ tema, logoUrl, onUpdateTema }: TemaAplikasiTab
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Setiap perubahan warna, mode, atau huruf langsung diterapkan sebagai pratinjau. Klik{' '}
-              <strong>Simpan Pengaturan</strong> untuk menyimpannya permanen.
+              {isSuperAdmin ? (
+                <>
+                  Setiap perubahan warna, mode, atau huruf langsung diterapkan sebagai pratinjau. Klik{' '}
+                  <strong>Simpan Pengaturan</strong> untuk menyimpannya permanen.
+                </>
+              ) : (
+                <>
+                  Perubahan tema langsung terlihat dan tersimpan khusus untuk perangkat Anda.
+                </>
+              )}
             </p>
           </section>
         </div>

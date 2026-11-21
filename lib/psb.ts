@@ -264,8 +264,8 @@ export function generateNextNoRegistrasi(
 }
 
 /**
- * Hitung sisa kuota promo bergaya promosi realistis (default mulai sisa 28 dari 100
- * agar tetap terasa meyakinkan dan berkurang alami per pendaftar terverifikasi).
+ * Hitung sisa kuota promo tampilan publik: statis di angka promosi (default 25)
+ * selama kuota asli masih tersedia, dan 0 apabila kuota asli telah habis.
  */
 export function computePromoDisplayRemaining(params: {
   psbRecordsCount: number;
@@ -279,11 +279,9 @@ export function computePromoDisplayRemaining(params: {
 
   const startDisplay = Math.max(
     1,
-    Math.min(total, Number(params.promoDisplayStart || 28))
+    Math.min(total, Number(params.promoDisplayStart || 25))
   );
-  const psbOnlineCount = Math.max(0, Number(params.psbRecordsCount || 0));
-  const promoSimulated = Math.max(3, startDisplay - psbOnlineCount);
-  return Math.min(realRemaining, promoSimulated);
+  return Math.min(realRemaining, startDisplay);
 }
 
 export interface PsbBillingSummary {

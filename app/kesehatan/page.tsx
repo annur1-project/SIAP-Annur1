@@ -180,58 +180,62 @@ CREATE TABLE IF NOT EXISTS poskestren_penyuluhan (
   created_at timestamptz DEFAULT now()
 );`;
 
-const STARTER_OBAT_P3K: Omit<ObatItem, 'id'>[] = [
-  {
-    nama_obat: 'Paracetamol 500mg',
-    kategori: 'Obat Bebas',
-    satuan: 'tablet',
-    stok: 50,
-    stok_minimum: 15,
-    harga_satuan: 500,
-    kadaluarsa: '2027-12-31',
-    keterangan: 'Penurun demam & pereda nyeri',
-  },
-  {
-    nama_obat: 'Oralit Sachet',
-    kategori: 'Obat Bebas',
-    satuan: 'sachet',
-    stok: 30,
-    stok_minimum: 10,
-    harga_satuan: 1500,
-    kadaluarsa: '2027-10-31',
-    keterangan: 'Rehidrasi diare / mual muntah',
-  },
-  {
-    nama_obat: 'Salep Scabimite / Kulit',
-    kategori: 'Kulit & Salep',
-    satuan: 'tube',
-    stok: 12,
-    stok_minimum: 4,
-    harga_satuan: 18000,
-    kadaluarsa: '2027-08-31',
-    keterangan: 'Penanganan gatal / keluhan kulit santri',
-  },
-  {
-    nama_obat: 'Povidone Iodine / Antiseptik + Kasa',
-    kategori: 'P3K & Luka',
-    satuan: 'paket',
-    stok: 15,
-    stok_minimum: 5,
-    harga_satuan: 8000,
-    kadaluarsa: '2028-01-31',
-    keterangan: 'Pembersih luka luar ringan',
-  },
-  {
-    nama_obat: 'Vitamin C / Multivitamin',
-    kategori: 'Vitamin & Suplemen',
-    satuan: 'tablet',
-    stok: 40,
-    stok_minimum: 10,
-    harga_satuan: 1000,
-    kadaluarsa: '2027-11-30',
-    keterangan: 'Pemulihan daya tahan tubuh santri',
-  },
-];
+function getStarterObatP3K(baseYear: number): Omit<ObatItem, 'id'>[] {
+  const nextYear = baseYear + 1;
+  const twoYears = baseYear + 2;
+  return [
+    {
+      nama_obat: 'Paracetamol 500mg',
+      kategori: 'Obat Bebas',
+      satuan: 'tablet',
+      stok: 50,
+      stok_minimum: 15,
+      harga_satuan: 500,
+      kadaluarsa: `${nextYear}-12-31`,
+      keterangan: 'Penurun demam & pereda nyeri',
+    },
+    {
+      nama_obat: 'Oralit Sachet',
+      kategori: 'Obat Bebas',
+      satuan: 'sachet',
+      stok: 30,
+      stok_minimum: 10,
+      harga_satuan: 1500,
+      kadaluarsa: `${nextYear}-10-31`,
+      keterangan: 'Rehidrasi diare / mual muntah',
+    },
+    {
+      nama_obat: 'Salep Scabimite / Kulit',
+      kategori: 'Kulit & Salep',
+      satuan: 'tube',
+      stok: 12,
+      stok_minimum: 4,
+      harga_satuan: 18000,
+      kadaluarsa: `${nextYear}-08-31`,
+      keterangan: 'Penanganan gatal / keluhan kulit santri',
+    },
+    {
+      nama_obat: 'Povidone Iodine / Antiseptik + Kasa',
+      kategori: 'P3K & Luka',
+      satuan: 'paket',
+      stok: 15,
+      stok_minimum: 5,
+      harga_satuan: 8000,
+      kadaluarsa: `${twoYears}-01-31`,
+      keterangan: 'Pembersih luka luar ringan',
+    },
+    {
+      nama_obat: 'Vitamin C / Multivitamin',
+      kategori: 'Vitamin & Suplemen',
+      satuan: 'tablet',
+      stok: 40,
+      stok_minimum: 10,
+      harga_satuan: 1000,
+      kadaluarsa: `${nextYear}-11-30`,
+      keterangan: 'Pemulihan daya tahan tubuh santri',
+    },
+  ];
+}
 
 function getKamarSortWeight(kamar: string): number {
   const idx = MASTER_KAMAR_ORDER.findIndex(
@@ -1104,8 +1108,9 @@ export default function KesehatanPage() {
     if (!canEdit) return;
     setSaving(true);
     try {
+      const starterItems = getStarterObatP3K(new Date().getFullYear());
       if (obatLocalFallback) {
-        const seeded = STARTER_OBAT_P3K.map((o) => ({
+        const seeded = starterItems.map((o) => ({
           ...o,
           id: createLocalId('obat'),
         }));
@@ -1113,7 +1118,7 @@ export default function KesehatanPage() {
         setObatList(next);
         writeLocalObat(next);
       } else {
-        const { error } = await supabase.from('poskestren_obat').insert(STARTER_OBAT_P3K);
+        const { error } = await supabase.from('poskestren_obat').insert(starterItems);
         if (error) throw error;
         const refreshed = await fetchAllData();
         setObatList(refreshed.obat);
@@ -2868,19 +2873,19 @@ export default function KesehatanPage() {
                 <Calendar className="w-3.5 h-3.5 text-emerald-700" />
                 Periode Tanggal Sakit:
               </span>
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-[1fr_auto_1fr] sm:flex items-center gap-2 w-full sm:w-auto min-w-0">
                 <input
                   type="date"
                   value={rekapStartDate}
                   onChange={(e) => setRekapStartDate(e.target.value)}
-                  className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  className="w-full min-w-0 sm:w-auto px-2.5 sm:px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                 />
-                <span className="text-slate-400">s/d</span>
+                <span className="text-slate-400 text-center">s/d</span>
                 <input
                   type="date"
                   value={rekapEndDate}
                   onChange={(e) => setRekapEndDate(e.target.value)}
-                  className="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  className="w-full min-w-0 sm:w-auto px-2.5 sm:px-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                 />
               </div>
             </div>

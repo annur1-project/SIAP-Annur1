@@ -55,7 +55,10 @@ export const metadata: Metadata = {
     title: 'e-annursatu',
   },
   icons: {
-    icon: '/icon.png',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon.png', type: 'image/png' },
+    ],
     apple: '/apple-icon.png',
   },
 };

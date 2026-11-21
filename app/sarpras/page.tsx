@@ -184,7 +184,7 @@ export default function SarprasPage() {
   const [invJumlah, setInvJumlah] = useState<string>('1');
   const [invSatuan, setInvSatuan] = useState<string>('Unit');
   const [invKondisi, setInvKondisi] = useState<KondisiAsetSarpras>('baik');
-  const [invTahun, setInvTahun] = useState<string>('2026');
+  const [invTahun, setInvTahun] = useState<string>('');
   const [invSumber, setInvSumber] = useState<string>('Kas Pondok');
   const [invNilai, setInvNilai] = useState<string>('0');
   const [invCatatan, setInvCatatan] = useState<string>('');
@@ -240,6 +240,7 @@ export default function SarprasPage() {
       const t = getLocalTodayStr();
       setTodayStr(t);
       setSelectedMonth(t.slice(0, 7));
+      setInvTahun((prev) => prev || t.slice(0, 4));
       void loadAllData();
     });
     return () => {
@@ -572,7 +573,7 @@ export default function SarprasPage() {
     setInvJumlah('1');
     setInvSatuan('Unit');
     setInvKondisi('baik');
-    setInvTahun((todayStr || '2026').slice(0, 4));
+    setInvTahun((todayStr || getLocalTodayStr()).slice(0, 4));
     setInvSumber('Kas Pondok');
     setInvNilai('0');
     setInvCatatan('');
@@ -854,12 +855,12 @@ export default function SarprasPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => void loadAllData()}
               disabled={loading}
-              className="min-h-[40px] px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className="min-h-[40px] px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Muat Ulang
@@ -869,7 +870,7 @@ export default function SarprasPage() {
               <button
                 type="button"
                 onClick={openAddInvModal}
-                className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-emerald-600 text-emerald-700 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-emerald-50 border border-emerald-600 text-emerald-700 text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 Tambah Inventaris
@@ -879,7 +880,9 @@ export default function SarprasPage() {
             <button
               type="button"
               onClick={() => setShowQuickReportModal(true)}
-              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className={`min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 ${
+                canEditSarpras ? 'col-span-2 sm:col-span-1' : ''
+              }`}
             >
               <Camera className="w-4 h-4" />
               Lapor Kerusakan
@@ -2236,7 +2239,7 @@ export default function SarprasPage() {
                       type="text"
                       value={invTahun}
                       onChange={(e) => setInvTahun(e.target.value)}
-                      placeholder="2026"
+                      placeholder={todayStr ? todayStr.slice(0, 4) : 'Tahun'}
                       className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 font-mono"
                     />
                   </div>
@@ -2393,7 +2396,7 @@ export default function SarprasPage() {
                               SARPRAS AN-NUR 1
                             </span>
                             <span className="font-mono text-[10px] font-bold text-slate-600">
-                              {it.tahun_perolehan || '2026'}
+                              {it.tahun_perolehan || (todayStr ? todayStr.slice(0, 4) : '-')}
                             </span>
                           </div>
                           <div className="font-mono font-extrabold text-sm text-slate-900 tracking-wide">
@@ -2624,7 +2627,7 @@ export default function SarprasPage() {
                 >
                   <div className="flex items-center justify-between border-b border-slate-400 pb-0.5 font-bold">
                     <span>SARPRAS AN-NUR 1</span>
-                    <span className="font-mono">{it.tahun_perolehan || '2026'}</span>
+                    <span className="font-mono">{it.tahun_perolehan || (todayStr ? todayStr.slice(0, 4) : '-')}</span>
                   </div>
                   <div className="font-mono font-extrabold text-xs">{it.kode_aset}</div>
                   <div className="font-bold truncate">{it.nama_barang}</div>
