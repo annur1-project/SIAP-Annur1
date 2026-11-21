@@ -140,7 +140,7 @@ export default function KegiatanFormatModal({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
+            <div className="p-2 rounded-xl siap-soft-box shrink-0">
               <Layers className="w-4 h-4" />
             </div>
             <div className="min-w-0">
@@ -179,7 +179,7 @@ export default function KegiatanFormatModal({
                 value={namaFormat}
                 onChange={(e) => setNamaFormat(e.target.value)}
                 placeholder="Contoh: Pembacaan Burdah (10 Fashl)"
-                className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 siap-ring-focus"
               />
             </div>
 
@@ -246,7 +246,7 @@ export default function KegiatanFormatModal({
                   <button
                     type="button"
                     onClick={handleAddSingleSlot}
-                    className="min-h-[38px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                    className="min-h-[38px] px-3 py-1.5 siap-btn-primary text-xs font-semibold rounded-lg inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Tambah
@@ -361,7 +361,7 @@ export default function KegiatanFormatModal({
             <button
               type="submit"
               disabled={saving}
-              className="min-h-[40px] px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 rounded-xl whitespace-nowrap"
+              className="min-h-[40px] px-5 py-2 text-xs font-bold siap-btn-primary disabled:opacity-60 rounded-xl whitespace-nowrap"
             >
               {saving ? 'Menyimpan...' : isEdit ? 'Simpan Perubahan Format' : 'Simpan Format Baru'}
             </button>

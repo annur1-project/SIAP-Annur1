@@ -183,7 +183,7 @@ export default function QuickMenuConfigModal({
             onClick={() => setActiveTab('beranda')}
             className={`px-3 py-2 text-xs sm:text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'beranda'
-                ? 'border-emerald-700 text-emerald-700'
+                ? 'siap-border-accent siap-text-accent'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -195,7 +195,7 @@ export default function QuickMenuConfigModal({
             onClick={() => setActiveTab('mobile')}
             className={`px-3 py-2 text-xs sm:text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'mobile'
-                ? 'border-emerald-700 text-emerald-700'
+                ? 'siap-border-accent siap-text-accent'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -256,17 +256,17 @@ export default function QuickMenuConfigModal({
                       onClick={() => toggleMenuId(item.id)}
                       className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-left transition-colors ${
                         checked
-                          ? 'bg-emerald-50 border-emerald-500 text-emerald-900'
+                          ? 'siap-soft-box border'
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={checked ? 'text-emerald-700' : 'text-slate-500'}>
+                        <span className={checked ? 'siap-text-accent' : 'text-slate-500'}>
                           {renderQuickMenuIcon(item.iconKey, 'w-4 h-4 shrink-0')}
                         </span>
                         <span className="text-xs font-semibold truncate">{item.label}</span>
                       </div>
-                      {checked && <Check className="w-4 h-4 text-emerald-700 shrink-0" />}
+                      {checked && <Check className="w-4 h-4 siap-text-accent shrink-0" />}
                     </button>
                   );
                 })}
@@ -274,7 +274,7 @@ export default function QuickMenuConfigModal({
             </>
           ) : (
             <div className="space-y-4">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900">
+              <div className="siap-soft-box border rounded-xl p-3 text-xs">
                 Pengaturan Bottom Navigation disimpan khusus di perangkat/browser ini agar tiap pengurus bisa memprioritaskan divisi yang paling sering dibuka. Slot ke-5 selalu tombol <strong>Menu</strong> lengkap.
               </div>
 
@@ -289,7 +289,7 @@ export default function QuickMenuConfigModal({
                       <div
                         key={`${href}-${idx}`}
                         className={`flex flex-col items-center justify-center py-1 ${
-                          idx === 0 ? 'text-emerald-700 font-bold' : 'text-slate-500 font-medium'
+                          idx === 0 ? 'siap-text-accent font-bold' : 'text-slate-500 font-medium'
                         }`}
                       >
                         {renderQuickMenuIcon(found.iconKey, 'w-4 h-4')}
@@ -316,7 +316,7 @@ export default function QuickMenuConfigModal({
                     <select
                       value={mobileSlots[slotIdx]}
                       onChange={(e) => updateMobileSlot(slotIdx, e.target.value)}
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-lg font-medium text-slate-800 outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-lg font-medium text-slate-800 siap-ring-focus"
                     >
                       {QUICK_MENU_CATALOG.map((opt) => (
                         <option key={opt.href} value={opt.href}>
@@ -352,7 +352,7 @@ export default function QuickMenuConfigModal({
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 rounded-lg text-xs sm:text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60"
+              className="px-4 py-2 rounded-lg text-xs sm:text-sm font-bold siap-btn-primary disabled:opacity-60"
             >
               {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
             </button>

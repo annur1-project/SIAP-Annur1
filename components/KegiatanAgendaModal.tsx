@@ -163,7 +163,7 @@ export default function KegiatanAgendaModal({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
+            <div className="p-2 rounded-xl siap-soft-box shrink-0">
               <Calendar className="w-4 h-4" />
             </div>
             <div className="min-w-0">
@@ -200,7 +200,7 @@ export default function KegiatanAgendaModal({
               <select
                 value={selectedFormatId}
                 onChange={(e) => handleFormatChange(e.target.value)}
-                className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl bg-white focus:outline-none siap-ring-focus"
               >
                 {formats.map((fmt) => (
                   <option key={fmt.id} value={fmt.id}>
@@ -221,7 +221,7 @@ export default function KegiatanAgendaModal({
                   onClick={() => setKategori('rutin')}
                   className={`min-h-[40px] px-3 py-2 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
                     kategori === 'rutin'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      ? 'siap-btn-primary border-transparent'
                       : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
@@ -232,7 +232,7 @@ export default function KegiatanAgendaModal({
                   onClick={() => setKategori('event_besar')}
                   className={`min-h-[40px] px-3 py-2 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
                     kategori === 'event_besar'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      ? 'siap-btn-primary border-transparent'
                       : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
@@ -246,7 +246,7 @@ export default function KegiatanAgendaModal({
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <Layers className="w-3.5 h-3.5 siap-text-accent shrink-0" />
                   Rincian Slot Terbentuk ({activeFormat.slots.length} Form Pengisi)
                 </span>
                 {isEdit && (
@@ -255,7 +255,7 @@ export default function KegiatanAgendaModal({
                       type="checkbox"
                       checked={reapplySlotsOnEdit}
                       onChange={(e) => setReapplySlotsOnEdit(e.target.checked)}
-                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      className="rounded border-slate-300 siap-accent-control"
                     />
                     Terapkan ulang slot format ini
                   </label>
@@ -291,7 +291,7 @@ export default function KegiatanAgendaModal({
               value={judul}
               onChange={(e) => setJudul(e.target.value)}
               placeholder="Contoh: Pembacaan Burdah Malam Jumat / Peringatan Maulid Nabi"
-              className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 siap-ring-focus"
             />
           </div>
 
@@ -417,7 +417,7 @@ export default function KegiatanAgendaModal({
             <button
               type="submit"
               disabled={saving}
-              className="min-h-[40px] px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 rounded-xl whitespace-nowrap"
+              className="min-h-[40px] px-5 py-2 text-xs font-bold siap-btn-primary disabled:opacity-60 rounded-xl whitespace-nowrap"
             >
               {saving
                 ? 'Menyimpan...'

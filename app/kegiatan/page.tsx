@@ -88,7 +88,7 @@ const STATUS_KEGIATAN_META: Record<StatusKegiatan, { label: string; badge: strin
   },
   selesai: {
     label: 'Selesai',
-    badge: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    badge: 'siap-soft-box border',
   },
   ditunda: {
     label: 'Ditunda',
@@ -103,7 +103,7 @@ const SLOT_STATUS_META: Record<StatusSlotPengisi, { label: string; cls: string }
   },
   siap: {
     label: 'Siap',
-    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+    cls: 'siap-soft-box border hover:opacity-90',
   },
   selesai: {
     label: 'Selesai',
@@ -830,7 +830,7 @@ export default function KegiatanPage() {
                   t.type === 'error'
                     ? 'border-rose-200 text-rose-900'
                     : t.type === 'success'
-                    ? 'border-emerald-200 text-emerald-950'
+                    ? 'siap-border-accent text-slate-900'
                     : 'border-slate-200 text-slate-900'
                 }`}
               >
@@ -839,7 +839,7 @@ export default function KegiatanPage() {
                     t.type === 'error'
                       ? 'text-rose-600'
                       : t.type === 'success'
-                      ? 'text-emerald-600'
+                      ? 'siap-text-accent'
                       : 'text-sky-600'
                   }`}
                 />
@@ -856,7 +856,7 @@ export default function KegiatanPage() {
         <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2.5">
-              <Calendar className="w-6 h-6 text-emerald-600 shrink-0" />
+              <Calendar className="w-6 h-6 siap-text-accent shrink-0" />
               Modul Kegiatan Pondok
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -879,14 +879,14 @@ export default function KegiatanPage() {
               onClick={handleExportExcel}
               className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
               Export Excel
             </button>
             {canEdit && (
               <button
                 type="button"
                 onClick={() => setAgendaModal({ open: true, editing: null })}
-                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 Jadwalkan Kegiatan
@@ -917,7 +917,7 @@ export default function KegiatanPage() {
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200">
             <span className="text-xs font-semibold text-slate-500 block">Kesiapan Pengisi Acara</span>
-            <strong className="text-2xl font-bold text-emerald-700 tabular-nums mt-1 block">
+            <strong className="text-2xl font-bold siap-text-accent tabular-nums mt-1 block">
               {loading ? '...' : `${summaryStats.persenSiap}%`}
             </strong>
             <span className="text-[11px] text-slate-500 tabular-nums">
@@ -943,7 +943,7 @@ export default function KegiatanPage() {
             onClick={() => setMainTab('agenda')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               mainTab === 'agenda'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -955,7 +955,7 @@ export default function KegiatanPage() {
             onClick={() => setMainTab('format')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               mainTab === 'format'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -967,7 +967,7 @@ export default function KegiatanPage() {
             onClick={() => setMainTab('arsip')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               mainTab === 'arsip'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -988,7 +988,7 @@ export default function KegiatanPage() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Cari nama kegiatan, lokasi, PJ, atau nama pengisi..."
-                  className="w-full min-h-[40px] pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full min-h-[40px] pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none siap-ring-focus"
                 />
               </div>
 
@@ -1023,12 +1023,12 @@ export default function KegiatanPage() {
 
             {loading ? (
               <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+                <Loader2 className="w-5 h-5 animate-spin siap-text-accent" />
                 <span>Memuat daftar jadwal kegiatan pondok...</span>
               </div>
             ) : filteredAgendas.length === 0 ? (
               <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center space-y-3">
-                <CalendarPlus className="w-10 h-10 text-emerald-600 mx-auto" />
+                <CalendarPlus className="w-10 h-10 siap-text-accent mx-auto" />
                 <div className="max-w-md mx-auto space-y-1">
                   <h3 className="text-sm font-bold text-slate-900">
                     Belum Ada Jadwal Kegiatan Sesuai Filter
@@ -1049,7 +1049,7 @@ export default function KegiatanPage() {
                           presetFormatId: 'fmt-burdah-12',
                         })
                       }
-                      className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                      className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
                     >
                       <Plus className="w-4 h-4" />
                       Buat Jadwal Kegiatan Pertama
@@ -1075,7 +1075,7 @@ export default function KegiatanPage() {
                         key={item.id}
                         className={`rounded-2xl border bg-white p-4 transition-colors cursor-pointer ${
                           isSelected
-                            ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                            ? 'siap-border-accent ring-1'
                             : 'border-slate-200 hover:border-slate-300'
                         }`}
                         onClick={() => {
@@ -1096,7 +1096,7 @@ export default function KegiatanPage() {
                               {item.tanggal === todayStr && (
                                 <>
                                   <span aria-hidden="true">&middot;</span>
-                                  <span className="font-bold text-emerald-700">Hari Ini</span>
+                                  <span className="font-bold siap-text-accent">Hari Ini</span>
                                 </>
                               )}
                             </div>
@@ -1142,13 +1142,13 @@ export default function KegiatanPage() {
                               <span className="text-slate-600 font-medium">
                                 Pengisi: <strong className="tabular-nums">{prog.terisi}/{prog.total}</strong> slot
                               </span>
-                              <span className="font-mono tabular-nums text-emerald-700 font-semibold">
+                              <span className="font-mono tabular-nums siap-text-accent font-semibold">
                                 {prog.persenTerisi}%
                               </span>
                             </div>
                             <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-emerald-600 rounded-full transition-all"
+                                className="h-full siap-progress-fill rounded-full transition-all"
                                 style={{ width: `${prog.persenTerisi}%` }}
                               />
                             </div>
@@ -1169,7 +1169,7 @@ export default function KegiatanPage() {
                                     clearPengisi: true,
                                   })
                                 }
-                                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-emerald-700"
+                                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                               >
                                 <Copy className="w-3.5 h-3.5" />
                               </button>
@@ -1299,7 +1299,7 @@ export default function KegiatanPage() {
                               onClick={() => handleCopyWa(selectedAgenda)}
                               className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
                             >
-                              <ClipboardCopy className="w-3.5 h-3.5 text-emerald-600" />
+                              <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
                               Salin WA
                             </button>
                             <button
@@ -1332,7 +1332,7 @@ export default function KegiatanPage() {
                             onClick={() => setDetailTab('pengisi')}
                             className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                               detailTab === 'pengisi'
-                                ? 'bg-emerald-600 text-white'
+                                ? 'siap-btn-primary'
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                           >
@@ -1344,7 +1344,7 @@ export default function KegiatanPage() {
                             onClick={() => setDetailTab('rundown')}
                             className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                               detailTab === 'rundown'
-                                ? 'bg-emerald-600 text-white'
+                                ? 'siap-btn-primary'
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                           >
@@ -1357,7 +1357,7 @@ export default function KegiatanPage() {
                               onClick={() => setDetailTab('panitia')}
                               className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                                 detailTab === 'panitia'
-                                  ? 'bg-emerald-600 text-white'
+                                  ? 'siap-btn-primary'
                                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                               }`}
                             >
@@ -1370,7 +1370,7 @@ export default function KegiatanPage() {
                             onClick={() => setDetailTab('dokumentasi')}
                             className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                               detailTab === 'dokumentasi'
-                                ? 'bg-emerald-600 text-white'
+                                ? 'siap-btn-primary'
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                           >
@@ -1428,7 +1428,7 @@ export default function KegiatanPage() {
                                 <button
                                   type="button"
                                   onClick={handleAddPengisiSlot}
-                                  className="min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1"
+                                  className="min-h-[36px] px-3.5 py-1.5 siap-btn-primary text-xs font-semibold rounded-lg inline-flex items-center gap-1"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
                                   Tambah Slot Pengisi
@@ -1456,7 +1456,7 @@ export default function KegiatanPage() {
                                           handleUpdatePengisi(slot.id, { peran: e.target.value })
                                         }
                                         placeholder="Bagian / Fashl"
-                                        className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-50"
+                                        className="flex-1 min-w-0 min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-800 border border-slate-200 rounded-lg siap-ring-focus read-only:bg-slate-50"
                                       />
                                     </div>
 
@@ -1543,7 +1543,7 @@ export default function KegiatanPage() {
                                 type="button"
                                 onClick={() => handleSaveDetailDraft()}
                                 disabled={savingDetail}
-                                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                                className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
                               >
                                 <Save className="w-3.5 h-3.5" />
                                 {savingDetail ? 'Menyimpan...' : 'Simpan Rincian Pengisi'}
@@ -1873,7 +1873,7 @@ export default function KegiatanPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleQuickStatusChange('selesai')}
-                                    className="min-h-[38px] px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
+                                    className="min-h-[38px] px-3.5 py-1.5 siap-soft-box hover:opacity-90 border text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
                                   >
                                     <CheckCircle2 className="w-3.5 h-3.5" />
                                     Tandai Kegiatan Selesai
@@ -1882,7 +1882,7 @@ export default function KegiatanPage() {
 
                                 {(selectedAgenda.dokumentasi_urls || []).length <
                                   MAX_DOKUMENTASI_FOTO && (
-                                  <label className="min-h-[38px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                                  <label className="min-h-[38px] px-3.5 py-1.5 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
                                     {uploadingPhoto ? (
                                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                     ) : (
@@ -1975,7 +1975,7 @@ export default function KegiatanPage() {
                                   type="button"
                                   onClick={() => handleSaveDetailDraft()}
                                   disabled={savingDetail}
-                                  className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                                  className="min-h-[40px] px-4 py-2 siap-btn-primary disabled:opacity-60 text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
                                 >
                                   <Save className="w-3.5 h-3.5" />
                                   {savingDetail ? 'Menyimpan...' : 'Simpan Dokumentasi & Notulensi'}
@@ -2033,7 +2033,7 @@ export default function KegiatanPage() {
                               ? 'Event Besar'
                               : 'Rutin Mingguan'}{' '}
                             &middot;{' '}
-                            <span className="font-mono tabular-nums font-semibold text-emerald-700">
+                            <span className="font-mono tabular-nums font-semibold siap-text-accent">
                               {sortedSlots.length} Slot Pengisi
                             </span>
                           </span>
@@ -2078,7 +2078,7 @@ export default function KegiatanPage() {
                               presetFormatId: fmt.id,
                             })
                           }
-                          className="min-h-[36px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
+                          className="min-h-[36px] px-3 py-1.5 siap-btn-primary text-xs font-bold rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
                         >
                           <CalendarPlus className="w-3.5 h-3.5" />
                           Jadwalkan
@@ -2184,7 +2184,7 @@ export default function KegiatanPage() {
                             {item.judul}
                           </h3>
                         </div>
-                        <span className="px-2 py-0.5 rounded-md border text-[11px] font-semibold bg-emerald-50 text-emerald-800 border-emerald-200 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-md border text-[11px] font-semibold siap-soft-box whitespace-nowrap">
                           {STATUS_KEGIATAN_META[item.status].label}
                         </span>
                       </div>
@@ -2229,7 +2229,7 @@ export default function KegiatanPage() {
                             setDetailTab('dokumentasi');
                             setMobileShowDetail(true);
                           }}
-                          className="font-semibold text-emerald-700 hover:underline whitespace-nowrap"
+                          className="font-semibold siap-text-accent hover:underline whitespace-nowrap"
                         >
                           Buka Detail
                         </button>
@@ -2340,7 +2340,7 @@ export default function KegiatanPage() {
                     prev ? { ...prev, clearPengisi: e.target.checked } : null
                   )
                 }
-                className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                className="mt-0.5 rounded border-slate-300 siap-accent-control"
               />
               <span>
                 Kosongkan nama pengisi (pertahankan daftar slot seperti Tawasul, Fashl 1–10, Doa
@@ -2358,7 +2358,7 @@ export default function KegiatanPage() {
               <button
                 type="button"
                 onClick={handleConfirmDuplicate}
-                className="min-h-[38px] px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+                className="min-h-[38px] px-4 py-1.5 text-xs font-bold siap-btn-primary rounded-xl"
               >
                 Buat Jadwal Duplikat
               </button>

@@ -202,12 +202,12 @@ const TONE_CLASSES: Record<
   QuickMenuCatalogItem['tone'],
   { bg: string; iconText: string; border: string }
 > = {
-  emerald: { bg: 'bg-emerald-50', iconText: 'text-emerald-700', border: 'border-emerald-200' },
+  emerald: { bg: 'siap-soft-box', iconText: 'siap-text-accent', border: '' },
   blue: { bg: 'bg-sky-50', iconText: 'text-sky-700', border: 'border-sky-200' },
   amber: { bg: 'bg-amber-50', iconText: 'text-amber-700', border: 'border-amber-200' },
   rose: { bg: 'bg-rose-50', iconText: 'text-rose-700', border: 'border-rose-200' },
   indigo: { bg: 'bg-indigo-50', iconText: 'text-indigo-700', border: 'border-indigo-200' },
-  teal: { bg: 'bg-teal-50', iconText: 'text-teal-700', border: 'border-teal-200' },
+  teal: { bg: 'siap-soft-box', iconText: 'siap-text-accent', border: '' },
   violet: { bg: 'bg-purple-50', iconText: 'text-purple-700', border: 'border-purple-200' },
   slate: { bg: 'bg-slate-100', iconText: 'text-slate-700', border: 'border-slate-200' },
 };
@@ -1198,10 +1198,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* HEADER BANNER COMPACT */}
-      <div className="bg-gradient-to-r from-emerald-900 to-emerald-800 rounded-2xl p-4 sm:p-5 text-white shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+      <div className="siap-hero rounded-2xl p-4 sm:p-5 text-white shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-emerald-200">
-            <span className="px-2.5 py-0.5 bg-emerald-700/70 rounded-md border border-emerald-600/50">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/85">
+            <span className="px-2.5 py-0.5 bg-white/15 rounded-md border border-white/25 text-white">
               TA {tahunAjaran || '...'}
             </span>
             <span className="truncate">{stats.namaPesantren}</span>
@@ -1215,7 +1215,7 @@ export default function DashboardPage() {
             type="button"
             onClick={loadDashboard}
             disabled={loading}
-            className="min-h-[38px] px-3 py-1.5 bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 text-xs font-semibold rounded-xl border border-emerald-600/60 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            className="min-h-[38px] px-3 py-1.5 bg-black/20 hover:bg-black/30 text-white text-xs font-semibold rounded-xl border border-white/25 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Muat Ulang
@@ -1223,14 +1223,15 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setShowSarprasReportModal(true)}
-            className="min-h-[38px] px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold rounded-xl border border-emerald-500/60 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            className="min-h-[38px] px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold rounded-xl border border-white/30 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
           >
             <Camera className="w-3.5 h-3.5" />
             Lapor Sarpras
           </button>
           <Link
             href="/santri"
-            className="col-span-2 sm:col-span-1 min-h-[38px] px-3.5 py-1.5 bg-white text-emerald-900 text-xs font-bold rounded-xl shadow-xs hover:bg-emerald-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            style={{ color: 'var(--siap-sidebar)' }}
+            className="col-span-2 sm:col-span-1 min-h-[38px] px-3.5 py-1.5 bg-white text-xs font-bold rounded-xl shadow-xs hover:bg-slate-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             Data Santri
@@ -1248,8 +1249,8 @@ export default function DashboardPage() {
       )}
 
       {quickToast && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center gap-2 text-emerald-900 text-xs font-medium">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+        <div className="siap-soft-box border rounded-xl p-3 flex items-center gap-2 text-xs font-medium">
+          <CheckCircle2 className="w-4 h-4 siap-text-accent shrink-0" />
           <span>{quickToast}</span>
         </div>
       )}
@@ -1258,36 +1259,36 @@ export default function DashboardPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="min-w-0 space-y-0.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold siap-text-accent">
               <MapPin className="w-3.5 h-3.5 shrink-0" />
               <span>Bululawang, Kab. Malang (WIB)</span>
             </div>
             <p className="text-sm sm:text-base font-bold text-slate-900">
               {todayCalendarInfo.masehiPasaran}
             </p>
-            <p className="text-xs font-semibold text-emerald-800">
+            <p className="text-xs font-semibold siap-text-accent">
               {todayCalendarInfo.hijri.formatted} H
             </p>
           </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-3 bg-emerald-50/80 border border-emerald-200 rounded-xl px-3.5 py-2">
+          <div className="flex items-center justify-between sm:justify-end gap-3 siap-soft-box border rounded-xl px-3.5 py-2">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">
+              <span className="text-[10px] font-bold uppercase tracking-wider siap-text-accent block">
                 Menuju {todayCalendarInfo.countdown.nextName}
               </span>
-              <strong className="text-base sm:text-lg font-extrabold text-emerald-950 tabular-nums">
+              <strong className="text-base sm:text-lg font-extrabold text-slate-900 tabular-nums">
                 {todayCalendarInfo.countdown.nextTime} WIB
               </strong>
             </div>
-            <div className="text-right border-l border-emerald-200 pl-3">
-              <span className="text-[10px] font-semibold text-emerald-700 block">Hitung Mundur</span>
-              <span className="font-mono text-xs sm:text-sm font-bold text-emerald-900 tabular-nums">
+            <div className="text-right border-l border-current/20 pl-3">
+              <span className="text-[10px] font-semibold siap-text-accent block">Hitung Mundur</span>
+              <span className="font-mono text-xs sm:text-sm font-bold text-slate-900 tabular-nums">
                 {todayCalendarInfo.countdown.remainingFormatted}
               </span>
             </div>
             <Link
               href="/kalender"
-              className="p-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white shrink-0 transition-colors"
+              className="p-2 rounded-lg siap-btn-primary shrink-0 transition-colors"
               title="Buka Kalender Masehi & Hijriyah"
               aria-label="Buka Kalender Masehi & Hijriyah"
             >
@@ -1312,11 +1313,11 @@ export default function DashboardPage() {
                 key={slot.label}
                 className={`rounded-lg px-2 py-1.5 border tabular-nums ${
                   isNext
-                    ? 'bg-emerald-700 border-emerald-700 text-white font-bold'
+                    ? 'siap-btn-primary border-transparent font-bold shadow-xs'
                     : 'bg-slate-50 border-slate-200 text-slate-700'
                 }`}
               >
-                <span className={`block text-[10px] ${isNext ? 'text-emerald-100' : 'text-slate-500'}`}>
+                <span className={`block text-[10px] ${isNext ? 'text-white/85' : 'text-slate-500'}`}>
                   {slot.label}
                 </span>
                 <span className="font-mono font-bold text-xs">{slot.time}</span>
@@ -1330,13 +1331,13 @@ export default function DashboardPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-emerald-700 shrink-0" />
+            <Clock className="w-4 h-4 siap-text-accent shrink-0" />
             <h2 className="font-bold text-sm text-slate-900">Menu Cepat Divisi</h2>
           </div>
           <button
             type="button"
             onClick={() => setQuickConfigOpen(true)}
-            className="min-h-[34px] px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="min-h-[34px] px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Atur Menu &amp; Bottom Nav
@@ -1350,7 +1351,7 @@ export default function DashboardPage() {
               <Link
                 key={item.id}
                 href={item.href}
-                className="group flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/40 transition-all text-center"
+                className="group flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-white hover:border-[var(--siap-primary)] transition-all text-center"
               >
                 <div
                   className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${tone.bg} ${tone.border} border flex items-center justify-center ${tone.iconText} group-hover:scale-105 transition-transform`}
@@ -1386,10 +1387,10 @@ export default function DashboardPage() {
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Syahriyah (Tunai)</span>
-            <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
+            <Wallet className="w-4 h-4 siap-text-accent shrink-0" />
           </div>
           <div className="mt-2">
-            <strong className="text-sm sm:text-lg font-extrabold text-emerald-800 tabular-nums block leading-snug">
+            <strong className="text-sm sm:text-lg font-extrabold siap-text-accent tabular-nums block leading-snug">
               {loading ? '...' : formatRupiah(stats.saldoOperasional)}
             </strong>
             <span className="text-[10.5px] text-slate-500 block mt-0.5 tabular-nums">
@@ -1416,7 +1417,7 @@ export default function DashboardPage() {
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] sm:text-xs font-semibold text-slate-500">Jamaah {bulanLabel}</span>
-            <CalendarCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <CalendarCheck className="w-4 h-4 siap-text-accent shrink-0" />
           </div>
           <div className="mt-2">
             <strong className="text-lg sm:text-2xl font-extrabold text-slate-900 tabular-nums block">
@@ -1455,7 +1456,7 @@ export default function DashboardPage() {
             </div>
             <Link
               href="/perizinan"
-              className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
+              className="text-xs font-bold siap-text-accent hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
             >
               Kelola <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
@@ -1501,7 +1502,7 @@ export default function DashboardPage() {
                         href={`https://wa.me/${item.waDigits}?text=${waText}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap"
+                        className="px-2.5 py-1.5 rounded-lg siap-btn-primary text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap"
                       >
                         <MessageCircle className="w-3.5 h-3.5" />
                         WA Wali
@@ -1548,7 +1549,7 @@ export default function DashboardPage() {
             </div>
             <Link
               href="/keuangan?tab=tunggakan"
-              className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
+              className="text-xs font-bold siap-text-accent hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
             >
               Penagihan <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
@@ -1574,7 +1575,7 @@ export default function DashboardPage() {
           </div>
 
           {tunggakanSummary.previewList.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-emerald-200 bg-emerald-50/60 p-3 text-center text-xs font-medium text-emerald-800">
+            <div className="rounded-xl border border-dashed siap-soft-box p-3 text-center text-xs font-medium">
               Alhamdulillah, seluruh syahriyah santri sampai jatuh tempo bulan ini sudah lunas.
             </div>
           ) : (
@@ -1617,12 +1618,12 @@ export default function DashboardPage() {
 
       {/* TOAST SARPRAS JIKA BARU KIRIM LAPORAN */}
       {sarprasToast && (
-        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-2">
+        <div className="p-3 rounded-xl siap-soft-box border text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 siap-text-accent shrink-0" />
             <span>{sarprasToast}</span>
           </div>
-          <Link href="/sarpras" className="font-bold text-emerald-700 hover:underline whitespace-nowrap shrink-0">
+          <Link href="/sarpras" className="font-bold siap-text-accent hover:underline whitespace-nowrap shrink-0">
             Lihat Antrean &rarr;
           </Link>
         </div>
@@ -1634,12 +1635,12 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-emerald-700 shrink-0" />
+              <Wallet className="w-4 h-4 siap-text-accent shrink-0" />
               <h3 className="font-bold text-sm text-slate-900">Keuangan 4 Dompet (Tunai)</h3>
             </div>
             <Link
               href="/keuangan"
-              className="text-xs font-semibold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0"
+              className="text-xs font-semibold siap-text-accent hover:underline inline-flex items-center gap-0.5 shrink-0"
             >
               Loket <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
@@ -1651,9 +1652,9 @@ export default function DashboardPage() {
                 {loading ? '...' : formatRupiah(stats.saldoPendaftaran)}
               </strong>
             </div>
-            <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
-              <span className="text-[10.5px] font-semibold text-emerald-900 block">2. Syahriyah</span>
-              <strong className="text-xs sm:text-sm font-bold text-emerald-950 tabular-nums">
+            <div className="p-2.5 rounded-xl siap-soft-box border">
+              <span className="text-[10.5px] font-semibold siap-text-accent block">2. Syahriyah</span>
+              <strong className="text-xs sm:text-sm font-bold text-slate-900 tabular-nums">
                 {loading ? '...' : formatRupiah(stats.saldoOperasional)}
               </strong>
             </div>
@@ -1687,15 +1688,15 @@ export default function DashboardPage() {
             </div>
             <Link
               href="/absen-jamaah"
-              className="text-xs font-semibold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0"
+              className="text-xs font-semibold siap-text-accent hover:underline inline-flex items-center gap-0.5 shrink-0"
             >
               Input <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
           <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
-            <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200">
-              <span className="text-[10px] text-emerald-800 block">Hadir</span>
-              <strong className="text-sm font-bold text-emerald-950 tabular-nums">
+            <div className="p-2 rounded-xl siap-soft-box border">
+              <span className="text-[10px] text-slate-600 block">Hadir</span>
+              <strong className="text-sm font-bold siap-text-accent tabular-nums">
                 {loading ? '...' : jamaahToday.hadir}
               </strong>
             </div>
@@ -1731,11 +1732,11 @@ export default function DashboardPage() {
               <h3 className="font-bold text-sm text-slate-900">Perizinan &amp; Poskestren</h3>
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold shrink-0">
-              <Link href="/perizinan" className="text-emerald-700 hover:underline">
+              <Link href="/perizinan" className="siap-text-accent hover:underline">
                 Izin
               </Link>
               <span className="text-slate-300">|</span>
-              <Link href="/kesehatan" className="text-emerald-700 hover:underline">
+              <Link href="/kesehatan" className="siap-text-accent hover:underline">
                 UKS
               </Link>
             </div>
@@ -1777,7 +1778,7 @@ export default function DashboardPage() {
             </div>
             <Link
               href="/keamanan"
-              className="text-xs font-semibold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0"
+              className="text-xs font-semibold siap-text-accent hover:underline inline-flex items-center gap-0.5 shrink-0"
             >
               Kelola <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
@@ -1823,11 +1824,11 @@ export default function DashboardPage() {
               <h3 className="font-bold text-sm text-slate-900">Dapur &amp; Laundry</h3>
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold shrink-0">
-              <Link href="/dapur" className="text-emerald-700 hover:underline">
+              <Link href="/dapur" className="siap-text-accent hover:underline">
                 Dapur
               </Link>
               <span className="text-slate-300">|</span>
-              <Link href="/laundry" className="text-emerald-700 hover:underline">
+              <Link href="/laundry" className="siap-text-accent hover:underline">
                 Laundry
               </Link>
             </div>
@@ -1866,15 +1867,15 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Package className="w-4 h-4 text-emerald-700 shrink-0" />
+              <Package className="w-4 h-4 siap-text-accent shrink-0" />
               <h3 className="font-bold text-sm text-slate-900">Sarpras &amp; Kegiatan</h3>
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold shrink-0">
-              <Link href="/sarpras" className="text-emerald-700 hover:underline">
+              <Link href="/sarpras" className="siap-text-accent hover:underline">
                 Sarpras
               </Link>
               <span className="text-slate-300">|</span>
-              <Link href="/kegiatan" className="text-emerald-700 hover:underline">
+              <Link href="/kegiatan" className="siap-text-accent hover:underline">
                 Agenda
               </Link>
             </div>
@@ -1905,10 +1906,10 @@ export default function DashboardPage() {
           </div>
           <Link
             href="/laporan"
-            className="w-full py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center justify-between transition-colors"
+            className="w-full py-2 px-3 rounded-xl siap-soft-box border text-xs font-bold flex items-center justify-between transition-colors hover:opacity-90"
           >
             <span className="inline-flex items-center gap-1.5">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
               Buka Pusat Laporan (PDF &amp; Excel)
             </span>
             <ArrowUpRight className="w-3.5 h-3.5" />

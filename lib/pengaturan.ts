@@ -82,7 +82,7 @@ export type ThemePresetKey =
   | 'slate'
   | 'custom';
 
-export type ThemeMode = 'light' | 'warm' | 'dark';
+export type ThemeMode = 'light' | 'warm' | 'dark' | 'system';
 export type ThemeFont = 'jakarta' | 'dmsans' | 'manrope' | 'lora';
 export type ThemeRadius = 'sharp' | 'medium' | 'rounded';
 export type ThemeDensity = 'comfortable' | 'compact';
@@ -383,6 +383,7 @@ export const DEFAULT_PENGATURAN_FORM: PengaturanFormState = {
 
 export const LS_PENGATURAN_EXTENDED_KEY = 'siap_pengaturan_extended_v1';
 export const LS_TEMA_APLIKASI_KEY = 'siap_tema_aplikasi_v1';
+export const LS_TEMA_MODE_OVERRIDE_KEY = 'siap_tema_mode_override_v1';
 export const LS_MOBILE_NAV_KEY = 'siap_mobile_nav_v1';
 export const THEME_UPDATED_EVENT = 'siap-theme-updated';
 export const MOBILE_NAV_UPDATED_EVENT = 'siap-mobile-nav-updated';
@@ -721,7 +722,7 @@ export function mergeTemaAplikasi(raw: unknown): TemaAplikasiConfig {
     primaryColor: sanitizeHexColor(obj.primaryColor, DEFAULT_TEMA_APLIKASI.primaryColor),
     sidebarColor: sanitizeHexColor(obj.sidebarColor, DEFAULT_TEMA_APLIKASI.sidebarColor),
     mode:
-      obj.mode && ['light', 'warm', 'dark'].includes(obj.mode)
+      obj.mode && ['light', 'warm', 'dark', 'system'].includes(obj.mode)
         ? obj.mode
         : DEFAULT_TEMA_APLIKASI.mode,
     fontFamily:
@@ -1030,6 +1031,42 @@ export function writeTemaLocal(tema: TemaAplikasiConfig): void {
   }
 }
 
+export function readTemaModeOverride(): ThemeMode | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(LS_TEMA_MODE_OVERRIDE_KEY);
+    if (raw && ['light', 'warm', 'dark', 'system'].includes(raw)) {
+      return raw as ThemeMode;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeTemaModeOverride(mode: ThemeMode | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!mode) {
+      window.localStorage.removeItem(LS_TEMA_MODE_OVERRIDE_KEY);
+    } else {
+      window.localStorage.setItem(LS_TEMA_MODE_OVERRIDE_KEY, mode);
+    }
+  } catch {
+    // Abaikan jika storage penuh
+  }
+}
+
+export function resolveEffectiveThemeMode(mode: ThemeMode): 'light' | 'warm' | 'dark' {
+  if (mode === 'system') {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'light';
+  }
+  return mode;
+}
+
 export function applyThemeToDocument(
   rawTema: TemaAplikasiConfig,
   extra?: { logoUrl?: string }
@@ -1037,6 +1074,7 @@ export function applyThemeToDocument(
   if (typeof document === 'undefined') return;
   const tema = mergeTemaAplikasi(rawTema);
   const root = document.documentElement;
+  const resolvedMode = resolveEffectiveThemeMode(tema.mode);
 
   const fontSpec = FONT_OPTIONS.find((f) => f.key === tema.fontFamily) || FONT_OPTIONS[0];
   const radiusPx = tema.radius === 'sharp' ? '6px' : tema.radius === 'rounded' ? '20px' : '12px';
@@ -1046,13 +1084,13 @@ export function applyThemeToDocument(
   root.style.setProperty('--siap-font', fontSpec.cssVar);
   root.style.setProperty('--siap-radius', radiusPx);
 
-  if (tema.mode === 'dark') {
+  if (resolvedMode === 'dark') {
     root.classList.add('dark');
     root.style.setProperty('--siap-bg', '#0b1120');
     root.style.setProperty('--siap-surface', '#111827');
     root.style.setProperty('--siap-text', '#f1f5f9');
     root.style.colorScheme = 'dark';
-  } else if (tema.mode === 'warm') {
+  } else if (resolvedMode === 'warm') {
     root.classList.remove('dark');
     root.style.setProperty('--siap-bg', '#f7f4ed');
     root.style.setProperty('--siap-surface', '#fffdf9');
@@ -1067,6 +1105,7 @@ export function applyThemeToDocument(
   }
 
   root.dataset.themeMode = tema.mode;
+  root.dataset.themeResolved = resolvedMode;
   root.dataset.themeFont = tema.fontFamily;
   root.dataset.themeRadius = tema.radius;
   root.dataset.themeDensity = tema.density;
@@ -1076,4 +1115,78 @@ export function applyThemeToDocument(
       new CustomEvent(THEME_UPDATED_EVENT, { detail: { tema, logoUrl: extra?.logoUrl } })
     );
   }
+}
+
+export function runThemeTransitionWithAnimation(opts: {
+  origin?: { x: number; y: number } | null;
+  applyFn: () => void;
+}): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    opts.applyFn();
+    return;
+  }
+
+  const prefersReduced =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) {
+    opts.applyFn();
+    return;
+  }
+
+  const root = document.documentElement;
+  const docWithTransition = document as Document & {
+    startViewTransition?: (cb: () => void) => {
+      ready: Promise<void>;
+      finished: Promise<void>;
+    };
+  };
+
+  if (typeof docWithTransition.startViewTransition === 'function') {
+    const x = opts.origin?.x ?? window.innerWidth / 2;
+    const y = opts.origin?.y ?? 24;
+    const endRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    );
+
+    root.classList.add('theme-view-transition');
+    try {
+      const transition = docWithTransition.startViewTransition(() => {
+        opts.applyFn();
+      });
+      transition.ready
+        .then(() => {
+          root.animate(
+            {
+              clipPath: [
+                `circle(0px at ${x}px ${y}px)`,
+                `circle(${endRadius}px at ${x}px ${y}px)`,
+              ],
+            },
+            {
+              duration: 400,
+              easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+              pseudoElement: '::view-transition-new(root)',
+            }
+          );
+        })
+        .catch(() => {
+          // Abaikan jika browser membatalkan pseudoElement animation
+        });
+      transition.finished.finally(() => {
+        root.classList.remove('theme-view-transition');
+      });
+      return;
+    } catch {
+      root.classList.remove('theme-view-transition');
+    }
+  }
+
+  // Fallback smooth crossfade 350ms untuk browser lama
+  root.classList.add('theme-crossfade-transition');
+  opts.applyFn();
+  window.setTimeout(() => {
+    root.classList.remove('theme-crossfade-transition');
+  }, 380);
 }
