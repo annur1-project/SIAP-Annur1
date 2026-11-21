@@ -604,7 +604,7 @@ export default function LaundryPage() {
                   t.type === 'error'
                     ? 'border-rose-200 text-rose-900'
                     : t.type === 'success'
-                    ? 'border-emerald-200 text-emerald-950'
+                    ? 'siap-border-accent text-slate-900'
                     : 'border-slate-200 text-slate-900'
                 }`}
               >
@@ -613,7 +613,7 @@ export default function LaundryPage() {
                     t.type === 'error'
                       ? 'text-rose-600'
                       : t.type === 'success'
-                      ? 'text-emerald-600'
+                      ? 'siap-text-accent'
                       : 'text-sky-600'
                   }`}
                 />
@@ -630,7 +630,7 @@ export default function LaundryPage() {
         <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2.5">
-              <Shirt className="w-6 h-6 text-emerald-600 shrink-0" />
+              <Shirt className="w-6 h-6 siap-text-accent shrink-0" />
               Sie Laundry Pondok
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -653,13 +653,13 @@ export default function LaundryPage() {
               onClick={handleExportExcel}
               className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
               Export Excel
             </button>
             <button
               type="button"
               onClick={() => window.print()}
-              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Printer className="w-4 h-4" />
               Cetak Rekap
@@ -687,7 +687,7 @@ export default function LaundryPage() {
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200">
             <span className="text-xs font-semibold text-slate-500 block">Total Jumlah Potong</span>
-            <strong className="text-2xl font-bold text-emerald-700 tabular-nums mt-1 block">
+            <strong className="text-2xl font-bold siap-text-accent tabular-nums mt-1 block">
               {loading ? '...' : `${dailySummary.totalPotong} pcs`}
             </strong>
             <span className="text-[11px] text-slate-500">Akumulasi potong cucian tanggal dipilih</span>
@@ -698,7 +698,7 @@ export default function LaundryPage() {
             <strong className="text-2xl font-bold text-slate-900 tabular-nums mt-1 block">
               {loading ? '...' : dailySummary.selesaiCount}
             </strong>
-            <span className="text-[11px] text-emerald-700">Kamar tuntas siap/sudah kembali</span>
+            <span className="text-[11px] siap-text-accent">Kamar tuntas siap/sudah kembali</span>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -717,7 +717,7 @@ export default function LaundryPage() {
             onClick={() => setActiveTab('harian')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'harian'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -729,7 +729,7 @@ export default function LaundryPage() {
             onClick={() => setActiveTab('jadwal')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'jadwal'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -741,7 +741,7 @@ export default function LaundryPage() {
             onClick={() => setActiveTab('laporan')}
             className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'laporan'
-                ? 'bg-white text-emerald-800 shadow-sm'
+                ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -777,7 +777,7 @@ export default function LaundryPage() {
                     setSelectedDate(e.target.value);
                     setOverrideFridayInput(false);
                   }}
-                  className="flex-1 min-w-[140px] sm:flex-none min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono tabular-nums border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="flex-1 min-w-[140px] sm:flex-none min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono tabular-nums border border-slate-200 rounded-xl bg-white focus:outline-none siap-ring-focus"
                 />
                 <button
                   type="button"
@@ -798,7 +798,7 @@ export default function LaundryPage() {
                       setSelectedDate(todayStr);
                       setOverrideFridayInput(false);
                     }}
-                    className="min-h-[40px] px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-semibold whitespace-nowrap"
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl border siap-soft-box text-xs font-semibold whitespace-nowrap"
                   >
                     Hari Ini
                   </button>
@@ -817,7 +817,7 @@ export default function LaundryPage() {
                   <button
                     type="button"
                     onClick={handleMarkAllDoneToday}
-                    className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap"
+                    className="min-h-[38px] px-3.5 py-1.5 rounded-xl siap-soft-box hover:opacity-90 border text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap"
                   >
                     <Check className="w-3.5 h-3.5" />
                     Tandai Semua Selesai
@@ -828,7 +828,7 @@ export default function LaundryPage() {
                   onClick={() => handleCopyWaDaily(selectedDate, dailyRecords)}
                   className="min-h-[38px] px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
                 >
-                  <ClipboardCopy className="w-3.5 h-3.5 text-emerald-600" />
+                  <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
                   Salin WA Hari Ini
                 </button>
               </div>
@@ -836,7 +836,7 @@ export default function LaundryPage() {
 
             {loading ? (
               <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+                <Loader2 className="w-5 h-5 animate-spin siap-text-accent" />
                 <span>Memuat catatan laundry...</span>
               </div>
             ) : isFridaySelected && !overrideFridayInput && dailyRecords.length === 0 ? (
@@ -855,7 +855,7 @@ export default function LaundryPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedDate(addDaysIso(selectedDate, 1))}
-                    className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl"
+                    className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl"
                   >
                     Lanjut ke Hari Sabtu
                   </button>
@@ -891,7 +891,7 @@ export default function LaundryPage() {
                         <button
                           type="button"
                           onClick={() => setActiveTab('jadwal')}
-                          className="text-xs font-semibold text-emerald-700 hover:underline whitespace-nowrap"
+                          className="text-xs font-semibold siap-text-accent hover:underline whitespace-nowrap"
                         >
                           Ubah Giliran Kamar
                         </button>
@@ -943,7 +943,7 @@ export default function LaundryPage() {
                                           }))
                                         }
                                         placeholder="0"
-                                        className="w-24 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                        className="w-24 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono font-bold tabular-nums text-right border border-slate-200 rounded-xl focus:outline-none siap-ring-focus"
                                       />
                                       <span className="text-xs font-semibold text-slate-500">pcs</span>
                                     </div>
@@ -957,13 +957,13 @@ export default function LaundryPage() {
                                         }))
                                       }
                                       placeholder="Catatan singkat (opsional)"
-                                      className="flex-1 min-w-[140px] sm:max-w-xs min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                      className="flex-1 min-w-[140px] sm:max-w-xs min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none siap-ring-focus"
                                     />
                                     <button
                                       type="button"
                                       onClick={() => handleSaveScheduledRoom(kamar)}
                                       disabled={savingId === `new-${kamar}`}
-                                      className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl whitespace-nowrap shrink-0"
+                                      className="min-h-[40px] px-4 py-2 siap-btn-primary disabled:opacity-60 text-xs font-bold rounded-xl whitespace-nowrap shrink-0"
                                     >
                                       {savingId === `new-${kamar}` ? 'Menyimpan...' : 'Catat Masuk'}
                                     </button>
@@ -985,7 +985,7 @@ export default function LaundryPage() {
                           return (
                             <div
                               key={existing.id}
-                              className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-emerald-50/20"
+                              className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/40"
                             >
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
@@ -995,7 +995,7 @@ export default function LaundryPage() {
                                   <span
                                     className={`px-2 py-0.5 rounded-md border text-[11px] font-bold ${
                                       existing.status === 'selesai'
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        ? 'siap-soft-box'
                                         : 'bg-amber-50 text-amber-800 border-amber-200'
                                     }`}
                                   >
@@ -1068,7 +1068,7 @@ export default function LaundryPage() {
                                     className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-colors ${
                                       existing.status === 'selesai'
                                         ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                        : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                                        : 'siap-btn-primary border-transparent'
                                     }`}
                                   >
                                     {existing.status === 'selesai'
@@ -1210,7 +1210,7 @@ export default function LaundryPage() {
                                 <span
                                   className={`px-2 py-0.5 rounded-md border text-[11px] font-bold ${
                                     item.status === 'selesai'
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      ? 'siap-soft-box'
                                       : 'bg-amber-50 text-amber-800 border-amber-200'
                                   }`}
                                 >
@@ -1267,7 +1267,7 @@ export default function LaundryPage() {
                                   className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap ${
                                     item.status === 'selesai'
                                       ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                                      : 'siap-btn-primary border-transparent'
                                   }`}
                                 >
                                   {item.status === 'selesai' ? 'Ubah ke Masuk' : 'Tandai Selesai'}
@@ -1342,7 +1342,7 @@ export default function LaundryPage() {
                           <span className="text-[11px] text-slate-500 block">Hari Operasional</span>
                           <h3 className="text-base font-bold text-slate-900">{hari.label}</h3>
                         </div>
-                        <span className="font-mono tabular-nums text-xs font-bold text-emerald-700">
+                        <span className="font-mono tabular-nums text-xs font-bold siap-text-accent">
                           {row.kamar_list.length} Kamar
                         </span>
                       </div>
@@ -1369,7 +1369,7 @@ export default function LaundryPage() {
                       <button
                         type="button"
                         onClick={() => openEditJadwalModal(row)}
-                        className="min-h-[38px] w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-800 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors"
+                        className="min-h-[38px] w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors"
                       >
                         <Settings2 className="w-3.5 h-3.5" />
                         Atur Kamar Hari {hari.label}
@@ -1441,7 +1441,7 @@ export default function LaundryPage() {
                   onClick={handleCopyWaPeriod}
                   className="min-h-[40px] px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
                 >
-                  <ClipboardCopy className="w-3.5 h-3.5 text-emerald-600" />
+                  <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
                   Salin Rekap WA
                 </button>
               </div>
@@ -1463,7 +1463,7 @@ export default function LaundryPage() {
               </div>
               <div className="bg-white p-4 rounded-2xl border border-slate-200">
                 <span className="text-xs text-slate-500 block">Akumulasi Potong</span>
-                <strong className="text-xl font-bold text-emerald-700 tabular-nums mt-0.5 block">
+                <strong className="text-xl font-bold siap-text-accent tabular-nums mt-0.5 block">
                   {reportAggregate.totalPotong} pcs
                 </strong>
               </div>
@@ -1520,7 +1520,7 @@ export default function LaundryPage() {
                                   key={x.id}
                                   className={`px-2 py-1 rounded-lg border text-[11px] font-medium tabular-nums ${
                                     x.status === 'selesai'
-                                      ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                                      ? 'siap-soft-box'
                                       : 'bg-amber-50/70 border-amber-200 text-amber-900'
                                   }`}
                                 >
@@ -1540,7 +1540,7 @@ export default function LaundryPage() {
                             <span
                               className={`px-2 py-0.5 rounded-md border text-[11px] font-bold tabular-nums ${
                                 group.selesaiCount === group.totalKamar
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  ? 'siap-soft-box'
                                   : 'bg-amber-50 text-amber-800 border-amber-200'
                               }`}
                             >
@@ -1555,7 +1555,7 @@ export default function LaundryPage() {
                                 title="Salin WA tanggal ini"
                                 className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                               >
-                                <ClipboardCopy className="w-3.5 h-3.5 text-emerald-600" />
+                                <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
                               </button>
                               <button
                                 type="button"
@@ -1563,7 +1563,7 @@ export default function LaundryPage() {
                                   setSelectedDate(group.tanggal);
                                   setActiveTab('harian');
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold siap-text-accent hover:bg-slate-50"
                               >
                                 Buka
                               </button>
@@ -1618,13 +1618,13 @@ export default function LaundryPage() {
                       onClick={() => toggleKamarInModal(kamar)}
                       className={`p-2.5 rounded-xl border text-left transition-colors ${
                         checked
-                          ? 'bg-emerald-50 border-emerald-500 text-emerald-950'
+                          ? 'siap-soft-box border'
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-xs font-bold truncate">{kamar}</span>
-                        {checked && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                        {checked && <Check className="w-3.5 h-3.5 siap-text-accent shrink-0" />}
                       </div>
                       {otherDays.length > 0 && (
                         <span className="text-[10px] text-slate-500 block mt-0.5 truncate">
@@ -1674,7 +1674,7 @@ export default function LaundryPage() {
                 <button
                   type="button"
                   onClick={handleSaveJadwalModal}
-                  className="min-h-[38px] px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+                  className="min-h-[38px] px-4 py-1.5 text-xs font-bold siap-btn-primary rounded-xl"
                 >
                   Simpan Jadwal
                 </button>

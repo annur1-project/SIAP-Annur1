@@ -629,7 +629,7 @@ export default function PendaftaranInternalPage() {
     );
   };
 
-  // Centang Massal -> Aktifkan Massal (Menunggu Penempatan + NIS 27XXXX berurutan)
+  // Centang Massal -> Aktifkan Massal (Menunggu Penempatan + NIS dinamis berurutan)
   const handleBulkAktifkanMassal = async () => {
     if (!canEdit || selectedEligibleRecords.length === 0) return;
     setBulkActivating(true);
@@ -727,7 +727,7 @@ export default function PendaftaranInternalPage() {
         <div
           className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex items-center gap-2 border ${
             toast.type === 'success'
-              ? 'bg-emerald-900 text-white border-emerald-700'
+              ? 'siap-btn-sidebar border'
               : 'bg-rose-600 text-white border-rose-700'
           }`}
         >
@@ -743,7 +743,7 @@ export default function PendaftaranInternalPage() {
       {/* HEADER */}
       <header className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider siap-text-accent">
             <UserPlus className="w-3.5 h-3.5" />
             Penerimaan Santri Baru (PSB) · TA {skema.tahun_ajaran_psb || dynamicPsbInfo.tahunAjaranPsb || '...'}
           </span>
@@ -759,7 +759,7 @@ export default function PendaftaranInternalPage() {
           <button
             type="button"
             onClick={() => copyPublicUrl('/daftar', 'Formulir /daftar')}
-            className="min-h-[38px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="min-h-[38px] px-3 py-2 siap-soft-box hover:opacity-90 border rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <ClipboardCopy className="w-3.5 h-3.5 shrink-0" />
             Salin Link /daftar
@@ -842,12 +842,12 @@ export default function PendaftaranInternalPage() {
             {counts.terverifikasi}
           </p>
         </div>
-        <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4">
-          <p className="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
+        <div className="siap-soft-box border rounded-2xl p-4">
+          <p className="text-[11px] font-semibold siap-text-accent flex items-center gap-1">
             <Sparkles className="w-3.5 h-3.5" />
             Sisa Kuota Free Pangkal (100)
           </p>
-          <p className="text-xl sm:text-2xl font-black text-emerald-900 tabular-nums mt-1">
+          <p className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums mt-1">
             {sisaKuota} / {skema.kuota_gratis_uang_pangkal}
           </p>
         </div>
@@ -894,19 +894,19 @@ export default function PendaftaranInternalPage() {
 
       {/* BULK ACTION BAR CENTANG MASSAL */}
       {canEdit && (eligibleBulkRecords.length > 0 || selectedEligibleRecords.length > 0) && (
-        <div className="bg-emerald-950 text-white border border-emerald-800 rounded-2xl p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="siap-btn-sidebar text-white border border-white/15 rounded-2xl p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={toggleSelectAllEligible}
-              className="min-h-[36px] px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer whitespace-nowrap"
+              className="min-h-[36px] px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white font-bold rounded-xl cursor-pointer whitespace-nowrap transition-colors"
             >
               {eligibleBulkRecords.length > 0 &&
               eligibleBulkRecords.every((r) => selectedIds.includes(r.id))
                 ? 'Batalkan Semua Centang'
                 : `Pilih Semua DP Terverifikasi (${eligibleBulkRecords.length})`}
             </button>
-            <span className="text-emerald-100">
+            <span className="text-white/90">
               Terpilih: <strong className="font-mono">{selectedEligibleRecords.length}</strong> calon santri terverifikasi DP (otomatis masuk kamar{' '}
               <strong>Menunggu Penempatan</strong> &amp; NIS{' '}
               {String(skema.tahun_psb || dynamicPsbInfo.tahunPsb || 'XX').slice(-2)}XXXX)
@@ -919,7 +919,7 @@ export default function PendaftaranInternalPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedIds([])}
-                  className="min-h-[36px] px-3 py-1.5 bg-emerald-900 hover:bg-emerald-800 text-emerald-200 font-semibold rounded-xl cursor-pointer"
+                  className="min-h-[36px] px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/90 font-semibold rounded-xl cursor-pointer transition-colors"
                 >
                   Batal
                 </button>
@@ -927,9 +927,10 @@ export default function PendaftaranInternalPage() {
                   type="button"
                   disabled={bulkActivating}
                   onClick={handleBulkAktifkanMassal}
-                  className="min-h-[38px] px-4 py-1.5 bg-white hover:bg-emerald-50 text-emerald-950 font-extrabold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
+                  style={{ color: 'var(--siap-sidebar, #064e3b)' }}
+                  className="min-h-[38px] px-4 py-1.5 bg-white hover:bg-white/90 font-extrabold rounded-xl inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
                 >
-                  <UserCheck className="w-4 h-4 text-emerald-700" />
+                  <UserCheck className="w-4 h-4 siap-text-accent" />
                   {bulkActivating
                     ? 'Mengaktifkan...'
                     : `Aktifkan Massal (${selectedEligibleRecords.length}) Jadi Santri`}
@@ -946,7 +947,7 @@ export default function PendaftaranInternalPage() {
           <UserPlus className="w-8 h-8 text-slate-300 mx-auto" />
           <p className="text-sm font-bold text-slate-800">Belum Ada Antrean Pendaftaran</p>
           <p className="text-xs text-slate-500">
-            Bagikan tautan <code className="font-mono font-bold text-emerald-700">/daftar</code> ke calon wali santri untuk mulai menerima pendaftaran online.
+            Bagikan tautan <code className="font-mono font-bold siap-text-accent">/daftar</code> ke calon wali santri untuk mulai menerima pendaftaran online.
           </p>
         </div>
       ) : (
@@ -964,7 +965,7 @@ export default function PendaftaranInternalPage() {
                 <div
                   key={rec.id}
                   className={`bg-white border rounded-2xl p-4 space-y-3 shadow-xs ${
-                    checked ? 'border-emerald-600 ring-1 ring-emerald-600' : 'border-slate-200'
+                    checked ? 'siap-border-accent ring-1' : 'border-slate-200'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -975,11 +976,11 @@ export default function PendaftaranInternalPage() {
                           checked={checked}
                           onChange={() => toggleSelectId(rec.id)}
                           aria-label={`Pilih ${rec.nama_lengkap} untuk aktivasi massal`}
-                          className="mt-1 w-4 h-4 accent-emerald-700 rounded cursor-pointer shrink-0"
+                          className="mt-1 w-4 h-4 siap-accent-control rounded cursor-pointer shrink-0"
                         />
                       )}
                       <div className="min-w-0">
-                        <span className="font-mono text-[11px] font-bold text-emerald-700">
+                        <span className="font-mono text-[11px] font-bold siap-text-accent">
                           {rec.no_registrasi}
                         </span>
                         <h3 className="text-sm font-extrabold text-slate-900">{rec.nama_lengkap}</h3>
@@ -1011,7 +1012,7 @@ export default function PendaftaranInternalPage() {
                   <button
                     type="button"
                     onClick={() => openDetailModal(rec)}
-                    className="w-full min-h-[40px] px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="w-full min-h-[40px] px-3 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Eye className="w-4 h-4" />
                     Periksa &amp; Proses Pendaftar
@@ -1038,7 +1039,7 @@ export default function PendaftaranInternalPage() {
                           }
                           onChange={toggleSelectAllEligible}
                           aria-label="Pilih semua calon santri terverifikasi DP"
-                          className="w-4 h-4 accent-emerald-700 rounded cursor-pointer disabled:opacity-40"
+                          className="w-4 h-4 siap-accent-control rounded cursor-pointer disabled:opacity-40"
                         />
                       )}
                     </th>
@@ -1061,7 +1062,7 @@ export default function PendaftaranInternalPage() {
                       rec.status === 'dp_terverifikasi' || rec.status === 'lunas_menunggu_kedatangan';
                     const checked = selectedIds.includes(rec.id);
                     return (
-                      <tr key={rec.id} className={checked ? 'bg-emerald-50/60' : 'hover:bg-slate-50/70'}>
+                      <tr key={rec.id} className={checked ? 'siap-soft-box' : 'hover:bg-slate-50/70'}>
                         <td className="pl-4 pr-2 py-3">
                           {canEdit && canBulkCheck ? (
                             <input
@@ -1069,14 +1070,14 @@ export default function PendaftaranInternalPage() {
                               checked={checked}
                               onChange={() => toggleSelectId(rec.id)}
                               aria-label={`Pilih ${rec.nama_lengkap}`}
-                              className="w-4 h-4 accent-emerald-700 rounded cursor-pointer"
+                              className="w-4 h-4 siap-accent-control rounded cursor-pointer"
                             />
                           ) : (
                             <span className="text-slate-300">-</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="font-mono text-[11px] font-bold text-emerald-700 block">
+                          <span className="font-mono text-[11px] font-bold siap-text-accent block">
                             {rec.no_registrasi}
                           </span>
                           <span className="font-bold text-slate-900">{rec.nama_lengkap}</span>
@@ -1106,7 +1107,7 @@ export default function PendaftaranInternalPage() {
                             {rec.paket}
                           </span>
                           {rec.dapat_promo_pangkal && (
-                            <span className="block text-[10px] font-semibold text-emerald-700 mt-0.5">
+                            <span className="block text-[10px] font-semibold siap-text-accent mt-0.5">
                               Free Pangkal
                             </span>
                           )}
@@ -1114,7 +1115,7 @@ export default function PendaftaranInternalPage() {
                         <td className="px-4 py-3 text-right font-mono font-bold tabular-nums">
                           {formatRupiah(rec.total_biaya_akhir)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-emerald-700 tabular-nums">
+                        <td className="px-4 py-3 text-right font-mono font-bold siap-text-accent tabular-nums">
                           {formatRupiah(paid)}
                         </td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-amber-800 tabular-nums">
@@ -1131,7 +1132,7 @@ export default function PendaftaranInternalPage() {
                           <button
                             type="button"
                             onClick={() => openDetailModal(rec)}
-                            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                            className="px-3 py-1.5 siap-btn-primary text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
                             Proses
@@ -1151,9 +1152,9 @@ export default function PendaftaranInternalPage() {
       {selected && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
-            <div className="bg-emerald-950 text-white px-5 py-4 flex items-center justify-between gap-3">
+            <div className="siap-btn-sidebar text-white px-5 py-4 flex items-center justify-between gap-3">
               <div>
-                <p className="font-mono text-xs text-emerald-300 font-bold">
+                <p className="font-mono text-xs text-white/80 font-bold">
                   {selected.no_registrasi} · {PSB_STATUS_META[selected.status].label}
                 </p>
                 <h2 className="text-base sm:text-lg font-extrabold">{selected.nama_lengkap}</h2>
@@ -1162,7 +1163,7 @@ export default function PendaftaranInternalPage() {
                 type="button"
                 onClick={() => setSelected(null)}
                 aria-label="Tutup detail pendaftaran"
-                className="p-1.5 text-emerald-200 hover:text-white cursor-pointer"
+                className="p-1.5 text-white/80 hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1210,7 +1211,7 @@ export default function PendaftaranInternalPage() {
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-emerald-700 text-white font-bold rounded-lg inline-flex items-center gap-1"
+                      className="px-3 py-1.5 siap-btn-primary font-bold rounded-lg inline-flex items-center gap-1"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
                       Chat WA Wali
@@ -1337,9 +1338,9 @@ export default function PendaftaranInternalPage() {
 
               {/* AKSI TAHAP 2: VERIFIKASI DP */}
               {canEdit && selected.status === 'menunggu_verifikasi' && (
-                <div className="border-2 border-emerald-200 bg-emerald-50/50 rounded-xl p-4 space-y-3">
-                  <p className="font-bold text-emerald-950 flex items-center gap-1.5">
-                    <Wallet className="w-4 h-4 text-emerald-700" />
+                <div className="border-2 siap-border-accent siap-soft-box rounded-xl p-4 space-y-3">
+                  <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <Wallet className="w-4 h-4 siap-text-accent" />
                     Tahap 2: Verifikasi DP &amp; Kunci Kuota Diskon 100 Pendaftar
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
@@ -1374,7 +1375,7 @@ export default function PendaftaranInternalPage() {
                       type="button"
                       disabled={savingAction}
                       onClick={handleVerifikasiDp}
-                      className="min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl cursor-pointer whitespace-nowrap"
+                      className="min-h-[40px] px-4 py-2 siap-btn-primary font-bold rounded-xl cursor-pointer whitespace-nowrap"
                     >
                       {savingAction ? 'Memproses...' : 'Verifikasi DP & Catat Kas'}
                     </button>
@@ -1384,7 +1385,7 @@ export default function PendaftaranInternalPage() {
                       ? 'DP Transfer tercatat di laporan Pemasukan Transfer (tidak menambah saldo kas tunai Dompet).'
                       : 'DP Tunai langsung masuk ke saldo tunai Dompet Pendaftaran.'}
                   </p>
-                  <div className="pt-2 border-t border-emerald-200/70 space-y-1.5">
+                  <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
                     <p className="text-[11px] font-bold text-rose-800">
                       Jika bukti transfer palsu / tidak ditemukan di mutasi rekening:
                     </p>
@@ -1528,7 +1529,7 @@ export default function PendaftaranInternalPage() {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Tanggal Masuk Resmi (NIS {tglMasukAktual.slice(2, 4) || '27'}XXXX) *
+                        Tanggal Masuk Resmi (NIS {tglMasukAktual.slice(2, 4) || dynamicPsbInfo.nisPrefix || 'XX'}XXXX) *
                       </label>
                       <input
                         type="date"
@@ -1610,7 +1611,7 @@ export default function PendaftaranInternalPage() {
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-4 py-2 bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
                   Cetak / Simpan PDF
@@ -1626,8 +1627,14 @@ export default function PendaftaranInternalPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <div className="w-[21cm] min-h-[10cm] mx-auto border-2 border-emerald-900 rounded-xl p-5 flex flex-col justify-between bg-white text-slate-900">
-                <div className="flex items-center justify-between border-b-2 border-emerald-800 pb-2.5">
+              <div
+                style={{ borderColor: 'var(--siap-sidebar, #064e3b)' }}
+                className="print-clean-surface w-[21cm] min-h-[10cm] mx-auto border-2 rounded-xl p-5 flex flex-col justify-between bg-white text-slate-900"
+              >
+                <div
+                  style={{ borderColor: 'var(--siap-primary, #047857)' }}
+                  className="flex items-center justify-between border-b-2 pb-2.5"
+                >
                   <div className="flex items-center gap-3">
                     {pengaturan.logo_url && (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1639,14 +1646,20 @@ export default function PendaftaranInternalPage() {
                       />
                     )}
                     <div>
-                      <p className="text-sm font-black uppercase text-emerald-950">
+                      <p
+                        style={{ color: 'var(--siap-sidebar, #064e3b)' }}
+                        className="text-sm font-black uppercase"
+                      >
                         {pengaturan.nama_pesantren}
                       </p>
                       <p className="text-[10px] text-slate-600">{pengaturan.alamat_lengkap}</p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-bold uppercase text-emerald-800">
+                    <p
+                      style={{ color: 'var(--siap-primary, #047857)' }}
+                      className="text-[10px] font-bold uppercase"
+                    >
                       KUITANSI PENDAFTARAN PSB
                     </p>
                     <p className="font-mono text-xs font-bold">{kuitansiPreview.nomor}</p>
@@ -1689,11 +1702,11 @@ export default function PendaftaranInternalPage() {
                 </div>
 
                 <div className="flex items-end justify-between border-t border-slate-200 pt-2">
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">
-                    <p className="text-[10px] font-semibold text-emerald-800 uppercase">
+                  <div className="siap-soft-box border rounded-lg px-4 py-2">
+                    <p className="text-[10px] font-semibold siap-text-accent uppercase">
                       Nominal Diterima
                     </p>
-                    <p className="text-lg font-black font-mono text-emerald-950">
+                    <p className="text-lg font-black font-mono text-slate-900">
                       {formatRupiah(kuitansiPreview.nominal)}
                     </p>
                   </div>

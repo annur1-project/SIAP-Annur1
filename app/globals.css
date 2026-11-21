@@ -11,6 +11,21 @@
   --siap-radius: 12px;
   --siap-font: var(--font-jakarta), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  /* Variabel turunan warna tema aktif */
+  --siap-primary-hover: color-mix(in srgb, var(--siap-primary) 84%, #000000);
+  --siap-primary-deep: color-mix(in srgb, var(--siap-sidebar) 88%, #000000);
+  --siap-primary-soft: color-mix(in srgb, var(--siap-primary) 11%, transparent);
+  --siap-primary-soft-hover: color-mix(in srgb, var(--siap-primary) 19%, transparent);
+  --siap-primary-border: color-mix(in srgb, var(--siap-primary) 32%, transparent);
+  --siap-primary-text: var(--siap-primary);
+}
+
+html.dark {
+  --siap-primary-soft: color-mix(in srgb, var(--siap-primary) 22%, transparent);
+  --siap-primary-soft-hover: color-mix(in srgb, var(--siap-primary) 32%, transparent);
+  --siap-primary-border: color-mix(in srgb, var(--siap-primary) 44%, transparent);
+  --siap-primary-text: color-mix(in srgb, var(--siap-primary) 54%, #ffffff);
 }
 
 @theme inline {
@@ -30,6 +45,67 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ========================================================================== */
+/* UTILITAS WARNA TEMA DINAMIS (MENGIKUTI PILIHAN TEMA AKTIF)                  */
+/* ========================================================================== */
+.siap-hero {
+  background: linear-gradient(135deg, var(--siap-sidebar) 0%, var(--siap-primary) 100%);
+  color: #ffffff;
+}
+
+.siap-btn-primary {
+  background-color: var(--siap-primary);
+  color: #ffffff;
+}
+.siap-btn-primary:hover:not(:disabled) {
+  background-color: var(--siap-primary-hover);
+}
+
+.siap-btn-sidebar {
+  background-color: var(--siap-sidebar);
+  color: #ffffff;
+}
+.siap-btn-sidebar:hover:not(:disabled) {
+  background-color: var(--siap-primary-deep);
+}
+
+.siap-btn-outline {
+  border-color: var(--siap-primary);
+  color: var(--siap-primary-text);
+  background-color: transparent;
+}
+.siap-btn-outline:hover:not(:disabled) {
+  background-color: var(--siap-primary-soft);
+}
+
+.siap-soft-box {
+  background-color: var(--siap-primary-soft);
+  border-color: var(--siap-primary-border);
+  color: var(--siap-primary-text);
+}
+
+.siap-text-accent {
+  color: var(--siap-primary-text);
+}
+
+.siap-border-accent {
+  border-color: var(--siap-primary);
+}
+
+.siap-ring-focus:focus {
+  outline: none;
+  border-color: var(--siap-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--siap-primary) 30%, transparent);
+}
+
+.siap-accent-control {
+  accent-color: var(--siap-primary);
+}
+
+.siap-progress-fill {
+  background-color: var(--siap-primary);
+}
+
 /* Sidebar & mobile header follow customized sidebar theme */
 [data-siap-sidebar],
 [data-siap-mobile-header] {
@@ -42,96 +118,209 @@ body {
 }
 
 /* Primary action accent tinting when custom theme is selected */
-[data-theme-custom-accent="true"] button.bg-emerald-700,
-[data-theme-custom-accent="true"] a.bg-emerald-700,
-[data-theme-custom-accent="true"] button.bg-emerald-800,
-[data-theme-custom-accent="true"] button.bg-emerald-600 {
+[data-theme-custom-accent="true"] .bg-emerald-700,
+[data-theme-custom-accent="true"] .bg-emerald-800,
+[data-theme-custom-accent="true"] .bg-emerald-600,
+[data-theme-custom-accent="true"] .bg-\[\#065f46\] {
   background-color: var(--siap-primary);
 }
 
+[data-theme-custom-accent="true"] .bg-emerald-900,
+[data-theme-custom-accent="true"] .bg-emerald-950 {
+  background-color: var(--siap-sidebar);
+}
+
 [data-theme-custom-accent="true"] .text-emerald-700,
-[data-theme-custom-accent="true"] .text-emerald-800 {
-  color: var(--siap-primary);
+[data-theme-custom-accent="true"] .text-emerald-800,
+[data-theme-custom-accent="true"] .text-emerald-600,
+[data-theme-custom-accent="true"] .text-teal-700,
+[data-theme-custom-accent="true"] .text-\[\#065f46\] {
+  color: var(--siap-primary-text);
+}
+
+[data-theme-custom-accent="true"] .border-emerald-700,
+[data-theme-custom-accent="true"] .border-emerald-600,
+[data-theme-custom-accent="true"] .border-emerald-500,
+[data-theme-custom-accent="true"] .border-\[\#065f46\] {
+  border-color: var(--siap-primary);
+}
+
+[data-theme-custom-accent="true"] .bg-emerald-50,
+[data-theme-custom-accent="true"] .bg-emerald-50\/70,
+[data-theme-custom-accent="true"] .bg-emerald-50\/80,
+[data-theme-custom-accent="true"] .bg-teal-50 {
+  background-color: var(--siap-primary-soft);
+}
+
+[data-theme-custom-accent="true"] .border-emerald-200,
+[data-theme-custom-accent="true"] .border-teal-200 {
+  border-color: var(--siap-primary-border);
+}
+
+/* ========================================================================== */
+/* ANIMASI TRANSISI GELOMBANG MELINGKAR & FALLBACK CROSSFADE 350ms            */
+/* ========================================================================== */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+html.theme-crossfade-transition,
+html.theme-crossfade-transition body,
+html.theme-crossfade-transition [data-siap-shell],
+html.theme-crossfade-transition [data-siap-shell] * {
+  transition:
+    background-color 350ms ease,
+    color 350ms ease,
+    border-color 350ms ease,
+    fill 350ms ease,
+    stroke 350ms ease !important;
 }
 
 /* Warm mode soft paper canvas */
-html[data-theme-mode="warm"] [data-siap-shell] {
+html[data-theme-resolved="warm"] [data-siap-shell] {
   background-color: #f7f4ed;
 }
 
-html[data-theme-mode="warm"] main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+html[data-theme-resolved="warm"] main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
   background-color: #fffdf9;
   border-color: #e7e1d4;
 }
 
-html[data-theme-mode="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+html[data-theme-resolved="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
   background-color: #f4efe4;
 }
 
 /* Dark mode clean surface pairing (excludes printable paper documents) */
 @media screen {
-  html.dark [data-siap-shell] {
+  html.dark [data-siap-shell],
+  html.dark [data-siap-public-shell] {
     background-color: #0b1120;
     color: #f1f5f9;
   }
 
-  html.dark main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
-  html.dark main .bg-white\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+  html.dark main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/95:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *) {
     background-color: #111827;
     border-color: #1e293b;
     color: #f1f5f9;
   }
 
-  html.dark main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
-  html.dark main .bg-slate-50\/60:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
-  html.dark main .bg-slate-50\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *),
-  html.dark main .bg-slate-100:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *) {
+  html.dark main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-50\/50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-50\/60:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-50\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-100:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-200:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *) {
     background-color: #0f172a;
     border-color: #1e293b;
     color: #e2e8f0;
   }
 
-  html.dark main .bg-emerald-50:not(#pusat-laporan-dokumen *),
-  html.dark main .bg-emerald-50\/70:not(#pusat-laporan-dokumen *) {
-    background-color: rgba(6, 78, 59, 0.25);
-    border-color: rgba(16, 185, 129, 0.35);
-    color: #d1fae5;
+  html.dark main .hover\:bg-slate-50:hover:not(#pusat-laporan-dokumen *),
+  html.dark main .hover\:bg-slate-100:hover:not(#pusat-laporan-dokumen *) {
+    background-color: #1e293b;
   }
 
-  html.dark main .bg-amber-50:not(#pusat-laporan-dokumen *) {
-    background-color: rgba(120, 53, 15, 0.25);
+  html.dark main .bg-emerald-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-emerald-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-emerald-50\/80:not(#pusat-laporan-dokumen *) {
+    background-color: var(--siap-primary-soft);
+    border-color: var(--siap-primary-border);
+    color: color-mix(in srgb, var(--siap-primary) 25%, #f8fafc);
+  }
+
+  html.dark main .bg-amber-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-amber-50\/70:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(120, 53, 15, 0.28);
     border-color: rgba(245, 158, 11, 0.35);
     color: #fef3c7;
   }
 
-  html.dark main .text-slate-900:not(#pusat-laporan-dokumen *),
-  html.dark main .text-slate-800:not(#pusat-laporan-dokumen *) {
+  html.dark main .bg-rose-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-rose-50\/60:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-rose-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-rose-50\/80:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(136, 19, 55, 0.28);
+    border-color: rgba(244, 63, 94, 0.38);
+    color: #ffe4e6;
+  }
+
+  html.dark main .bg-sky-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-sky-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-indigo-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-purple-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-purple-50\/70:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(30, 58, 138, 0.26);
+    border-color: rgba(96, 165, 250, 0.32);
+    color: #e0f2fe;
+  }
+
+  html.dark main .text-slate-900:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .text-slate-800:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
     color: #f8fafc;
   }
 
-  html.dark main .text-slate-700:not(#pusat-laporan-dokumen *),
-  html.dark main .text-slate-600:not(#pusat-laporan-dokumen *) {
+  html.dark main .text-slate-700:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .text-slate-600:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
     color: #cbd5e1;
   }
 
-  html.dark main .text-slate-500:not(#pusat-laporan-dokumen *),
-  html.dark main .text-slate-400:not(#pusat-laporan-dokumen *) {
+  html.dark main .text-slate-500:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .text-slate-400:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
     color: #94a3b8;
   }
 
   html.dark main .text-emerald-700:not(#pusat-laporan-dokumen *),
   html.dark main .text-emerald-800:not(#pusat-laporan-dokumen *),
-  html.dark main .text-emerald-900:not(#pusat-laporan-dokumen *) {
-    color: color-mix(in srgb, var(--siap-primary) 45%, #ffffff);
+  html.dark main .text-emerald-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-emerald-950:not(#pusat-laporan-dokumen *),
+  html.dark main .text-teal-700:not(#pusat-laporan-dokumen *) {
+    color: var(--siap-primary-text);
   }
 
-  html.dark main .border-slate-300:not(#pusat-laporan-dokumen *),
-  html.dark main .border-slate-200:not(#pusat-laporan-dokumen *),
-  html.dark main .border-slate-100:not(#pusat-laporan-dokumen *) {
+  html.dark main .text-sky-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-sky-950:not(#pusat-laporan-dokumen *) {
+    color: #bae6fd;
+  }
+
+  html.dark main .text-amber-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-amber-950:not(#pusat-laporan-dokumen *) {
+    color: #fde68a;
+  }
+
+  html.dark main .text-rose-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-rose-950:not(#pusat-laporan-dokumen *) {
+    color: #fecdd3;
+  }
+
+  html.dark main .text-purple-900:not(#pusat-laporan-dokumen *),
+  html.dark main .text-purple-950:not(#pusat-laporan-dokumen *) {
+    color: #e9d5ff;
+  }
+
+  html.dark main .border-slate-300:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .border-slate-200:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .border-slate-100:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
     border-color: #1e293b;
   }
 
-  html.dark main input:not(#pusat-laporan-dokumen *),
+  html.dark main .divide-slate-100 > :not(:last-child),
+  html.dark main .divide-slate-200 > :not(:last-child) {
+    border-color: #1e293b;
+  }
+
+  html.dark main input:not(#pusat-laporan-dokumen *):not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   html.dark main select:not(#pusat-laporan-dokumen *),
   html.dark main textarea:not(#pusat-laporan-dokumen *) {
     background-color: #0f172a;
@@ -165,13 +354,31 @@ html[data-theme-density="compact"] main {
   padding-bottom: 1.5rem;
 }
 
+/* ========================================================================== */
+/* KUNCI @media print AGAR SELALU PUTIH BERSIH & TEKS HITAM TAJAM             */
+/* MESKIPUN MODE GELAP (html.dark) SEDANG AKTIF                               */
+/* ========================================================================== */
 @media print {
+  :root,
+  html,
+  html.dark,
+  body {
+    color-scheme: light !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    --siap-bg: #ffffff !important;
+    --siap-surface: #ffffff !important;
+    --siap-text: #0f172a !important;
+  }
+
   html,
   body,
   [data-siap-shell],
   [data-siap-shell] > main {
     display: block !important;
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #0f172a !important;
     overflow: visible !important;
     height: auto !important;
@@ -182,6 +389,15 @@ html[data-theme-density="compact"] main {
     padding: 0 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  html.dark main .bg-white,
+  html.dark main .bg-slate-50,
+  html.dark .print-clean-surface,
+  #pusat-laporan-dokumen {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
   }
 
   #pusat-laporan-dokumen {

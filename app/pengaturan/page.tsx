@@ -35,6 +35,7 @@ import {
   sanitizeCorePayload,
   writeExtendedLocal,
   writeTemaLocal,
+  writeTemaModeOverride,
   type MasterPembayaranItem,
   type PengaturanFormState,
   type PengaturanTabKey,
@@ -425,6 +426,7 @@ export default function PengaturanPage() {
       }
       writeExtendedLocal(ext);
       writeTemaLocal(formData.aturan_operasional.tema);
+      writeTemaModeOverride(null);
       applyThemeToDocument(formData.aturan_operasional.tema, { logoUrl: formData.logo_url });
       setSavedSnapshot(JSON.stringify(formData));
       showToast(
@@ -442,6 +444,7 @@ export default function PengaturanPage() {
 
     writeExtendedLocal(ext);
     writeTemaLocal(formData.aturan_operasional.tema);
+    writeTemaModeOverride(null);
     applyThemeToDocument(formData.aturan_operasional.tema, { logoUrl: formData.logo_url });
     setSavedSnapshot(JSON.stringify(formData));
     showToast('success', 'Seluruh pengaturan pondok, keuangan, legalitas, divisi & tema tersimpan!');

@@ -418,19 +418,19 @@ export default function KalenderPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="bg-white/10 border border-white/15 rounded-xl px-4 py-2.5 backdrop-blur-xs">
-              <p className="text-[11px] text-emerald-200 font-medium">Waktu Sholat Berikutnya</p>
+              <p className="text-[11px] text-white/80 font-medium">Waktu Sholat Berikutnya</p>
               <div className="flex items-baseline gap-2.5 mt-0.5">
                 <span className="text-base sm:text-lg font-extrabold text-white tabular-nums">
                   {nextPrayerToday.nextName} {nextPrayerToday.nextTime} WIB
                 </span>
-                <span className="text-xs font-mono text-emerald-200 tabular-nums">
+                <span className="text-xs font-mono text-white/80 tabular-nums">
                   {nextPrayerToday.remainingFormatted}
                 </span>
               </div>
             </div>
 
             <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 flex items-center gap-2">
-              <span className="text-[11px] font-medium text-emerald-100 whitespace-nowrap">
+              <span className="text-[11px] font-medium text-white/90 whitespace-nowrap">
                 Koreksi Hijriyah:
               </span>
               <select
@@ -438,13 +438,13 @@ export default function KalenderPage() {
                 disabled={!canEdit}
                 value={koreksiHijriyah}
                 onChange={(e) => handleUpdateKoreksi(Number(e.target.value))}
-                className="bg-emerald-950/80 border border-white/25 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                className="bg-black/30 border border-white/25 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
               >
-                <option value={-2}>-2 hari</option>
-                <option value={-1}>-1 hari</option>
-                <option value={0}>0 (Standar)</option>
-                <option value={1}>+1 hari</option>
-                <option value={2}>+2 hari</option>
+                <option value={-2} className="bg-slate-900 text-white">-2 hari</option>
+                <option value={-1} className="bg-slate-900 text-white">-1 hari</option>
+                <option value={0} className="bg-slate-900 text-white">0 (Standar)</option>
+                <option value={1} className="bg-slate-900 text-white">+1 hari</option>
+                <option value={2} className="bg-slate-900 text-white">+2 hari</option>
               </select>
             </div>
           </div>
@@ -474,7 +474,7 @@ export default function KalenderPage() {
                 key={slot.label}
                 className="bg-black/20 border border-white/10 rounded-lg px-2 py-1.5 text-center"
               >
-                <p className="text-[10px] text-emerald-200">{slot.label}</p>
+                <p className="text-[10px] text-white/80">{slot.label}</p>
                 <p className="text-xs sm:text-sm font-bold text-white tabular-nums mt-0.5">
                   {slot.time}
                 </p>
@@ -535,7 +535,7 @@ export default function KalenderPage() {
                   idx === 0
                     ? 'text-rose-600'
                     : idx === 5
-                    ? 'text-emerald-700'
+                    ? 'siap-text-accent'
                     : 'text-slate-500'
                 }`}
               >
@@ -570,7 +570,7 @@ export default function KalenderPage() {
                     isSelected
                       ? {
                           borderColor: 'var(--siap-primary, #047857)',
-                          backgroundColor: 'color-mix(in srgb, var(--siap-primary, #047857) 10%, white)',
+                          backgroundColor: 'var(--siap-primary-soft)',
                         }
                       : isToday
                       ? { borderColor: 'var(--siap-primary, #047857)' }
@@ -587,7 +587,7 @@ export default function KalenderPage() {
                   }`}
                 >
                   <div className="flex items-baseline justify-center gap-0.5 sm:gap-1 leading-none">
-                    <span className="text-[10px] sm:text-xs font-semibold text-emerald-700">
+                    <span className="text-[10px] sm:text-xs font-semibold siap-text-accent">
                       {cell.hijri.arabicDay}
                     </span>
                     <span
@@ -595,7 +595,7 @@ export default function KalenderPage() {
                         isAhad || hasHariBesar
                           ? 'text-rose-600'
                           : cell.isFriday
-                          ? 'text-emerald-700'
+                          ? 'siap-text-accent'
                           : 'text-slate-800'
                       }`}
                     >
@@ -730,7 +730,7 @@ export default function KalenderPage() {
                         className="rounded-xl border border-slate-200 p-3 bg-slate-50/60 flex items-start justify-between gap-2"
                       >
                         <div className="min-w-0">
-                          <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">
+                          <span className="text-[10px] font-bold siap-text-accent uppercase tracking-wide">
                             {item.kategoriLabel}
                           </span>
                           <p className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5">
@@ -875,7 +875,7 @@ export default function KalenderPage() {
                         onClick={() => setSelectedIso(item.isoDate)}
                         className={`w-full text-left rounded-lg border px-3 py-2 flex items-center justify-between gap-2 text-xs transition-colors ${
                           item.isoDate === selectedIso
-                            ? 'border-emerald-500 bg-emerald-50'
+                            ? 'siap-soft-box border'
                             : 'border-slate-200 hover:bg-slate-50'
                         }`}
                       >
@@ -924,7 +924,7 @@ export default function KalenderPage() {
                   value={formJudul}
                   onChange={(e) => setFormJudul(e.target.value)}
                   placeholder="Contoh: Mujahadah Malam Jumat Legi"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-600"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none siap-ring-focus"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -933,7 +933,7 @@ export default function KalenderPage() {
                   <select
                     value={formKategori}
                     onChange={(e) => setFormKategori(e.target.value as KategoriAgendaKalender)}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-600"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white outline-none siap-ring-focus"
                   >
                     <option value="pondok">Agenda Pondok</option>
                     <option value="rapat">Rapat Pengurus</option>
@@ -949,7 +949,7 @@ export default function KalenderPage() {
                     value={formWaktu}
                     onChange={(e) => setFormWaktu(e.target.value)}
                     placeholder="08:00 WIB"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-600"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none siap-ring-focus"
                   />
                 </div>
               </div>
@@ -960,7 +960,7 @@ export default function KalenderPage() {
                   value={formLokasi}
                   onChange={(e) => setFormLokasi(e.target.value)}
                   placeholder="Masjid / Aula Pondok"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-600"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none siap-ring-focus"
                 />
               </div>
               <div>
@@ -970,7 +970,7 @@ export default function KalenderPage() {
                   value={formCatatan}
                   onChange={(e) => setFormCatatan(e.target.value)}
                   placeholder="Keterangan tambahan..."
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-600"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg outline-none siap-ring-focus"
                 />
               </div>
               <div className="pt-2 flex justify-end gap-2">
@@ -984,7 +984,7 @@ export default function KalenderPage() {
                 <button
                   type="submit"
                   disabled={savingAgenda}
-                  className="px-4 py-2 text-xs font-bold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-60"
+                  className="px-4 py-2 text-xs font-bold rounded-lg siap-btn-primary disabled:opacity-60"
                 >
                   {savingAgenda ? 'Menyimpan...' : 'Simpan Agenda'}
                 </button>

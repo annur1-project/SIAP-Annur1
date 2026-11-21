@@ -369,7 +369,7 @@ export default function KoperasiPage() {
         <div
           className={`fixed bottom-20 md:bottom-6 right-4 z-50 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg border ${
             toast.type === 'success'
-              ? 'bg-emerald-900 text-white border-emerald-700'
+              ? 'siap-btn-sidebar border'
               : 'bg-rose-800 text-white border-rose-700'
           }`}
         >
@@ -381,7 +381,7 @@ export default function KoperasiPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2.5">
-            <Store className="w-6 h-6 text-[#065f46]" />
+            <Store className="w-6 h-6 siap-text-accent" />
             Koperasi Pondok Pesantren
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -401,15 +401,15 @@ export default function KoperasiPage() {
 
       {/* Ringkasan Keuangan Koperasi */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-2xl bg-[#065f46] text-white p-5 space-y-1.5">
+        <div className="rounded-2xl siap-hero text-white p-5 space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-emerald-100">Saldo Kas Utama Koperasi</span>
-            <Landmark className="w-5 h-5 text-emerald-200" />
+            <span className="text-xs font-medium text-white/85">Saldo Kas Utama Koperasi</span>
+            <Landmark className="w-5 h-5 text-white/80" />
           </div>
           <p className="text-2xl font-bold font-mono tabular-nums">
             {formatRupiahKoperasi(computedSaldoKas)}
           </p>
-          <p className="text-xs text-emerald-100/80">
+          <p className="text-xs text-white/80">
             Bertambah dari surplus Tutup Kas Malam; berkurang oleh kulaan kas &amp; setoran pondok.
           </p>
         </div>
@@ -466,7 +466,7 @@ export default function KoperasiPage() {
         {/* 1. Pencatatan Kulaan / Belanja Stok */}
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5 text-[#065f46]" />
+            <ShoppingBag className="w-5 h-5 siap-text-accent" />
             Catat Kulaan / Belanja Stok
           </h2>
 
@@ -526,25 +526,35 @@ export default function KoperasiPage() {
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Sumber Dana</label>
               <div className="grid grid-cols-1 gap-2">
-                <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2.5 text-xs font-medium cursor-pointer">
+                <label
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-xs font-medium cursor-pointer transition-colors ${
+                    kulaanSumber === 'uang_laci' ? 'siap-soft-box' : 'border-slate-200'
+                  }`}
+                >
                   <input
                     type="radio"
                     name="sumber_kulaan"
                     disabled={isReadOnly}
                     checked={kulaanSumber === 'uang_laci'}
                     onChange={() => setKulaanSumber('uang_laci')}
+                    className="siap-accent-control"
                   />
                   <span>
                     <strong>Uang Laci Harian</strong> (langsung dari hasil penjualan berjalan)
                   </span>
                 </label>
-                <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2.5 text-xs font-medium cursor-pointer">
+                <label
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-xs font-medium cursor-pointer transition-colors ${
+                    kulaanSumber === 'kas_koperasi' ? 'siap-soft-box' : 'border-slate-200'
+                  }`}
+                >
                   <input
                     type="radio"
                     name="sumber_kulaan"
                     disabled={isReadOnly}
                     checked={kulaanSumber === 'kas_koperasi'}
                     onChange={() => setKulaanSumber('kas_koperasi')}
+                    className="siap-accent-control"
                   />
                   <span>
                     <strong>Saldo Kas Koperasi</strong> (potong tabungan/kas utama koperasi)
@@ -557,7 +567,7 @@ export default function KoperasiPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#065f46] hover:bg-emerald-900 text-white py-2.5 text-sm font-semibold min-h-[44px] disabled:opacity-50"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl siap-btn-primary py-2.5 text-sm font-semibold min-h-[44px] disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" />
                 Simpan Kulaan Stok
@@ -569,7 +579,7 @@ export default function KoperasiPage() {
         {/* 2. Tutup Kas Malam (1x Input per Hari) */}
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <Calculator className="w-5 h-5 text-[#065f46]" />
+            <Calculator className="w-5 h-5 siap-text-accent" />
             Tutup Kas Malam (1× / Hari)
           </h2>
 
@@ -587,8 +597,8 @@ export default function KoperasiPage() {
             </div>
 
             {alreadyClosedOnDate && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              <div className="rounded-xl border siap-soft-box px-3 py-2.5 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 siap-text-accent shrink-0" />
                 <span>Tutup kas untuk tanggal {tutupTanggal} sudah selesai dicatat.</span>
               </div>
             )}
@@ -645,13 +655,13 @@ export default function KoperasiPage() {
               </div>
               <div className="flex justify-between text-slate-900 font-bold border-t border-slate-200 pt-1.5">
                 <span>Omzet Hari Ini (Otomatis)</span>
-                <span className="font-mono tabular-nums text-[#065f46]">
+                <span className="font-mono tabular-nums siap-text-accent">
                   {formatRupiahKoperasi(tutupKasPreview.omzetHariIni)}
                 </span>
               </div>
               <div className="flex justify-between text-slate-900 font-bold">
                 <span>Surplus Masuk Kas Koperasi</span>
-                <span className="font-mono tabular-nums text-emerald-700">
+                <span className="font-mono tabular-nums siap-text-accent">
                   +{formatRupiahKoperasi(tutupKasPreview.surplusMasukKas)}
                 </span>
               </div>
@@ -673,7 +683,7 @@ export default function KoperasiPage() {
         {/* 3. Setoran Bulanan ke Kas Pondok */}
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <ArrowRightLeft className="w-5 h-5 text-[#065f46]" />
+            <ArrowRightLeft className="w-5 h-5 siap-text-accent" />
             Setor ke Kas Pondok (Bendahara)
           </h2>
           <p className="text-xs text-slate-500 leading-relaxed">
@@ -730,7 +740,7 @@ export default function KoperasiPage() {
                   onClick={() => setSetoranMetode('tunai')}
                   className={`py-2 px-3 rounded-xl border text-xs font-semibold min-h-[40px] ${
                     setoranMetode === 'tunai'
-                      ? 'bg-[#065f46] text-white border-[#065f46]'
+                      ? 'siap-btn-primary border-transparent'
                       : 'bg-white text-slate-700 border-slate-300'
                   }`}
                 >
@@ -742,7 +752,7 @@ export default function KoperasiPage() {
                   onClick={() => setSetoranMetode('transfer')}
                   className={`py-2 px-3 rounded-xl border text-xs font-semibold min-h-[40px] ${
                     setoranMetode === 'transfer'
-                      ? 'bg-[#065f46] text-white border-[#065f46]'
+                      ? 'siap-btn-primary border-transparent'
                       : 'bg-white text-slate-700 border-slate-300'
                   }`}
                 >
@@ -807,7 +817,7 @@ export default function KoperasiPage() {
                       <td className="py-2 pr-2 text-right font-mono tabular-nums">
                         {formatRupiahKoperasi(t.omzet_non_tunai)}
                       </td>
-                      <td className="py-2 text-right font-mono font-bold tabular-nums text-emerald-700">
+                      <td className="py-2 text-right font-mono font-bold tabular-nums siap-text-accent">
                         {formatRupiahKoperasi(t.omzet_total)}
                       </td>
                     </tr>

@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   Landmark,
   Lock,
+  Monitor,
   Moon,
   Palette,
   Plus,
@@ -46,7 +47,9 @@ import {
   moveKamarItem,
   NAMA_DOMPET_MAP,
   removeKamarItem,
+  runThemeTransitionWithAnimation,
   THEME_PRESETS,
+  writeTemaModeOverride,
   type MasterPembayaranItem,
   type PengaturanFormState,
   type ProfilPondokPsbConfig,
@@ -79,7 +82,7 @@ export function IdentitasRekeningTab({ formData, onUpdateField }: IdentitasReken
       <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
         <div className="border-b border-slate-100 pb-3">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-emerald-700 shrink-0" />
+            <Building2 className="w-4 h-4 siap-text-accent shrink-0" />
             Profil &amp; Identitas Pesantren
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -97,7 +100,7 @@ export function IdentitasRekeningTab({ formData, onUpdateField }: IdentitasReken
               type="text"
               value={formData.nama_pesantren}
               onChange={(e) => onUpdateField('nama_pesantren', e.target.value)}
-              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-700"
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 siap-ring-focus"
             />
           </div>
 
@@ -173,7 +176,7 @@ export function IdentitasRekeningTab({ formData, onUpdateField }: IdentitasReken
       <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
         <div className="border-b border-slate-100 pb-3">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-emerald-700 shrink-0" />
+            <CreditCard className="w-4 h-4 siap-text-accent shrink-0" />
             Rekening Transfer Resmi Pondok
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -310,14 +313,14 @@ export function LogoLegalitasTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <ImageIcon className="w-4 h-4 text-emerald-700 shrink-0" />
+              <ImageIcon className="w-4 h-4 siap-text-accent shrink-0" />
               Kop Surat Resmi Pondok (JPG / PNG · Rasio 17,46 × 4,13 cm)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Jika diunggah, Pusat Laporan otomatis memakai gambar Kop Surat asli ini (ukuran lebar penuh A4: 17,46 × 4,13 cm) menggantikan kop teks standar.
             </p>
           </div>
-          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0 self-start sm:self-center">
+          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg siap-soft-box border shrink-0 self-start sm:self-center">
             Rasio 17,46 × 4,13 cm
           </span>
         </div>
@@ -341,7 +344,7 @@ export function LogoLegalitasTab({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <label className="min-h-[38px] px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap">
+            <label className="min-h-[38px] px-4 py-1.5 siap-btn-primary rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap">
               <Upload className="w-3.5 h-3.5 shrink-0" />
               {uploadingField === 'kop_surat_url'
                 ? 'Mengunggah Kop...'
@@ -374,7 +377,7 @@ export function LogoLegalitasTab({
       <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
         <div className="border-b border-slate-100 pb-3">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <ImageIcon className="w-4 h-4 text-emerald-700 shrink-0" />
+            <ImageIcon className="w-4 h-4 siap-text-accent shrink-0" />
             Logo Lembaga &amp; Stempel Resmi
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -412,7 +415,7 @@ export function LogoLegalitasTab({
 
                 <div className="flex items-center gap-2">
                   <label className="flex-1 min-h-[38px] px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap">
-                    <Upload className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <Upload className="w-3.5 h-3.5 siap-text-accent shrink-0" />
                     {isUploading ? 'Mengunggah...' : url ? 'Ganti File' : 'Unggah File'}
                     <input
                       type="file"
@@ -444,7 +447,7 @@ export function LogoLegalitasTab({
       <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
         <div className="border-b border-slate-100 pb-3">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Landmark className="w-4 h-4 text-emerald-700 shrink-0" />
+            <Landmark className="w-4 h-4 siap-text-accent shrink-0" />
             Pejabat Penanda Tangan &amp; TTD Digital
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -473,7 +476,7 @@ export function LogoLegalitasTab({
                   type="text"
                   value={formData[p.nameField]}
                   onChange={(e) => onUpdateField(p.nameField, e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-700"
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 siap-ring-focus"
                 />
 
                 {/* Preview proporsional seperti kertas pengesahan */}
@@ -499,7 +502,7 @@ export function LogoLegalitasTab({
 
                 <div className="flex items-center gap-2">
                   <label className="flex-1 min-h-[38px] px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap">
-                    <Upload className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <Upload className="w-3.5 h-3.5 siap-text-accent shrink-0" />
                     {isUploading ? 'Mengunggah...' : ttdUrl ? 'Ganti TTD (PNG)' : 'Unggah TTD (PNG)'}
                     <input
                       type="file"
@@ -591,7 +594,7 @@ export function KeuanganTarifTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
+              <Calendar className="w-4 h-4 siap-text-accent shrink-0" />
               Siklus Tahun Ajaran, Jatuh Tempo &amp; Saldo Awal 4 Dompet
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -600,7 +603,7 @@ export function KeuanganTarifTab({
           </div>
           <div className="text-left sm:text-right">
             <span className="text-[11px] text-slate-500 block">Total Saldo Awal 4 Dompet</span>
-            <span className="text-sm font-mono font-extrabold text-emerald-800 tabular-nums">
+            <span className="text-sm font-mono font-extrabold siap-text-accent tabular-nums">
               {formatRp(totalSaldoAwal)}
             </span>
           </div>
@@ -713,7 +716,7 @@ export function KeuanganTarifTab({
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
           <div>
             <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-emerald-700 shrink-0" />
+              <Wallet className="w-4 h-4 siap-text-accent shrink-0" />
               Master Tarif &amp; Komponen Pembayaran Santri
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -725,7 +728,7 @@ export function KeuanganTarifTab({
             <button
               type="button"
               onClick={onOpenNewModal}
-              className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="w-full sm:w-auto min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               Tambah Pembayaran Baru
@@ -750,12 +753,12 @@ export function KeuanganTarifTab({
                       {item.wajib_ndalem ? 'Ndalem Wajib' : 'Ndalem Opsional'}
                     </div>
                   </div>
-                  <span className={`text-[11px] font-bold shrink-0 ${item.aktif ? 'text-emerald-700' : 'text-slate-400'}`}>
+                  <span className={`text-[11px] font-bold shrink-0 ${item.aktif ? 'siap-text-accent' : 'text-slate-400'}`}>
                     {item.aktif ? 'Aktif' : 'Nonaktif'}
                   </span>
                 </div>
 
-                <div className="font-mono font-extrabold text-emerald-800 text-sm tabular-nums">
+                <div className="font-mono font-extrabold siap-text-accent text-sm tabular-nums">
                   {formatRp(tarifAktif.nominal)}
                 </div>
 
@@ -785,7 +788,7 @@ export function KeuanganTarifTab({
                       onClick={() => onToggleItemAktif(item)}
                       className="min-h-[38px] px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl font-semibold text-xs inline-flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      {item.aktif ? <ToggleRight className="w-4 h-4 text-emerald-700" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
+                      {item.aktif ? <ToggleRight className="w-4 h-4 siap-text-accent" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
                       {item.aktif ? 'Nonaktifkan' : 'Aktifkan'}
                     </button>
                   </div>
@@ -827,12 +830,12 @@ export function KeuanganTarifTab({
                       {NAMA_DOMPET_MAP[item.dompet_tujuan] || item.dompet_tujuan}
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
-                      <span className={item.wajib_ndalem ? 'font-semibold text-emerald-700' : 'text-slate-500'}>
+                      <span className={item.wajib_ndalem ? 'font-semibold siap-text-accent' : 'text-slate-500'}>
                         {item.wajib_ndalem ? 'Wajib' : 'Opsional'}
                       </span>
                     </td>
                     <td className="py-3 px-3">
-                      <div className="font-mono font-extrabold text-emerald-800 text-xs tabular-nums whitespace-nowrap">
+                      <div className="font-mono font-extrabold siap-text-accent text-xs tabular-nums whitespace-nowrap">
                         {formatRp(tarifAktif.nominal)}
                       </div>
                       {riwayatList.length > 0 && (
@@ -857,8 +860,8 @@ export function KeuanganTarifTab({
                         >
                           {item.aktif ? (
                             <>
-                              <ToggleRight className="w-4 h-4 text-emerald-700" />
-                              <span className="text-emerald-700">Aktif</span>
+                              <ToggleRight className="w-4 h-4 siap-text-accent" />
+                              <span className="siap-text-accent">Aktif</span>
                             </>
                           ) : (
                             <>
@@ -868,7 +871,7 @@ export function KeuanganTarifTab({
                           )}
                         </button>
                       ) : (
-                        <span className={item.aktif ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>
+                        <span className={item.aktif ? 'siap-text-accent font-semibold' : 'text-slate-400'}>
                           {item.aktif ? 'Aktif' : 'Nonaktif'}
                         </span>
                       )}
@@ -899,7 +902,7 @@ export function KeuanganTarifTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+              <GraduationCap className="w-4 h-4 siap-text-accent shrink-0" />
               Skema Biaya Pendaftaran Santri Baru (PSB)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1112,7 +1115,7 @@ export function KeuanganTarifTab({
                 onChange={(e) =>
                   onUpdatePendaftaran((prev) => ({ ...prev, promo_aktif: e.target.checked }))
                 }
-                className="w-4 h-4 accent-emerald-700 rounded"
+                className="w-4 h-4 siap-accent-control rounded"
               />
               Aktifkan Free Uang Pangkal
             </label>
@@ -1124,7 +1127,7 @@ export function KeuanganTarifTab({
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-900">Paket Kamar VIP</span>
-              <span className="text-[11px] font-mono font-bold text-emerald-700 tabular-nums">
+              <span className="text-[11px] font-mono font-bold siap-text-accent tabular-nums">
                 Normal: {formatRp(simVipNormal.totalNormal)} &middot; Promo: {formatRp(simVipPromo.totalPromo)}
               </span>
             </div>
@@ -1138,7 +1141,7 @@ export function KeuanganTarifTab({
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-900">Paket Kamar Reguler</span>
-              <span className="text-[11px] font-mono font-bold text-emerald-700 tabular-nums">
+              <span className="text-[11px] font-mono font-bold siap-text-accent tabular-nums">
                 Normal: {formatRp(simRegNormal.totalNormal)} &middot; Promo: {formatRp(simRegPromo.totalPromo)}
               </span>
             </div>
@@ -1225,12 +1228,12 @@ export function AturanDivisiTab({ formData, onUpdateAturan }: AturanDivisiTabPro
                 handleAddKamar();
               }
             }}
-            className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-700"
+            className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 siap-ring-focus"
           />
           <button
             type="button"
             onClick={handleAddKamar}
-            className="min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Tambah Kamar
@@ -1388,7 +1391,7 @@ export function AturanDivisiTab({ formData, onUpdateAturan }: AturanDivisiTabPro
         <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-4">
           <div className="border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-emerald-700 shrink-0" />
+              <ShieldAlert className="w-4 h-4 siap-text-accent shrink-0" />
               Ambang Poin Keamanan &amp; Jadwal Rutin
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1604,7 +1607,7 @@ export function AturanDivisiTab({ formData, onUpdateAturan }: AturanDivisiTabPro
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <GraduationCap className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <GraduationCap className="w-4 h-4 siap-text-accent shrink-0" />
                   Profil Pondok, Berkas Wajib &amp; Jadwal Santri (Tampil di /daftar)
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -1808,7 +1811,7 @@ export function TemaAplikasiTab({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Palette className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <Palette className="w-4 h-4 siap-text-accent shrink-0" />
                   Palet Warna &amp; Sidebar Aplikasi
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -1840,9 +1843,17 @@ export function TemaAplikasiTab({
                         sidebarColor: p.sidebarColor,
                       }))
                     }
+                    style={
+                      active
+                        ? {
+                            borderColor: 'var(--siap-primary)',
+                            boxShadow: '0 0 0 2px color-mix(in srgb, var(--siap-primary) 22%, transparent)',
+                          }
+                        : undefined
+                    }
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       active
-                        ? 'border-emerald-700 bg-slate-50 ring-2 ring-emerald-600/20'
+                        ? 'bg-slate-50'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
                   >
@@ -1916,20 +1927,21 @@ export function TemaAplikasiTab({
           <section className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5 text-xs">
             <div className="border-b border-slate-100 pb-3">
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Type className="w-4 h-4 text-emerald-700 shrink-0" />
+                <Type className="w-4 h-4 siap-text-accent shrink-0" />
                 Mode Layar, Jenis Huruf &amp; Gaya Antarmuka
               </h2>
             </div>
 
-            {/* Mode Terang / Hangat / Gelap */}
+            {/* Mode Terang / Gelap / Otomatis (Sistem) / Hangat */}
             <div className="space-y-2">
               <span className="font-semibold text-slate-700 block">Mode Latar Aplikasi</span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                 {(
                   [
-                    { key: 'light', label: 'Terang Bersih', desc: 'Latar putih/abu modern', icon: Sun },
+                    { key: 'light', label: 'Terang', desc: 'Latar putih bersih & tajam', icon: Sun },
+                    { key: 'dark', label: 'Gelap', desc: 'Nyaman untuk malam hari', icon: Moon },
+                    { key: 'system', label: 'Otomatis (Sistem)', desc: 'Ikuti setelan perangkat', icon: Monitor },
                     { key: 'warm', label: 'Terang Hangat', desc: 'Nuansa kertas krem lembut', icon: Sparkles },
-                    { key: 'dark', label: 'Mode Gelap', desc: 'Nyaman untuk malam hari', icon: Moon },
                   ] as Array<{ key: ThemeMode; label: string; desc: string; icon: React.ComponentType<{ className?: string }> }>
                 ).map((m) => {
                   const Icon = m.icon;
@@ -1938,14 +1950,35 @@ export function TemaAplikasiTab({
                     <button
                       key={m.key}
                       type="button"
-                      onClick={() => onUpdateTema((prev) => ({ ...prev, mode: m.key }))}
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const origin =
+                          e.clientX || e.clientY
+                            ? { x: e.clientX, y: e.clientY }
+                            : { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                        runThemeTransitionWithAnimation({
+                          origin,
+                          applyFn: () => {
+                            writeTemaModeOverride(m.key);
+                            onUpdateTema((prev) => ({ ...prev, mode: m.key }));
+                          },
+                        });
+                      }}
+                      style={
+                        active
+                          ? {
+                              borderColor: 'var(--siap-primary)',
+                              boxShadow: '0 0 0 2px color-mix(in srgb, var(--siap-primary) 22%, transparent)',
+                            }
+                          : undefined
+                      }
                       className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
                         active
-                          ? 'border-emerald-700 bg-slate-50 ring-2 ring-emerald-600/20'
+                          ? 'bg-slate-50'
                           : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
-                      <Icon className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                      <Icon className="w-4 h-4 siap-text-accent shrink-0 mt-0.5" />
                       <div>
                         <span className="font-bold text-slate-900 block">{m.label}</span>
                         <span className="text-[11px] text-slate-500">{m.desc}</span>
@@ -1969,9 +2002,17 @@ export function TemaAplikasiTab({
                       onClick={() =>
                         onUpdateTema((prev) => ({ ...prev, fontFamily: f.key as ThemeFont }))
                       }
+                      style={
+                        active
+                          ? {
+                              borderColor: 'var(--siap-primary)',
+                              boxShadow: '0 0 0 2px color-mix(in srgb, var(--siap-primary) 22%, transparent)',
+                            }
+                          : undefined
+                      }
                       className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                         active
-                          ? 'border-emerald-700 bg-slate-50 ring-2 ring-emerald-600/20'
+                          ? 'bg-slate-50'
                           : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
@@ -2006,7 +2047,7 @@ export function TemaAplikasiTab({
                       onClick={() => onUpdateTema((prev) => ({ ...prev, radius: r.key }))}
                       className={`py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer ${
                         tema.radius === r.key
-                          ? 'border-emerald-700 bg-emerald-700 text-white'
+                          ? 'siap-btn-primary border-transparent'
                           : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                       }`}
                     >
@@ -2031,7 +2072,7 @@ export function TemaAplikasiTab({
                       onClick={() => onUpdateTema((prev) => ({ ...prev, density: d.key }))}
                       className={`py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer ${
                         tema.density === d.key
-                          ? 'border-emerald-700 bg-emerald-700 text-white'
+                          ? 'siap-btn-primary border-transparent'
                           : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                       }`}
                     >
@@ -2082,26 +2123,26 @@ export function TemaAplikasiTab({
                         onChange={(e) =>
                           onUpdateTema((prev) => ({ ...prev, sidebarShowLogo: e.target.checked }))
                         }
-                        className="w-4 h-4 accent-emerald-700 rounded"
+                        className="w-4 h-4 siap-accent-control rounded"
                       />
                       Tampilkan Logo Kop Surat Pondok di pojok atas Sidebar (menggantikan inisial e1)
                     </label>
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="rounded-xl border siap-soft-box p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-emerald-700" />
+                    <p className="text-xs font-bold flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 siap-text-accent" />
                       Generator Paket Ikon PWA &amp; Favicon
                     </p>
-                    <p className="text-[11px] text-emerald-800 mt-0.5">
+                    <p className="text-[11px] opacity-85 mt-0.5">
                       Kelola logo e1, maskable safe-zone 192/512, Apple Touch, dan monokrom Material You.
                     </p>
                   </div>
                   <Link
                     href="/tools/pwa-icon"
-                    className="min-h-[38px] px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                    className="min-h-[38px] px-3.5 py-2 rounded-xl siap-btn-primary text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
                   >
                     <ImageIcon className="w-3.5 h-3.5" />
                     Buka Studio Ikon PWA
@@ -2118,7 +2159,7 @@ export function TemaAplikasiTab({
                 <button
                   type="button"
                   onClick={onSaveLocalTheme}
-                  className="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  className="min-h-[40px] px-4 py-2 rounded-xl siap-btn-primary text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                 >
                   <Save className="w-3.5 h-3.5" />
                   Simpan Preferensi Tema Perangkat

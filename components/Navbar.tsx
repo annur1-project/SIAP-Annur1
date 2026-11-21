@@ -28,15 +28,22 @@ import {
   LogOut,
   Eye,
   Image as ImageIcon,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import {
+  applyThemeToDocument,
   DEFAULT_MOBILE_NAV_HREFS,
   DEFAULT_TEMA_APLIKASI,
   MOBILE_NAV_UPDATED_EVENT,
   QUICK_MENU_CATALOG,
   readMobileNavPrefs,
   readTemaLocal,
+  resolveEffectiveThemeMode,
+  runThemeTransitionWithAnimation,
   THEME_UPDATED_EVENT,
+  writeTemaLocal,
+  writeTemaModeOverride,
   type TemaAplikasiConfig,
 } from '@/lib/pengaturan';
 import { renderQuickMenuIcon } from '@/components/QuickMenuConfigModal';
@@ -79,6 +86,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tema, setTema] = useState<TemaAplikasiConfig>(DEFAULT_TEMA_APLIKASI);
+  const [resolvedDark, setResolvedDark] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [mobileNavHrefs, setMobileNavHrefs] = useState<string[]>(DEFAULT_MOBILE_NAV_HREFS);
 
@@ -97,13 +105,19 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       const localTema = readTemaLocal();
-      if (localTema) setTema(localTema);
+      if (localTema) {
+        setTema(localTema);
+        setResolvedDark(resolveEffectiveThemeMode(localTema.mode) === 'dark');
+      }
       setMobileNavHrefs(readMobileNavPrefs());
     }, 0);
 
     const handleThemeEvent = (evt: Event) => {
       const custom = evt as CustomEvent<{ tema?: TemaAplikasiConfig; logoUrl?: string }>;
-      if (custom.detail?.tema) setTema(custom.detail.tema);
+      if (custom.detail?.tema) {
+        setTema(custom.detail.tema);
+        setResolvedDark(resolveEffectiveThemeMode(custom.detail.tema.mode) === 'dark');
+      }
       if (typeof custom.detail?.logoUrl === 'string') setLogoUrl(custom.detail.logoUrl);
     };
 
@@ -125,6 +139,45 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const handleToggleDarkLight = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const origin =
+      e.clientX || e.clientY
+        ? { x: e.clientX, y: e.clientY }
+        : { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+
+    const nextMode = resolvedDark ? 'light' : 'dark';
+    const nextTema: TemaAplikasiConfig = { ...tema, mode: nextMode };
+
+    runThemeTransitionWithAnimation({
+      origin,
+      applyFn: () => {
+        writeTemaModeOverride(nextMode);
+        writeTemaLocal(nextTema);
+        applyThemeToDocument(nextTema);
+      },
+    });
+  };
+
+  const renderThemeToggleIcon = () => (
+    <span className="relative w-4 h-4 inline-flex items-center justify-center">
+      <Sun
+        className={`w-4 h-4 absolute transition-all duration-400 ease-out ${
+          resolvedDark
+            ? 'opacity-0 rotate-180 scale-50'
+            : 'opacity-100 rotate-0 scale-100'
+        }`}
+      />
+      <Moon
+        className={`w-4 h-4 absolute transition-all duration-400 ease-out ${
+          resolvedDark
+            ? 'opacity-100 rotate-0 scale-100'
+            : 'opacity-0 -rotate-180 scale-50'
+        }`}
+      />
+    </span>
+  );
+
   const useCustomAccent = tema.preset !== 'emerald';
   const isPublicRoute = isPublicAppPath(pathname);
 
@@ -132,7 +185,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
 
   if (isPublicRoute) {
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-900">
+      <div data-siap-public-shell className="min-h-screen bg-slate-50 text-slate-900">
         {children}
       </div>
     );
@@ -174,20 +227,34 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         style={{ backgroundColor: tema.sidebarColor }}
         className="print:hidden hidden md:flex flex-col w-64 text-white min-h-screen fixed left-0 top-0 bottom-0 shadow-lg z-30 transition-colors"
       >
-        <div className="p-4 border-b border-white/15 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#065f46] flex items-center justify-center shrink-0 overflow-hidden border border-white/25">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={effectiveLogo}
-              alt="Logo e-annursatu"
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
+        <div className="p-4 border-b border-white/15 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              style={{ backgroundColor: tema.primaryColor }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border border-white/25"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={effectiveLogo}
+                alt="Logo e-annursatu"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-bold text-base leading-tight truncate">{brandTitle}</h1>
+              <p className="text-xs text-white/75 truncate">{tema.appSubtitle || 'An-Nur 1 Bululawang'}</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-base leading-tight truncate">{brandTitle}</h1>
-            <p className="text-xs text-white/75 truncate">{tema.appSubtitle || 'An-Nur 1 Bululawang'}</p>
-          </div>
+          <button
+            type="button"
+            onClick={handleToggleDarkLight}
+            title={resolvedDark ? 'Ubah ke Mode Terang' : 'Ubah ke Mode Gelap'}
+            aria-label={resolvedDark ? 'Ubah ke Mode Terang' : 'Ubah ke Mode Gelap'}
+            className="w-8 h-8 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+          >
+            {renderThemeToggleIcon()}
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
@@ -260,7 +327,10 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         className="print:hidden md:hidden text-white h-12 px-3 sticky top-0 z-40 flex justify-between items-center shadow-md shrink-0 gap-2"
       >
         <Link href="/" className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-[#065f46] flex items-center justify-center shrink-0 overflow-hidden border border-white/25">
+          <div
+            style={{ backgroundColor: tema.primaryColor }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border border-white/25"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={effectiveLogo}
@@ -273,6 +343,15 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         </Link>
         <div className="flex items-center gap-1.5 shrink-0">
           <InstallPWAButton variant="compact" />
+          <button
+            type="button"
+            onClick={handleToggleDarkLight}
+            title={resolvedDark ? 'Ubah ke Mode Terang' : 'Ubah ke Mode Gelap'}
+            aria-label={resolvedDark ? 'Ubah ke Mode Terang' : 'Ubah ke Mode Gelap'}
+            className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/15 hover:bg-white/25 text-white shrink-0 cursor-pointer"
+          >
+            {renderThemeToggleIcon()}
+          </button>
           <Link
             href="/profil"
             aria-label="Profil Saya"
@@ -299,7 +378,10 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         >
           <div className="h-12 px-3 border-b border-white/15 flex items-center justify-between gap-2 shrink-0 text-white">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-[#065f46] flex items-center justify-center shrink-0 overflow-hidden border border-white/25">
+              <div
+                style={{ backgroundColor: tema.primaryColor }}
+                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border border-white/25"
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={effectiveLogo}

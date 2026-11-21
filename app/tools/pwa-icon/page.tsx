@@ -209,7 +209,7 @@ export default function PwaIconGeneratorPage() {
           type="button"
           onClick={handleDownloadAll}
           disabled={variants.length === 0 || processing}
-          className="inline-flex items-center gap-2 rounded-xl bg-[#065f46] hover:bg-emerald-900 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 min-h-[44px] whitespace-nowrap"
+          className="inline-flex items-center gap-2 rounded-xl siap-btn-primary px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 min-h-[44px] whitespace-nowrap"
         >
           <Download className="w-4 h-4" />
           Unduh Semua Paket ({variants.length} File)
@@ -220,7 +220,7 @@ export default function PwaIconGeneratorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Upload className="w-4 h-4 text-emerald-700" />
+            <Upload className="w-4 h-4 siap-text-accent" />
             1. Sumber Gambar Logo
           </h2>
 
@@ -269,7 +269,7 @@ export default function PwaIconGeneratorPage() {
 
         <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-emerald-700" />
+            <Sliders className="w-4 h-4 siap-text-accent" />
             2. Pengaturan Safe Zone &amp; Alpha
           </h2>
 
@@ -305,7 +305,7 @@ export default function PwaIconGeneratorPage() {
               max={92}
               value={safeScale}
               onChange={(e) => setSafeScale(Number(e.target.value))}
-              className="w-full accent-[#065f46]"
+              className="w-full siap-accent-control"
             />
           </div>
 
@@ -320,7 +320,7 @@ export default function PwaIconGeneratorPage() {
               max={250}
               value={whiteThreshold}
               onChange={(e) => setWhiteThreshold(Number(e.target.value))}
-              className="w-full accent-[#065f46]"
+              className="w-full siap-accent-control"
             />
           </div>
 
@@ -329,7 +329,7 @@ export default function PwaIconGeneratorPage() {
               type="checkbox"
               checked={showSafeGuide}
               onChange={(e) => setShowSafeGuide(e.target.checked)}
-              className="rounded border-slate-300 text-emerald-700"
+              className="rounded border-slate-300 siap-accent-control"
             />
             Tampilkan lingkaran panduan Safe Zone (80%)
           </label>
@@ -338,7 +338,7 @@ export default function PwaIconGeneratorPage() {
         {/* Simulasi Material You / iOS Tinted */}
         <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Palette className="w-4 h-4 text-emerald-700" />
+            <Palette className="w-4 h-4 siap-text-accent" />
             3. Simulasi Themed Icon (Material You)
           </h2>
           <p className="text-xs text-slate-500">
@@ -408,7 +408,7 @@ export default function PwaIconGeneratorPage() {
                   {item.filename} · purpose: {item.purpose}
                 </p>
               </div>
-              <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+              <ShieldCheck className="w-4 h-4 siap-text-accent shrink-0" />
             </div>
 
             <div className="flex items-center justify-center py-3 rounded-xl bg-[repeating-conic-gradient(#e2e8f0_0%_25%,#f8fafc_0%_50%)] bg-[length:16px_16px] border border-slate-200">
@@ -428,7 +428,7 @@ export default function PwaIconGeneratorPage() {
             <button
               type="button"
               onClick={() => downloadDataUrl(item.filename, item.dataUrl)}
-              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-700 text-emerald-800 hover:bg-emerald-50 py-2 text-xs font-semibold transition min-h-[40px]"
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl siap-btn-outline py-2 text-xs font-semibold transition min-h-[40px]"
             >
               <Download className="w-3.5 h-3.5" />
               Unduh {item.filename}
