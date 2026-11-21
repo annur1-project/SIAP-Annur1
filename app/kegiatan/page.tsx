@@ -937,7 +937,7 @@ export default function KegiatanPage() {
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-fit">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit overflow-x-auto">
           <button
             type="button"
             onClick={() => setMainTab('agenda')}
@@ -1396,7 +1396,7 @@ export default function KegiatanPage() {
                             <div className="text-xs text-slate-600">
                               {canEdit
                                 ? 'Isi nama santri atau pengurus pada setiap slot. Klik status untuk menandai kesiapan.'
-                                : 'Daftar pengisi acara pada setiap slot kegiatan (Mode Transparansi).'}
+                                : 'Daftar pengisi acara pada setiap slot kegiatan (View Only).'}
                             </div>
                             {canEdit && (
                               <div className="flex flex-wrap items-center gap-1.5">

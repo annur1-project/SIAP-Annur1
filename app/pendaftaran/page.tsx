@@ -29,6 +29,8 @@ import {
   DEFAULT_PENGATURAN_FORM,
   DEFAULT_SKEMA_PENDAFTARAN,
   generateNextNisForYear,
+  getDynamicTahunPsbInfo,
+  getDynamicTodayIsoWib,
   getTahunAjaranForDate,
   mergeAturanOperasional,
   readExtendedLocal,
@@ -68,7 +70,11 @@ export default function PendaftaranInternalPage() {
   const [loading, setLoading] = useState(true);
   const [tableMissing, setTableMissing] = useState(false);
   const [savingAction, setSavingAction] = useState(false);
-  const [todayIso, setTodayIso] = useState('2026-11-18');
+  const [todayIso, setTodayIso] = useState('');
+  const [dynamicPsbInfo, setDynamicPsbInfo] = useState<{
+    tahunPsb: number;
+    tahunAjaranPsb: string;
+  }>({ tahunPsb: 0, tahunAjaranPsb: '' });
   const [petugasNama, setPetugasNama] = useState('Pengurus PSB / Bendahara');
 
   const [skema, setSkema] = useState<SkemaPendaftaranConfig>(DEFAULT_SKEMA_PENDAFTARAN);
@@ -107,7 +113,7 @@ export default function PendaftaranInternalPage() {
   const [pelunasanBuktiFile, setPelunasanBuktiFile] = useState<File | null>(null);
   const [pelunasanBuktiPreview, setPelunasanBuktiPreview] = useState<string>('');
   const [selectedKamar, setSelectedKamar] = useState<string>('Menunggu Penempatan');
-  const [tglMasukAktual, setTglMasukAktual] = useState<string>('2027-07-01');
+  const [tglMasukAktual, setTglMasukAktual] = useState<string>('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkActivating, setBulkActivating] = useState(false);
@@ -173,12 +179,11 @@ export default function PendaftaranInternalPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const d = new Date();
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-        d.getDate()
-      ).padStart(2, '0')}`;
+      const iso = getDynamicTodayIsoWib();
+      const psbInfo = getDynamicTahunPsbInfo();
       setTodayIso(iso);
       setTglMasukAktual(iso);
+      setDynamicPsbInfo(psbInfo);
       void loadAll();
     }, 0);
     return () => clearTimeout(timer);
@@ -206,7 +211,9 @@ export default function PendaftaranInternalPage() {
 
     const defaultRoom = rec.kamar_rencana || 'Menunggu Penempatan';
     setSelectedKamar(defaultRoom);
-    const defaultTahunPsb = Number(rec.tahun_psb || skema.tahun_psb || 2027);
+    const defaultTahunPsb = Number(
+      rec.tahun_psb || skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
+    );
     setTglMasukAktual(`${defaultTahunPsb}-07-01`);
   };
 
@@ -591,7 +598,9 @@ export default function PendaftaranInternalPage() {
   const handleResmikanSantri = async () => {
     if (!canEdit || !selected) return;
     const roomFinal = selectedKamar.trim() || 'Menunggu Penempatan';
-    const defaultTahunPsb = Number(selected.tahun_psb || skema.tahun_psb || 2027);
+    const defaultTahunPsb = Number(
+      selected.tahun_psb || skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
+    );
     const tglMasuk = tglMasukAktual || `${defaultTahunPsb}-07-01`;
 
     setSavingAction(true);
@@ -631,7 +640,9 @@ export default function PendaftaranInternalPage() {
     let firstError = '';
 
     for (const rec of selectedEligibleRecords) {
-      const tahunPsb = Number(rec.tahun_psb || skema.tahun_psb || 2027);
+      const tahunPsb = Number(
+        rec.tahun_psb || skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
+      );
       const tglMasuk = `${tahunPsb}-07-01`;
       const res = await activateSinglePsbRecord({
         rec,
@@ -734,7 +745,7 @@ export default function PendaftaranInternalPage() {
         <div>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
             <UserPlus className="w-3.5 h-3.5" />
-            Penerimaan Santri Baru (PSB) · TA {skema.tahun_ajaran_psb || '2027/2028'}
+            Penerimaan Santri Baru (PSB) · TA {skema.tahun_ajaran_psb || dynamicPsbInfo.tahunAjaranPsb || '...'}
           </span>
           <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">
             Antrean Pendaftaran Online &amp; Verifikasi DP
@@ -744,39 +755,39 @@ export default function PendaftaranInternalPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             type="button"
             onClick={() => copyPublicUrl('/daftar', 'Formulir /daftar')}
-            className="min-h-[38px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[38px] px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <ClipboardCopy className="w-3.5 h-3.5" />
+            <ClipboardCopy className="w-3.5 h-3.5 shrink-0" />
             Salin Link /daftar
           </button>
           <a
             href="/daftar"
             target="_blank"
             rel="noopener noreferrer"
-            className="min-h-[38px] px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+            className="min-h-[38px] px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
-            <ExternalLink className="w-3.5 h-3.5" />
+            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
             Buka /daftar
           </a>
           <button
             type="button"
             onClick={() => copyPublicUrl('/cek-daftar', 'Cek Status /cek-daftar')}
-            className="min-h-[38px] px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[38px] px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <ClipboardCopy className="w-3.5 h-3.5" />
+            <ClipboardCopy className="w-3.5 h-3.5 shrink-0" />
             Link /cek-daftar
           </button>
           <button
             type="button"
             onClick={() => void loadAll()}
             aria-label="Muat ulang data PSB"
-            className="min-h-[38px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[38px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${loading ? 'animate-spin' : ''}`} />
             Muat Ulang
           </button>
         </div>
@@ -897,7 +908,8 @@ export default function PendaftaranInternalPage() {
             </button>
             <span className="text-emerald-100">
               Terpilih: <strong className="font-mono">{selectedEligibleRecords.length}</strong> calon santri terverifikasi DP (otomatis masuk kamar{' '}
-              <strong>Menunggu Penempatan</strong> &amp; NIS {String(skema.tahun_psb || 2027).slice(-2)}XXXX)
+              <strong>Menunggu Penempatan</strong> &amp; NIS{' '}
+              {String(skema.tahun_psb || dynamicPsbInfo.tahunPsb || 'XX').slice(-2)}XXXX)
             </span>
           </div>
 

@@ -75,12 +75,24 @@ const menuItems: NavMenuItem[] = [
 
 export default function Navbar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { loading: authLoading, pengurus, jabatanLabels, canEditModule, canManageAccounts, signOut } = useAuth();
+  const { loading: authLoading, pengurus, jabatanLabels, canEditModule, isSuperAdmin, signOut } = useAuth();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tema, setTema] = useState<TemaAplikasiConfig>(DEFAULT_TEMA_APLIKASI);
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [mobileNavHrefs, setMobileNavHrefs] = useState<string[]>(DEFAULT_MOBILE_NAV_HREFS);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -126,7 +138,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const visibleMenuItems = menuItems.filter((item) => !item.adminOnly || canManageAccounts);
+  const visibleMenuItems = menuItems.filter((item) => !item.adminOnly || isSuperAdmin);
   const effectiveLogo = logoUrl || '/icons/logo-e1.png';
   const brandTitle =
     tema.appShortTitle === 'e-Pondok An-Nur 1' ? 'e-annursatu' : tema.appShortTitle || 'e-annursatu';
@@ -135,7 +147,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
     <div
       data-siap-shell
       data-theme-custom-accent={useCustomAccent ? 'true' : 'false'}
-      className="min-h-screen bg-slate-50 flex flex-col md:flex-row transition-colors"
+      className="min-h-screen bg-slate-50 flex flex-col md:flex-row print:block print:min-h-0 print:bg-white transition-colors"
     >
       {showAuthGate && (
         <div
@@ -202,7 +214,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
                   <span className="truncate">{item.name}</span>
                 </span>
                 {!editable && item.moduleKey !== 'beranda' && (
-                  <span title="Mode Transparansi (Hanya Lihat)" className="text-white/50 shrink-0">
+                  <span title="View Only" className="text-white/50 shrink-0">
                     <Eye className="w-3.5 h-3.5" />
                   </span>
                 )}
@@ -279,60 +291,85 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* Menu Drawer HP */}
+      {/* Menu Drawer HP (Solid penuh layar agar konten belakang tidak bocor saat digulir) */}
       {mobileMenuOpen && (
         <div
           style={{ backgroundColor: tema.sidebarColor }}
-          className="print:hidden md:hidden fixed inset-0 top-12 bottom-14 backdrop-blur-xs z-40 p-4 overflow-y-auto space-y-4"
+          className="print:hidden md:hidden fixed inset-0 bottom-14 z-50 flex flex-col overflow-hidden"
         >
-          <div className="rounded-xl bg-black/25 border border-white/15 p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-white truncate">{pengurus.nama_lengkap}</p>
-              <p className="text-xs text-white/75 truncate">
-                {jabatanLabels.join(' · ') || `@${pengurus.username}`}
-              </p>
+          <div className="h-12 px-3 border-b border-white/15 flex items-center justify-between gap-2 shrink-0 text-white">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-[#065f46] flex items-center justify-center shrink-0 overflow-hidden border border-white/25">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={effectiveLogo}
+                  alt="Logo e-annursatu"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span className="font-bold text-sm truncate whitespace-nowrap">Menu {brandTitle}</span>
             </div>
             <button
               type="button"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                void signOut();
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-3 py-2 text-xs font-semibold text-white shrink-0 min-h-[40px]"
+              onClick={() => setMobileMenuOpen(false)}
+              aria-label="Tutup menu"
+              className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/15 hover:bg-white/25 text-white shrink-0"
             >
-              <LogOut className="w-4 h-4" />
-              Keluar
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 pb-6">
-            {visibleMenuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive =
-                item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
-              const editable = canEditModule(item.moduleKey);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  style={isActive ? { backgroundColor: tema.primaryColor } : undefined}
-                  className={`relative flex flex-col items-center justify-center p-3.5 rounded-xl border transition-colors min-h-[76px] ${
-                    isActive
-                      ? 'border-white/50 text-white shadow-sm'
-                      : 'bg-black/20 border-white/15 text-white/90 active:bg-white/20'
-                  }`}
-                >
-                  {!editable && item.moduleKey !== 'beranda' && (
-                    <Eye className="w-3.5 h-3.5 text-white/50 absolute top-2 right-2" />
-                  )}
-                  <Icon className="w-5 h-5 mb-1.5 text-white/80" />
-                  <span className="text-xs text-center font-semibold leading-tight">
-                    {item.name}
-                  </span>
-                </Link>
-              );
-            })}
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
+            <div className="rounded-xl bg-black/25 border border-white/15 p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-white truncate">{pengurus.nama_lengkap}</p>
+                <p className="text-xs text-white/75 truncate">
+                  {jabatanLabels.join(' · ') || `@${pengurus.username}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void signOut();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-3 py-2 text-xs font-semibold text-white shrink-0 min-h-[40px]"
+              >
+                <LogOut className="w-4 h-4" />
+                Keluar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pb-6">
+              {visibleMenuItems.map((item) => {
+                const Icon = item.icon;
+                const isActive =
+                  item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
+                const editable = canEditModule(item.moduleKey);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                    style={isActive ? { backgroundColor: tema.primaryColor } : undefined}
+                    className={`relative flex flex-col items-center justify-center p-3.5 rounded-xl border transition-colors min-h-[76px] ${
+                      isActive
+                        ? 'border-white/50 text-white shadow-sm'
+                        : 'bg-black/20 border-white/15 text-white/90 active:bg-white/20'
+                    }`}
+                  >
+                    {!editable && item.moduleKey !== 'beranda' && (
+                      <Eye className="w-3.5 h-3.5 text-white/50 absolute top-2 right-2" />
+                    )}
+                    <Icon className="w-5 h-5 mb-1.5 text-white/80" />
+                    <span className="text-xs text-center font-semibold leading-tight">
+                      {item.name}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -385,7 +422,7 @@ export default function Navbar({ children }: { children: React.ReactNode }) {
         className={
           showAuthGate
             ? 'hidden'
-            : 'flex-1 min-w-0 w-full md:ml-64 print:ml-0 p-3 sm:p-4 md:p-8 print:p-0 pb-20 md:pb-8'
+            : 'flex-1 min-w-0 w-full md:ml-64 print:block print:w-full print:ml-0 p-3 sm:p-4 md:p-8 print:p-0 pb-20 md:pb-8 print:pb-0'
         }
       >
         {children}

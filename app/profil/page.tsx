@@ -125,7 +125,7 @@ function ProfilContent() {
             <div className="min-w-0">
               <h2 className="text-base font-bold text-slate-900 truncate">{pengurus.nama_lengkap}</h2>
               <p className="text-xs text-slate-500 font-mono">
-                @{pengurus.username} · Masa Khidmat {pengurus.masa_khidmat || '2026/2027'}
+                @{pengurus.username} · Masa Khidmat {pengurus.masa_khidmat || '-'}
               </p>
             </div>
           </div>
@@ -166,7 +166,7 @@ function ProfilContent() {
               <p>
                 Akses NIK / KK Santri Utuh:{' '}
                 <strong className={canViewSensitiveSantri ? 'text-emerald-700' : 'text-slate-500'}>
-                  {canViewSensitiveSantri ? 'Terbuka (Sekretaris / EMIS / Pimpinan)' : 'Disamarkan (Mode Transparansi)'}
+                  {canViewSensitiveSantri ? 'Terbuka (Sekretaris / EMIS / Pimpinan)' : 'Disamarkan (View Only)'}
                 </strong>
               </p>
             </div>

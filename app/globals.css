@@ -168,8 +168,27 @@ html[data-theme-density="compact"] main {
 @media print {
   html,
   body,
-  [data-siap-shell] {
+  [data-siap-shell],
+  [data-siap-shell] > main {
+    display: block !important;
     background: #ffffff !important;
     color: #0f172a !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #pusat-laporan-dokumen {
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 }

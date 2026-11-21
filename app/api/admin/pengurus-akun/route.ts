@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { normalizeUsername, usernameToAuthEmail } from '@/lib/supabase';
+import { isMissingColumnError } from '@/lib/pengaturan';
 
 function getServerSupabaseAdmin() {
   const url = (
@@ -30,7 +31,17 @@ function getServerSupabaseAdmin() {
   return { admin, verifier };
 }
 
-function hasAdminOrSekretarisRole(jabatanRows: Array<{ divisi?: string; nama_jabatan?: string }>): boolean {
+function isCallerSuperAdmin(callerPengurus: { role?: string | null; username?: string | null }): boolean {
+  const roleStr = String(callerPengurus.role || '').trim().toLowerCase();
+  const uname = normalizeUsername(String(callerPengurus.username || ''));
+  return roleStr === 'super_admin' || uname === 'admin.utama';
+}
+
+function hasAdminOrSekretarisRole(
+  callerPengurus: { role?: string | null; username?: string | null },
+  jabatanRows: Array<{ divisi?: string; nama_jabatan?: string }>
+): boolean {
+  if (isCallerSuperAdmin(callerPengurus)) return true;
   return jabatanRows.some((j) => {
     const text = `${j.divisi || ''} ${j.nama_jabatan || ''}`.toLowerCase();
     return (
@@ -45,11 +56,12 @@ function hasAdminOrSekretarisRole(jabatanRows: Array<{ divisi?: string; nama_jab
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
-      action?: 'create_account' | 'reset_password' | 'sync_status';
+      action?: 'create_account' | 'reset_password' | 'sync_status' | 'update_permissions';
       pengurus_id?: string;
       username?: string;
       temporary_password?: string;
       status?: string;
+      allowed_modules?: string[] | null;
     };
 
     const action = body?.action;
@@ -67,7 +79,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di server. Tambahkan environment variable SUPABASE_SERVICE_ROLE_KEY untuk mengaktifkan manajemen akun terpusat.',
+            'SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di environment server (.env.local / Vercel). Tambahkan SUPABASE_SERVICE_ROLE_KEY agar Admin dapat membuat akun, mereset sandi, dan mengatur hak akses modul.',
           code: 'MISSING_SERVICE_ROLE_KEY',
         },
         { status: 503 }
@@ -76,7 +88,6 @@ export async function POST(req: NextRequest) {
 
     const { admin, verifier } = clients;
 
-    // Verifikasi token pemanggil dari header Authorization Bearer
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     if (!token) {
@@ -88,12 +99,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Sesi pemanggil tidak valid.' }, { status: 401 });
     }
 
-    // Pastikan pemanggil adalah pengurus aktif dengan jabatan Pimpinan Inti atau Sekretaris
-    const { data: callerPengurus } = await admin
+    let callerRes = await admin
       .from('pengurus')
-      .select('id, status')
+      .select('id, status, username, role')
       .eq('auth_user_id', callerAuth.user.id)
       .maybeSingle();
+
+    if (callerRes.error && isMissingColumnError(callerRes.error)) {
+      callerRes = await admin
+        .from('pengurus')
+        .select('id, status, username')
+        .eq('auth_user_id', callerAuth.user.id)
+        .maybeSingle() as typeof callerRes;
+    }
+
+    const callerPengurus = callerRes.data as {
+      id: string;
+      status?: string | null;
+      username?: string | null;
+      role?: string | null;
+    } | null;
 
     if (!callerPengurus || String(callerPengurus.status || '').toLowerCase() !== 'aktif') {
       return NextResponse.json({ error: 'Akun pemanggil tidak aktif.' }, { status: 403 });
@@ -104,14 +129,20 @@ export async function POST(req: NextRequest) {
       .select('divisi, nama_jabatan')
       .eq('pengurus_id', callerPengurus.id);
 
-    if (!hasAdminOrSekretarisRole((callerJabs || []) as Array<{ divisi?: string; nama_jabatan?: string }>)) {
+    const callerSuperAdmin = isCallerSuperAdmin(callerPengurus);
+
+    if (
+      !hasAdminOrSekretarisRole(
+        callerPengurus,
+        (callerJabs || []) as Array<{ divisi?: string; nama_jabatan?: string }>
+      )
+    ) {
       return NextResponse.json(
-        { error: 'Hanya Admin Utama (Pimpinan Inti) atau Sekretaris yang berhak mengelola akun pengurus.' },
+        { error: 'Hanya Admin Utama (Super Admin) atau Sekretaris yang berhak mengelola akun pengurus.' },
         { status: 403 }
       );
     }
 
-    // Ambil data target pengurus
     const { data: target, error: targetErr } = await admin
       .from('pengurus')
       .select('id, nama_lengkap, username, auth_user_id, status')
@@ -122,11 +153,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Data pengurus target tidak ditemukan.' }, { status: 404 });
     }
 
+    if (action === 'update_permissions') {
+      if (!callerSuperAdmin) {
+        return NextResponse.json(
+          { error: 'Hanya Admin Utama (Super Admin) yang berhak mengatur hak akses modul.' },
+          { status: 403 }
+        );
+      }
+
+      const nextModules = Array.isArray(body.allowed_modules)
+        ? body.allowed_modules.map((m) => String(m || '').trim()).filter(Boolean)
+        : null;
+
+      const { error: permErr } = await admin
+        .from('pengurus')
+        .update({ allowed_modules: nextModules })
+        .eq('id', pengurusId);
+
+      if (permErr) {
+        return NextResponse.json(
+          {
+            error: isMissingColumnError(permErr)
+              ? 'Kolom allowed_modules belum ada di tabel pengurus. Jalankan Skrip SQL Migrasi terlebih dahulu.'
+              : permErr.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      if (target.auth_user_id) {
+        try {
+          await admin
+            .from('profiles')
+            .update({ allowed_modules: nextModules })
+            .eq('id', target.auth_user_id);
+        } catch {
+          // Abaikan jika tabel profiles / kolom belum ada
+        }
+      }
+
+      return NextResponse.json({ ok: true, allowed_modules: nextModules });
+    }
+
     if (action === 'create_account') {
       const uname = normalizeUsername(body.username || target.username || '');
       const tempPw = (body.temporary_password || '').trim();
       if (!uname || uname.length < 3) {
-        return NextResponse.json({ error: 'Username minimal 3 karakter (huruf/angka/titik).' }, { status: 400 });
+        return NextResponse.json(
+          { error: 'Username minimal 3 karakter (huruf/angka/titik).' },
+          { status: 400 }
+        );
       }
       if (tempPw.length < 6) {
         return NextResponse.json({ error: 'Password sementara minimal 6 karakter.' }, { status: 400 });
@@ -176,14 +252,27 @@ export async function POST(req: NextRequest) {
         authUserId = created.user.id;
       }
 
-      const { error: dbUpdErr } = await admin
+      const updateFields: Record<string, unknown> = {
+        auth_user_id: authUserId,
+        username: uname,
+        must_change_password: true,
+      };
+      if (callerSuperAdmin && body.allowed_modules !== undefined) {
+        updateFields.allowed_modules = Array.isArray(body.allowed_modules)
+          ? body.allowed_modules.map((m) => String(m || '').trim()).filter(Boolean)
+          : null;
+      }
+
+      let { error: dbUpdErr } = await admin
         .from('pengurus')
-        .update({
-          auth_user_id: authUserId,
-          username: uname,
-          must_change_password: true,
-        })
+        .update(updateFields)
         .eq('id', pengurusId);
+
+      if (dbUpdErr && isMissingColumnError(dbUpdErr) && 'allowed_modules' in updateFields) {
+        delete updateFields.allowed_modules;
+        const retry = await admin.from('pengurus').update(updateFields).eq('id', pengurusId);
+        dbUpdErr = retry.error;
+      }
 
       if (dbUpdErr) {
         return NextResponse.json({ error: dbUpdErr.message }, { status: 500 });

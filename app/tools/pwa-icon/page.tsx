@@ -20,8 +20,8 @@ const MATERIAL_YOU_SAMPLES = [
 ];
 
 export default function PwaIconGeneratorPage() {
-  const { canManageAccounts } = useAuth();
-  const isReadOnly = !canManageAccounts;
+  const { isSuperAdmin } = useAuth();
+  const isReadOnly = !isSuperAdmin;
 
   const [mainSrc, setMainSrc] = useState<string>('/icons/logo-e1.png');
   const [monoSrc, setMonoSrc] = useState<string>('/icons/icon-monochrome-512.png');

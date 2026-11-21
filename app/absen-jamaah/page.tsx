@@ -1402,12 +1402,12 @@ export default function AbsenJamaahPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
             <button
               type="button"
               onClick={handleReload}
               disabled={loading}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+              className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Muat Ulang
@@ -1415,7 +1415,7 @@ export default function AbsenJamaahPage() {
             <button
               type="button"
               onClick={handleExportExcel}
-              className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+              className="min-h-[40px] px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4" />
               Ekspor Excel
@@ -1423,7 +1423,7 @@ export default function AbsenJamaahPage() {
             <button
               type="button"
               onClick={handlePrintRekap}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+              className="col-span-2 sm:col-span-1 min-h-[40px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
             >
               <Printer className="w-4 h-4" />
               Cetak Rekap A4
@@ -1570,13 +1570,13 @@ export default function AbsenJamaahPage() {
             />
           </div>
 
-          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 min-h-[40px]">
+          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 min-h-[40px] min-w-0 overflow-hidden">
             <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
+              className="w-full min-w-0 bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
             />
           </div>
 
@@ -2113,14 +2113,14 @@ export default function AbsenJamaahPage() {
       {activeTab === 'rekap' && (
         <div className="space-y-4 print:hidden">
           <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
+              <div className="grid grid-cols-3 sm:flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
                 {(['harian', 'mingguan', 'bulanan'] as RekapPeriod[]).map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => setRekapPeriod(p)}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize whitespace-nowrap shrink-0 transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize whitespace-nowrap shrink-0 transition-colors ${
                       rekapPeriod === p
                         ? 'bg-emerald-800 text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -2131,11 +2131,11 @@ export default function AbsenJamaahPage() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+              <div className="grid grid-cols-2 sm:flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
                 <button
                   type="button"
                   onClick={() => setRekapGroupBy('santri')}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors ${
                     rekapGroupBy === 'santri'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
@@ -2147,7 +2147,7 @@ export default function AbsenJamaahPage() {
                 <button
                   type="button"
                   onClick={() => setRekapGroupBy('kamar')}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                     rekapGroupBy === 'kamar'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'

@@ -173,9 +173,9 @@ export const DEFAULT_SKEMA_PENDAFTARAN: SkemaPendaftaranConfig = {
   syahriyah_reguler: 450000,
   kuota_gratis_uang_pangkal: 100,
   promo_aktif: true,
-  tahun_psb: 2027,
-  tahun_ajaran_psb: '2027/2028',
-  kuota_promo_tampil_awal: 28,
+  tahun_psb: 0,
+  tahun_ajaran_psb: '',
+  kuota_promo_tampil_awal: 25,
 };
 
 export const DEFAULT_PROFIL_PONDOK_PSB: ProfilPondokPsbConfig = {
@@ -255,7 +255,7 @@ export const DEFAULT_TEMA_APLIKASI: TemaAplikasiConfig = {
 };
 
 export const DEFAULT_ATURAN_OPERASIONAL: AturanOperasional = {
-  tahun_ajaran_aktif: '2026/2027',
+  tahun_ajaran_aktif: '',
   daftar_kamar: [...DEFAULT_KAMAR_MASTER],
   perizinan: {
     infaq_tidak_menginap: 5000,
@@ -547,6 +547,44 @@ export function hitungRincianPendaftaran(params: {
   };
 }
 
+export function getDynamicTodayIsoWib(now: Date = new Date()): string {
+  const wibMs = now.getTime() + 7 * 60 * 60 * 1000;
+  return new Date(wibMs).toISOString().slice(0, 10);
+}
+
+export function getDynamicTahunSekarang(now: Date = new Date()): number {
+  return Number(getDynamicTodayIsoWib(now).slice(0, 4));
+}
+
+export function getDynamicTahunAjaranAktif(now: Date = new Date()): string {
+  return getTahunAjaranForDate(getDynamicTodayIsoWib(now));
+}
+
+export function getDynamicTahunPsbInfo(now: Date = new Date()): {
+  tahunPsb: number;
+  tahunAjaranPsb: string;
+  nisPrefix: string;
+} {
+  const taAktif = getDynamicTahunAjaranAktif(now);
+  const startActive = parseInt(taAktif.split('/')[0] || String(getDynamicTahunSekarang(now)), 10);
+  const tahunPsb = startActive + 1;
+  return {
+    tahunPsb,
+    tahunAjaranPsb: `${tahunPsb}/${tahunPsb + 1}`,
+    nisPrefix: String(tahunPsb).slice(-2).padStart(2, '0'),
+  };
+}
+
+export function getDynamicMasaKhidmatOptions(now: Date = new Date()): string[] {
+  const taAktif = getDynamicTahunAjaranAktif(now);
+  const startYr = parseInt(taAktif.split('/')[0] || String(getDynamicTahunSekarang(now)), 10);
+  return [
+    `${startYr - 1}/${startYr}`,
+    `${startYr}/${startYr + 1}`,
+    `${startYr + 1}/${startYr + 2}`,
+  ];
+}
+
 export function getTahunAjaranForDate(isoDate: string): string {
   const clean = (isoDate || '').slice(0, 10);
   const parts = clean.split('-');
@@ -558,7 +596,7 @@ export function getTahunAjaranForDate(isoDate: string): string {
 
 /**
  * Menghasilkan NIS berurutan per 2-digit tahun masuk (`YYXXXX`),
- * sehingga santri PSB TA 2027/2028 memakai awalan `27` sementara santri Mutasi
+ * sehingga santri PSB memakai awalan tahun PSB sementara santri Mutasi
  * yang masuk di tahun berjalan memakai awalan tahun tanggal masuknya tanpa bentrok urutan.
  */
 export function generateNextNisForYear(
@@ -566,7 +604,7 @@ export function generateNextNisForYear(
   existingList: Array<{ nis?: string | null }>,
   offset = 1
 ): string {
-  let yearPrefix = '27';
+  let yearPrefix = String(new Date().getFullYear()).slice(-2).padStart(2, '0');
   if (typeof tglMasukOrYear === 'number') {
     yearPrefix = String(tglMasukOrYear).slice(-2).padStart(2, '0');
   } else {
@@ -776,18 +814,18 @@ export function mergeAturanOperasional(raw: unknown): AturanOperasional {
         typeof obj.pendaftaran?.promo_aktif === 'boolean'
           ? obj.pendaftaran.promo_aktif
           : DEFAULT_SKEMA_PENDAFTARAN.promo_aktif,
-      tahun_psb: Number(obj.pendaftaran?.tahun_psb ?? DEFAULT_SKEMA_PENDAFTARAN.tahun_psb ?? 2027),
+      tahun_psb: Number(obj.pendaftaran?.tahun_psb || 0),
       tahun_ajaran_psb:
         typeof obj.pendaftaran?.tahun_ajaran_psb === 'string' &&
         obj.pendaftaran.tahun_ajaran_psb.trim()
           ? obj.pendaftaran.tahun_ajaran_psb.trim()
-          : DEFAULT_SKEMA_PENDAFTARAN.tahun_ajaran_psb,
+          : '',
       kuota_promo_tampil_awal: Math.max(
         1,
         Number(
           obj.pendaftaran?.kuota_promo_tampil_awal ??
             DEFAULT_SKEMA_PENDAFTARAN.kuota_promo_tampil_awal ??
-            28
+            25
         )
       ),
     },

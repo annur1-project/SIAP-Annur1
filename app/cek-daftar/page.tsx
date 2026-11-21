@@ -23,6 +23,7 @@ import {
   toWaMeDigits,
   type PsbPendaftaranRecord,
 } from '@/lib/psb';
+import { getDynamicTahunPsbInfo } from '@/lib/pengaturan';
 import { PsbPublicHeader } from '@/components/PsbPondokInfo';
 
 function CekDaftarInner() {
@@ -36,6 +37,7 @@ function CekDaftarInner() {
   const [results, setResults] = useState<PsbPendaftaranRecord[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [exampleNoReg, setExampleNoReg] = useState('PSB-XX-001');
   const [pengaturan, setPengaturan] = useState({
     nama_pesantren: PSB_PROFIL_PONDOK.namaResmi,
     alamat_lengkap: PSB_PROFIL_PONDOK.alamat,
@@ -70,6 +72,8 @@ function CekDaftarInner() {
     };
 
     const timer = setTimeout(() => {
+      const psbInfo = getDynamicTahunPsbInfo();
+      setExampleNoReg(`PSB-${String(psbInfo.tahunPsb).slice(-2)}-001`);
       void loadData();
     }, 0);
     return () => {
@@ -139,7 +143,7 @@ function CekDaftarInner() {
               <input
                 id="cek_reg"
                 type="text"
-                placeholder="Misal: PSB-27-001"
+                placeholder={`Misal: ${exampleNoReg}`}
                 value={noReg}
                 onChange={(e) => setNoReg(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono uppercase"
@@ -184,6 +188,22 @@ function CekDaftarInner() {
                 Hubungi Admin
               </a>
             </div>
+          </div>
+        )}
+
+        {hasSearched && results.length > 1 && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-950">
+            <div>
+              <strong className="block text-sm font-extrabold">
+                Ditemukan {results.length} Calon Santri dengan Nomor WA Wali yang Sama
+              </strong>
+              <p className="text-emerald-800 mt-0.5">
+                Menampilkan seluruh status pendaftaran anak Anda secara terpisah berdasarkan Nomor Registrasi masing-masing.
+              </p>
+            </div>
+            <span className="px-3 py-1.5 rounded-xl bg-white border border-emerald-200 font-bold text-emerald-800 shrink-0 self-start sm:self-center">
+              {results.length} Pendaftar
+            </span>
           </div>
         )}
 

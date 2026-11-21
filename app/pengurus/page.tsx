@@ -7,7 +7,18 @@ import {
   normalizeUsername,
   setMockAccountPassword,
 } from "@/lib/supabase";
-import { useAuth, TransparencyBanner } from "@/lib/auth";
+import {
+  useAuth,
+  TransparencyBanner,
+  MODULE_PERMISSION_GROUPS,
+  derivePermissionsFromJabatan,
+  normalizeAllowedModulesList,
+} from "@/lib/auth";
+import {
+  getDynamicMasaKhidmatOptions,
+  getDynamicTahunAjaranAktif,
+  getDynamicTahunSekarang,
+} from "@/lib/pengaturan";
 import {
   Users,
   Plus,
@@ -61,6 +72,8 @@ interface PengurusItem {
   masa_khidmat: string;
   catatan: string | null;
   username: string | null;
+  role: string | null;
+  allowed_modules: string[] | null;
   auth_user_id: string | null;
   must_change_password: boolean;
   jabatan_list: JabatanItem[];
@@ -143,8 +156,6 @@ const DEFAULT_KAMAR_SANTRI = [
   "Al-Fachriyah 3 (VIP)",
   "Al-Fachriyah 4 (VIP)",
 ];
-
-const MASA_KHIDMAT_OPTIONS = ["2025/2026", "2026/2027", "2027/2028"];
 
 // Normalisasi nama divisi lama ke format baku
 function normalizeDivisi(divisi: string): string {
@@ -385,7 +396,14 @@ function getRowHierarchyStyle(
 }
 
 export default function DataPengurusPage() {
-  const { canEditModule, canViewBisyaroh, canManageAccounts, refreshAuth, pengurus: currentPengurus } = useAuth();
+  const {
+    canEditModule,
+    canViewBisyaroh,
+    canManageAccounts,
+    isSuperAdmin,
+    refreshAuth,
+    pengurus: currentPengurus,
+  } = useAuth();
   const canEditPengurus = canEditModule("pengurus");
 
   // State Data Utama
@@ -407,7 +425,8 @@ export default function DataPengurusPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDivisi, setFilterDivisi] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("aktif");
-  const [masaKhidmat, setMasaKhidmat] = useState("2026/2027");
+  const [masaKhidmatOptions, setMasaKhidmatOptions] = useState<string[]>([]);
+  const [masaKhidmat, setMasaKhidmat] = useState("");
   const [showBisyaroh, setShowBisyaroh] = useState(false);
 
   // State Modal Tambah / Edit
@@ -419,15 +438,17 @@ export default function DataPengurusPage() {
   const [accountTarget, setAccountTarget] = useState<PengurusItem | null>(null);
   const [accountUsername, setAccountUsername] = useState("");
   const [accountTempPassword, setAccountTempPassword] = useState("");
+  const [accountModules, setAccountModules] = useState<Set<string>>(new Set());
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountFeedback, setAccountFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const [dynamicYearHint, setDynamicYearHint] = useState("annur1234");
 
   // State Form Pengurus
   const [namaLengkap, setNamaLengkap] = useState("");
   const [noWa, setNoWa] = useState("");
   const [nominalBisyaroh, setNominalBisyaroh] = useState<string>("0");
   const [statusPengurus, setStatusPengurus] = useState<"aktif" | "nonaktif" | "boyong">("aktif");
-  const [formMasaKhidmat, setFormMasaKhidmat] = useState("2026/2027");
+  const [formMasaKhidmat, setFormMasaKhidmat] = useState("");
   const [alamatAsal, setAlamatAsal] = useState("");
   const [catatan, setCatatan] = useState("");
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
@@ -505,6 +526,8 @@ export default function DataPengurusPage() {
         masa_khidmat?: string | null;
         catatan?: string | null;
         username?: string | null;
+        role?: string | null;
+        allowed_modules?: unknown;
         auth_user_id?: string | null;
         must_change_password?: boolean | null;
         jabatan_list?: RawJabatanRow[] | null;
@@ -538,7 +561,21 @@ export default function DataPengurusPage() {
         baseRows = (pengurusData || []) as RawPengurusRow[];
       }
 
-      // Ambil nominal bisyaroh HANYA jika user adalah Pimpinan Inti / Bendahara
+      // Ambil kolom role & allowed_modules langsung dari tabel pengurus jika view belum menyertakannya
+      const extraMetaMap = new Map<string, { role: string | null; allowed_modules: string[] | null }>();
+      const { data: metaRows, error: metaErr } = await supabase
+        .from("pengurus")
+        .select("id, role, allowed_modules");
+      if (!metaErr && Array.isArray(metaRows)) {
+        (metaRows as Array<{ id: string; role?: string | null; allowed_modules?: unknown }>).forEach((m) => {
+          extraMetaMap.set(m.id, {
+            role: m.role ?? null,
+            allowed_modules: normalizeAllowedModulesList(m.allowed_modules),
+          });
+        });
+      }
+
+      // Ambil nominal bisyaroh HANYA jika user adalah Pimpinan Inti / Bendahara / Super Admin
       const bisyarohMap = new Map<string, number>();
       if (canViewBisyaroh) {
         const { data: rpcRows } = await supabase.rpc("get_pengurus_bisyaroh_map");
@@ -549,35 +586,48 @@ export default function DataPengurusPage() {
         }
       }
 
-      const normalized: PengurusItem[] = baseRows.map((item) => ({
-        id: item.id,
-        nama_lengkap: item.nama_lengkap,
-        no_wa: item.no_wa ?? null,
-        alamat: item.alamat ?? null,
-        foto_url: item.foto_url ?? null,
-        ttd_url: item.ttd_url ?? null,
-        nominal_bisyaroh: canViewBisyaroh
-          ? bisyarohMap.has(item.id)
-            ? (bisyarohMap.get(item.id) as number)
-            : Number(item.nominal_bisyaroh || 0)
-          : 0,
-        status: item.status || "aktif",
-        masa_khidmat: item.masa_khidmat || "2026/2027",
-        catatan: item.catatan ?? null,
-        username: item.username || null,
-        auth_user_id: item.auth_user_id || null,
-        must_change_password: Boolean(item.must_change_password),
-        jabatan_list: Array.isArray(item.jabatan_list)
-          ? item.jabatan_list.map((j) => ({
-              id: j.id,
-              divisi: normalizeDivisi(j.divisi || ""),
-              nama_jabatan: j.nama_jabatan || "",
-              is_utama: Boolean(j.is_utama),
-              urutan_struktur: Number(j.urutan_struktur || 10),
-            }))
-          : [],
-      }));
+      const activeTaFallback = getDynamicTahunAjaranAktif();
+      const normalized: PengurusItem[] = baseRows.map((item) => {
+        const extra = extraMetaMap.get(item.id);
+        return {
+          id: item.id,
+          nama_lengkap: item.nama_lengkap,
+          no_wa: item.no_wa ?? null,
+          alamat: item.alamat ?? null,
+          foto_url: item.foto_url ?? null,
+          ttd_url: item.ttd_url ?? null,
+          nominal_bisyaroh: canViewBisyaroh
+            ? bisyarohMap.has(item.id)
+              ? (bisyarohMap.get(item.id) as number)
+              : Number(item.nominal_bisyaroh || 0)
+            : 0,
+          status: item.status || "aktif",
+          masa_khidmat: item.masa_khidmat || activeTaFallback,
+          catatan: item.catatan ?? null,
+          username: item.username || null,
+          role: (item.role ?? extra?.role ?? null) as string | null,
+          allowed_modules:
+            item.allowed_modules !== undefined
+              ? normalizeAllowedModulesList(item.allowed_modules)
+              : extra?.allowed_modules ?? null,
+          auth_user_id: item.auth_user_id || null,
+          must_change_password: Boolean(item.must_change_password),
+          jabatan_list: Array.isArray(item.jabatan_list)
+            ? item.jabatan_list.map((j) => ({
+                id: j.id,
+                divisi: normalizeDivisi(j.divisi || ""),
+                nama_jabatan: j.nama_jabatan || "",
+                is_utama: Boolean(j.is_utama),
+                urutan_struktur: Number(j.urutan_struktur || 10),
+              }))
+            : [],
+        };
+      });
 
+      const dynOpts = getDynamicMasaKhidmatOptions();
+      const dbTerms = Array.from(new Set(normalized.map((p) => p.masa_khidmat).filter(Boolean)));
+      const mergedOpts = Array.from(new Set([...dynOpts, ...dbTerms])).sort();
+      setMasaKhidmatOptions(mergedOpts);
       setPengurusList(normalized);
     } catch (err) {
       console.error("Gagal memuat data pengurus:", err);
@@ -588,6 +638,12 @@ export default function DataPengurusPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      const dynTa = getDynamicTahunAjaranAktif();
+      const dynOpts = getDynamicMasaKhidmatOptions();
+      setMasaKhidmatOptions(dynOpts);
+      setMasaKhidmat((prev) => prev || dynTa);
+      setFormMasaKhidmat((prev) => prev || dynTa);
+      setDynamicYearHint(`annur${getDynamicTahunSekarang()}`);
       void fetchAllData();
     }, 0);
     return () => clearTimeout(timer);
@@ -597,6 +653,7 @@ export default function DataPengurusPage() {
   // KALKULASI STATISTIK & DATA TERFILTER (URUT SESUAI HIRARKI)
   // ============================================================
   const pengurusByMasaKhidmat = useMemo(() => {
+    if (!masaKhidmat) return pengurusList;
     return pengurusList.filter((p) => p.masa_khidmat === masaKhidmat);
   }, [pengurusList, masaKhidmat]);
 
@@ -1168,7 +1225,7 @@ export default function DataPengurusPage() {
   };
 
   // ============================================================
-  // MANAJEMEN AKUN LOGIN TERPUSAT (CREATE / RESET PASSWORD)
+  // MANAJEMEN AKUN LOGIN TERPUSAT (CREATE / RESET PASSWORD / MODUL RBAC)
   // ============================================================
   const openAccountModal = (item: PengurusItem) => {
     if (!canManageAccounts) return;
@@ -1180,10 +1237,112 @@ export default function DataPengurusPage() {
           .slice(0, 2)
           .join(".")
     );
+
+    const initialPerms = Array.isArray(item.allowed_modules)
+      ? new Set<string>(item.allowed_modules)
+      : new Set<string>(
+          Array.from(
+            derivePermissionsFromJabatan(item.jabatan_list || [], {
+              role: item.role,
+              username: item.username,
+            }).editable
+          )
+        );
+
     setAccountTarget(item);
     setAccountUsername(item.username || suggested);
     setAccountTempPassword("");
+    setAccountModules(initialPerms);
     setAccountFeedback(null);
+  };
+
+  const togglePermissionGroup = (modules: readonly string[]) => {
+    setAccountModules((prev) => {
+      const next = new Set(prev);
+      const allChecked = modules.every((m) => next.has(m));
+      if (allChecked) {
+        modules.forEach((m) => next.delete(m));
+      } else {
+        modules.forEach((m) => next.add(m));
+      }
+      return next;
+    });
+  };
+
+  const handleSaveModulePermissions = async () => {
+    if (!accountTarget || !isSuperAdmin) return;
+    setAccountSaving(true);
+    setAccountFeedback(null);
+    const modulesArray = Array.from(accountModules);
+    try {
+      if (!isSupabaseConfigured()) {
+        await supabase
+          .from("pengurus")
+          .update({ allowed_modules: modulesArray })
+          .eq("id", accountTarget.id);
+        setAccountTarget((prev) => (prev ? { ...prev, allowed_modules: modulesArray } : prev));
+        setAccountFeedback({
+          type: "ok",
+          msg: "Hak akses modul berhasil disimpan (Mode Pratinjau).",
+        });
+        await fetchAllData();
+        if (currentPengurus && accountTarget.id === currentPengurus.id) {
+          await refreshAuth();
+        }
+        return;
+      }
+
+      const { data: sessData } = await supabase.auth.getSession();
+      const token = sessData?.session?.access_token;
+      if (!token) {
+        setAccountFeedback({
+          type: "err",
+          msg: "Sesi Supabase Anda tidak ditemukan. Silakan login ulang terlebih dahulu.",
+        });
+        return;
+      }
+
+      const res = await fetch("/api/admin/pengurus-akun", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "update_permissions",
+          pengurus_id: accountTarget.id,
+          allowed_modules: modulesArray,
+        }),
+      });
+
+      const json = (await res.json()) as { error?: string; allowed_modules?: string[] | null };
+      if (!res.ok) {
+        setAccountFeedback({
+          type: "err",
+          msg: json.error || "Gagal menyimpan hak akses modul.",
+        });
+        return;
+      }
+
+      setAccountTarget((prev) =>
+        prev ? { ...prev, allowed_modules: json.allowed_modules ?? modulesArray } : prev
+      );
+      setAccountFeedback({
+        type: "ok",
+        msg: "Hak akses modul berhasil diperbarui dan langsung aktif untuk akun ini.",
+      });
+      await fetchAllData();
+      if (currentPengurus && accountTarget.id === currentPengurus.id) {
+        await refreshAuth();
+      }
+    } catch (err) {
+      setAccountFeedback({
+        type: "err",
+        msg: err instanceof Error ? err.message : "Terjadi kendala saat menghubungi server.",
+      });
+    } finally {
+      setAccountSaving(false);
+    }
   };
 
   const handleAccountAction = async (mode: "create_account" | "reset_password") => {
@@ -1202,6 +1361,7 @@ export default function DataPengurusPage() {
 
     setAccountSaving(true);
     setAccountFeedback(null);
+    const modulesArray = isSuperAdmin ? Array.from(accountModules) : undefined;
     try {
       if (!isSupabaseConfigured()) {
         // Mode Preview / Mock lokal
@@ -1211,6 +1371,7 @@ export default function DataPengurusPage() {
             username: mode === "create_account" ? cleanUname : accountTarget.username || cleanUname,
             auth_user_id: accountTarget.auth_user_id || `auth-${accountTarget.id}`,
             must_change_password: true,
+            ...(modulesArray ? { allowed_modules: modulesArray } : {}),
           })
           .eq("id", accountTarget.id);
         setMockAccountPassword(
@@ -1249,6 +1410,7 @@ export default function DataPengurusPage() {
           pengurus_id: accountTarget.id,
           username: cleanUname,
           temporary_password: tempPw,
+          ...(mode === "create_account" && modulesArray ? { allowed_modules: modulesArray } : {}),
         }),
       });
 
@@ -1471,68 +1633,68 @@ export default function DataPengurusPage() {
         </div>
       </div>
 
-      {/* KARTU RINGKASAN STATISTIK */}
+      {/* KARTU RINGKASAN STATISTIK (Kompak 2x2 di HP, 4 kolom di Desktop) */}
       <div
-        className={`grid grid-cols-1 sm:grid-cols-2 ${
+        className={`grid grid-cols-2 ${
           canViewBisyaroh ? "lg:grid-cols-4" : "lg:grid-cols-3"
-        } gap-4 no-print`}
+        } gap-3 sm:gap-4 no-print`}
       >
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-            <Users className="w-6 h-6" />
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-sm flex items-center gap-3">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <p className="text-xs font-medium text-slate-500">Total Personel Aktif</p>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPersonel}</span>
-              <span className="text-xs text-slate-400">Orang</span>
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Personel Aktif</p>
+            <div className="flex items-baseline gap-1 mt-0.5">
+              <span className="text-xl sm:text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPersonel}</span>
+              <span className="text-[11px] text-slate-400">Orang</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0">
-            <Award className="w-6 h-6" />
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-sm flex items-center gap-3">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0">
+            <Award className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <p className="text-xs font-medium text-slate-500">Total Posisi Terisi</p>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPosisi}</span>
-              <span className="text-xs text-slate-400">Jabatan</span>
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Posisi Terisi</p>
+            <div className="flex items-baseline gap-1 mt-0.5">
+              <span className="text-xl sm:text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPosisi}</span>
+              <span className="text-[11px] text-slate-400">Jabatan</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-            <Layers className="w-6 h-6" />
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-sm flex items-center gap-3">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <Layers className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <p className="text-xs font-medium text-slate-500">Rangkap Jabatan</p>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-bold text-slate-800 tabular-nums">{stats.rangkapJabatan}</span>
-              <span className="text-xs text-slate-400">Personel</span>
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Rangkap Jabatan</p>
+            <div className="flex items-baseline gap-1 mt-0.5">
+              <span className="text-xl sm:text-2xl font-bold text-slate-800 tabular-nums">{stats.rangkapJabatan}</span>
+              <span className="text-[11px] text-slate-400">Personel</span>
             </div>
           </div>
         </div>
 
         {canViewBisyaroh && (
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3.5 min-w-0">
-              <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-                <Wallet className="w-6 h-6" />
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-sm flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+                <Wallet className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-500">Total Bisyaroh / Bulan</p>
-                <p className="text-lg font-bold text-slate-800 truncate mt-0.5 tabular-nums">
-                  {showBisyaroh ? formatRupiah(stats.totalBisyaroh) : "Rp ••••••••"}
+                <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Bisyaroh / Bln</p>
+                <p className="text-sm sm:text-lg font-bold text-slate-800 truncate mt-0.5 tabular-nums">
+                  {showBisyaroh ? formatRupiah(stats.totalBisyaroh) : "Rp ••••••"}
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setShowBisyaroh(!showBisyaroh)}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              className="p-1.5 sm:p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition shrink-0"
               title={showBisyaroh ? "Sembunyikan Nominal" : "Tampilkan Nominal"}
             >
               {showBisyaroh ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -1575,7 +1737,7 @@ export default function DataPengurusPage() {
             onChange={(e) => setMasaKhidmat(e.target.value)}
             className="min-h-[38px] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
-            {MASA_KHIDMAT_OPTIONS.map((mk) => (
+            {masaKhidmatOptions.map((mk) => (
               <option key={mk} value={mk}>
                 {mk}
               </option>
@@ -2461,7 +2623,7 @@ export default function DataPengurusPage() {
                       onChange={(e) => setFormMasaKhidmat(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     >
-                      {MASA_KHIDMAT_OPTIONS.map((mk) => (
+                      {masaKhidmatOptions.map((mk) => (
                         <option key={mk} value={mk}>
                           {mk}
                         </option>
@@ -2750,14 +2912,14 @@ export default function DataPengurusPage() {
           MODAL MANAJEMEN AKUN LOGIN TERPUSAT (TANPA LOGOUT ADMIN)
       ============================================================ */}
       {accountTarget && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 no-print">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200">
-            <div className="bg-emerald-800 text-white px-5 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 no-print">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+            <div className="bg-emerald-800 text-white px-5 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <UserCog className="w-5 h-5 text-emerald-200 shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-sm font-bold">Kelola Akun Login Pengurus</h3>
-                  <p className="text-[11px] text-emerald-200 truncate max-w-[260px]">
+                  <p className="text-[11px] text-emerald-200 truncate">
                     {accountTarget.nama_lengkap}
                   </p>
                 </div>
@@ -2765,13 +2927,13 @@ export default function DataPengurusPage() {
               <button
                 type="button"
                 onClick={() => setAccountTarget(null)}
-                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-700"
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-700 shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
+            <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Status Akun:</span>
@@ -2785,34 +2947,109 @@ export default function DataPengurusPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Username Login (huruf kecil / tanpa spasi)
-                </label>
-                <input
-                  type="text"
-                  value={accountUsername}
-                  onChange={(e) => setAccountUsername(normalizeUsername(e.target.value))}
-                  placeholder="misal: ahmad.zaini"
-                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                />
-              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Username Login
+                  </label>
+                  <input
+                    type="text"
+                    value={accountUsername}
+                    onChange={(e) => setAccountUsername(normalizeUsername(e.target.value))}
+                    placeholder="misal: ahmad.zaini"
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Password Sementara (minimal 6 karakter)
-                </label>
-                <input
-                  type="text"
-                  value={accountTempPassword}
-                  onChange={(e) => setAccountTempPassword(e.target.value)}
-                  placeholder="Contoh: annur2026"
-                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Saat login pertama kali, pengurus wajib mengganti password sementara ini di menu Profil Saya.
-                </p>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Password Sementara (min 6)
+                  </label>
+                  <input
+                    type="text"
+                    value={accountTempPassword}
+                    onChange={(e) => setAccountTempPassword(e.target.value)}
+                    placeholder={`Contoh: ${dynamicYearHint}`}
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                </div>
               </div>
+              <p className="text-[11px] text-slate-500 -mt-2">
+                Saat login pertama kali, pengurus wajib mengganti password sementara di menu Profil Saya.
+              </p>
+
+              {/* HANYA ADMIN UTAMA (SUPER ADMIN): Pengaturan Hak Akses Modul (Full Access) */}
+              {isSuperAdmin && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                        Pengaturan Hak Akses Modul (Full Access)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Modul tercentang terbuka penuh; sisanya otomatis View Only.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allKeys = new Set<string>();
+                          MODULE_PERMISSION_GROUPS.forEach((g) => g.modules.forEach((m) => allKeys.add(m)));
+                          setAccountModules(allKeys);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Pilih Semua
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAccountModules(new Set())}
+                        className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Kosongkan
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
+                    {MODULE_PERMISSION_GROUPS.map((grp) => {
+                      const checked = grp.modules.every((m) => accountModules.has(m));
+                      return (
+                        <label
+                          key={grp.key}
+                          className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 cursor-pointer transition text-[11px] ${
+                            checked
+                              ? "bg-white border-emerald-400 text-slate-900 font-semibold shadow-2xs"
+                              : "bg-white/60 border-slate-200 text-slate-600"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePermissionGroup(grp.modules)}
+                            className="w-4 h-4 accent-emerald-700 rounded shrink-0"
+                          />
+                          <span className="leading-tight">{grp.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      disabled={accountSaving}
+                      onClick={() => void handleSaveModulePermissions()}
+                      className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs disabled:opacity-60 inline-flex items-center gap-1.5"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      {accountSaving ? "Menyimpan..." : "Simpan Hak Akses Modul"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {accountFeedback && (
                 <div

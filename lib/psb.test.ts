@@ -179,10 +179,10 @@ test('PSB_PROFIL_PONDOK memuat data historis dan persyaratan resmi dari PDF', ()
   assert.ok(PSB_PROFIL_PONDOK.berkasFisikWajib.length >= 5);
 });
 
-test('computePromoDisplayRemaining menjaga tampilan kuota promosi tetap realistis (20-30 slot)', () => {
+test('computePromoDisplayRemaining menjaga tampilan kuota promosi tetap statis di slot promo selama masih tersedia', () => {
   assert.equal(
     computePromoDisplayRemaining({ psbRecordsCount: 0, kuotaTotal: 100, realQuotaUsed: 4 }),
-    28
+    25
   );
   assert.equal(
     computePromoDisplayRemaining({ psbRecordsCount: 3, kuotaTotal: 100, realQuotaUsed: 7 }),
@@ -190,7 +190,11 @@ test('computePromoDisplayRemaining menjaga tampilan kuota promosi tetap realisti
   );
   assert.equal(
     computePromoDisplayRemaining({ psbRecordsCount: 10, kuotaTotal: 100, realQuotaUsed: 14, promoDisplayStart: 25 }),
-    15
+    25
+  );
+  assert.equal(
+    computePromoDisplayRemaining({ psbRecordsCount: 1, kuotaTotal: 100, realQuotaUsed: 90, promoDisplayStart: 25 }),
+    10
   );
   assert.equal(
     computePromoDisplayRemaining({ psbRecordsCount: 1, kuotaTotal: 100, realQuotaUsed: 100 }),

@@ -23,6 +23,8 @@ import {
   SlidersHorizontal,
   FileSpreadsheet,
   MapPin,
+  MessageCircle,
+  Receipt,
 } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
@@ -65,6 +67,10 @@ import {
   DEFAULT_MOBILE_NAV_HREFS,
   QUICK_MENU_CATALOG,
   type QuickMenuCatalogItem,
+  type MasterPembayaranItem,
+  type TarifRiwayatItem,
+  getDynamicTahunAjaranAktif,
+  getTarifAktifFromRiwayat,
   isMissingColumnError,
   mergeAturanOperasional,
   normalizeMenuCepatIds,
@@ -81,6 +87,7 @@ import {
   getWibTodayIso,
 } from '@/lib/kalender';
 import { computeWalletAndTransferSummary } from '@/lib/keuangan';
+import { toWaMeDigits } from '@/lib/psb';
 import { useAuth } from '@/lib/auth';
 
 interface SantriRow {
@@ -89,6 +96,11 @@ interface SantriRow {
   nis?: string;
   status: string;
   kamar?: string;
+  tarif_syahriyah?: number;
+  ktl_nominal?: number;
+  no_wa_ayah?: string;
+  no_wa_ibu?: string;
+  no_wa_wali?: string;
 }
 
 interface TransaksiRow {
@@ -106,6 +118,7 @@ interface PengaturanRow {
   id?: number;
   nama_pesantren?: string;
   kota_surat?: string;
+  jatuh_tempo_tanggal?: number;
   rekening_bank?: string;
   rekening_nomor?: string;
   rekening_atas_nama?: string;
@@ -133,6 +146,27 @@ interface IzinPulangRow {
   tgl_rencana_kembali: string;
   alasan?: string | null;
   status: 'disetujui' | 'kembali' | 'terlambat';
+}
+
+interface IzinPulangPrioritas {
+  id: string;
+  santriNama: string;
+  kamar: string;
+  jenisIzin: string;
+  tglRencanaKembali: string;
+  batasJam: string;
+  isLate: boolean;
+  waDigits: string;
+}
+
+interface TunggakanSantriPrioritas {
+  santriId: string;
+  nama: string;
+  kamar: string;
+  jumlahBulan: number;
+  ktlNominal: number;
+  totalTagihan: number;
+  jalur: 'WA_1_2' | 'SURAT_3_PLUS';
 }
 
 interface SantriSakitRow {
@@ -178,21 +212,22 @@ const TONE_CLASSES: Record<
   slate: { bg: 'bg-slate-100', iconText: 'text-slate-700', border: 'border-slate-200' },
 };
 
-function parseBatasJam(alasan?: string | null): string {
-  if (!alasan) return '17:00';
+function parseIzinMeta(alasan?: string | null): { batasJam: string; waPenjemput: string } {
+  const fallback = { batasJam: '17:00', waPenjemput: '' };
+  if (!alasan) return fallback;
   const marker = '[IZIN_META:';
   const idx = alasan.indexOf(marker);
-  if (idx === -1) return '17:00';
+  if (idx === -1) return fallback;
   try {
     const raw = alasan.slice(idx + marker.length, alasan.lastIndexOf(']'));
-    const parsed = JSON.parse(raw) as { b?: string };
-    if (typeof parsed.b === 'string' && /^\d{2}:\d{2}$/.test(parsed.b)) {
-      return parsed.b;
-    }
+    const parsed = JSON.parse(raw) as { b?: string; w?: string };
+    return {
+      batasJam: typeof parsed.b === 'string' && /^\d{2}:\d{2}$/.test(parsed.b) ? parsed.b : '17:00',
+      waPenjemput: typeof parsed.w === 'string' ? parsed.w : '',
+    };
   } catch {
-    return '17:00';
+    return fallback;
   }
-  return '17:00';
 }
 
 function formatRupiah(nominal: number): string {
@@ -208,7 +243,7 @@ export default function DashboardPage() {
   const { canViewBisyaroh } = useAuth();
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [tahunAjaran, setTahunAjaran] = useState('2026/2027');
+  const [tahunAjaran, setTahunAjaran] = useState('');
   const [bulanLabel, setBulanLabel] = useState('Bulan Berjalan');
   const [nowClock, setNowClock] = useState<Date | null>(null);
 
@@ -265,6 +300,20 @@ export default function DashboardPage() {
     terlambat: 0,
     tidakMenginap: 0,
     menginap: 0,
+  });
+  const [izinPrioritasList, setIzinPrioritasList] = useState<IzinPulangPrioritas[]>([]);
+  const [tunggakanSummary, setTunggakanSummary] = useState<{
+    totalSantri: number;
+    waCount: number;
+    suratCount: number;
+    totalNominal: number;
+    previewList: TunggakanSantriPrioritas[];
+  }>({
+    totalSantri: 0,
+    waCount: 0,
+    suratCount: 0,
+    totalNominal: 0,
+    previewList: [],
   });
 
   const [kesehatanStats, setKesehatanStats] = useState({
@@ -382,6 +431,7 @@ export default function DashboardPage() {
     const monthStart = `${monthPrefix}-01`;
     const monthEnd = `${monthPrefix}-${String(lastDayOfMonth).padStart(2, '0')}`;
     const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
+    const activeTa = getDynamicTahunAjaranAktif(now);
 
     const namaBulan = [
       'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -397,6 +447,9 @@ export default function DashboardPage() {
       sakitRes,
       keamananRes,
       sitaRes,
+      pembayaranRes,
+      masterBayarRes,
+      riwayatTarifRes,
       dapurSesiRes,
       dapurMenuRes,
       dapurKasRes,
@@ -406,7 +459,9 @@ export default function DashboardPage() {
       laundryJadwalRes,
       laundryCatatanRes,
     ] = await Promise.all([
-      supabase.from('santri').select('id, nama_lengkap, nis, status, kamar'),
+      supabase
+        .from('santri')
+        .select('id, nama_lengkap, nis, status, kamar, tarif_syahriyah, ktl_nominal, no_wa_ayah, no_wa_ibu, no_wa_wali'),
       supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi, metode_pembayaran, kategori, keterangan'),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
       supabase
@@ -417,10 +472,16 @@ export default function DashboardPage() {
       supabase
         .from('izin_pulang')
         .select('id, santri_id, jenis_izin, tgl_pulang, tgl_rencana_kembali, alasan, status')
-        .eq('status', 'disetujui'),
+        .in('status', ['disetujui', 'terlambat']),
       supabase.from('santri_sakit').select('id, santri_id, tgl_sakit, tgl_sembuh, status'),
       supabase.from('keamanan_pelanggaran').select('id, santri_id, tanggal, poin, status_takzir'),
       supabase.from('keamanan_sita_barang').select('id, status'),
+      supabase
+        .from('pembayaran_santri_detail')
+        .select('santri_id, tahun_ajaran, item_kode, periode_bulan')
+        .eq('tahun_ajaran', activeTa),
+      supabase.from('master_pembayaran').select('id, kode, nama_item, tipe_periode, aktif'),
+      supabase.from('master_pembayaran_riwayat').select('id, item_id, nominal, berlaku_mulai'),
       fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY),
       fetchTableWithFallback<DapurMenuJadwal>('dapur_menu_jadwal', LS_DAPUR_MENU_KEY),
       fetchTableWithFallback<DapurKasItem>('dapur_kas', LS_DAPUR_KAS_KEY),
@@ -550,22 +611,144 @@ export default function DashboardPage() {
       }
     }
 
+    const santriById = new Map(santriList.map((s) => [s.id, s]));
+
     let izinTidakMenginap = 0;
     let izinMenginap = 0;
     let izinTerlambat = 0;
+    const izinPrioritasList: IzinPulangPrioritas[] = [];
 
     for (const row of izinActiveList) {
       if (row.jenis_izin === 'tidak_menginap') izinTidakMenginap += 1;
       else izinMenginap += 1;
 
-      const batasJam = parseBatasJam(row.alasan);
+      const meta = parseIzinMeta(row.alasan);
       const isLate =
+        row.status === 'terlambat' ||
         todayIso > row.tgl_rencana_kembali ||
         (row.jenis_izin === 'tidak_menginap' &&
           todayIso === row.tgl_rencana_kembali &&
-          currentHm > batasJam);
+          currentHm > meta.batasJam);
       if (isLate) izinTerlambat += 1;
+
+      const s = santriById.get(row.santri_id);
+      const waRaw = meta.waPenjemput || s?.no_wa_wali || s?.no_wa_ayah || s?.no_wa_ibu || '';
+      izinPrioritasList.push({
+        id: row.id,
+        santriNama: s?.nama_lengkap || 'Santri',
+        kamar: s?.kamar || '-',
+        jenisIzin: row.jenis_izin,
+        tglRencanaKembali: row.tgl_rencana_kembali,
+        batasJam: meta.batasJam,
+        isLate,
+        waDigits: toWaMeDigits(waRaw),
+      });
     }
+    izinPrioritasList.sort((a, b) => {
+      if (a.isLate !== b.isLate) return a.isLate ? -1 : 1;
+      return a.tglRencanaKembali.localeCompare(b.tglRencanaKembali);
+    });
+
+    // Hitung Ringkasan Santri Menunggak Syahriyah (sinkron dengan /keuangan?tab=tunggakan)
+    const jatuhTempoTgl = Number(setting.jatuh_tempo_tanggal || 10);
+    const nowDay = now.getDate();
+    let cutoffYear = yyyy;
+    let cutoffMonth = nowDay > jatuhTempoTgl ? now.getMonth() + 1 : now.getMonth();
+    if (cutoffMonth === 0) {
+      cutoffMonth = 12;
+      cutoffYear -= 1;
+    }
+    const cutoffPeriode = `${cutoffYear}-${String(cutoffMonth).padStart(2, '0')}`;
+    const taMonths: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const mIdx = ((6 + i) % 12) + 1;
+      const yr = mIdx >= 7 ? startYear : startYear + 1;
+      const p = `${yr}-${String(mIdx).padStart(2, '0')}`;
+      if (p <= cutoffPeriode) taMonths.push(p);
+    }
+
+    const masterItems = (masterBayarRes.error ? [] : masterBayarRes.data || []) as MasterPembayaranItem[];
+    const riwayatTarif = (riwayatTarifRes.error ? [] : riwayatTarifRes.data || []) as TarifRiwayatItem[];
+    const paidSyahriyahMap = new Map<string, Set<string>>();
+    if (!pembayaranRes.error && Array.isArray(pembayaranRes.data)) {
+      for (const det of pembayaranRes.data as Array<{
+        santri_id: string;
+        item_kode: string;
+        periode_bulan: string;
+      }>) {
+        if (det.item_kode !== 'syahriyah') continue;
+        if (!paidSyahriyahMap.has(det.santri_id)) paidSyahriyahMap.set(det.santri_id, new Set());
+        paidSyahriyahMap.get(det.santri_id)!.add(det.periode_bulan);
+      }
+    }
+
+    const resolveNominalForKode = (kode: string, dateTarget: string, fallback: number): number => {
+      const m = masterItems.find((item) => item.kode === kode);
+      if (!m) return fallback;
+      const list = riwayatTarif.filter((r) => r.item_id === m.id);
+      if (list.length === 0) return fallback;
+      return getTarifAktifFromRiwayat(list, dateTarget).nominal || fallback;
+    };
+
+    const skemaPsb = mergedAturan.pendaftaran;
+    const tunggakanList: TunggakanSantriPrioritas[] = [];
+    let tunggakanWaCount = 0;
+    let tunggakanSuratCount = 0;
+    let tunggakanTotalNominal = 0;
+
+    for (const s of santriList) {
+      if (!['aktif', 'ndalem', 'beasiswa_lazis'].includes(s.status)) continue;
+      const paidSet = paidSyahriyahMap.get(s.id) || new Set<string>();
+      const k = (s.kamar || '').toUpperCase();
+      const isVip = k.includes('VIP') || k.includes('FACHRIYAH') || Number(s.tarif_syahriyah) >= 500000;
+      const isNdalem = s.status === 'ndalem';
+      let unpaidMonths = 0;
+      let unpaidNom = 0;
+
+      for (const p of taMonths) {
+        if (!paidSet.has(p)) {
+          unpaidMonths += 1;
+          const dateTarget = `${p}-01`;
+          if (isNdalem) {
+            unpaidNom += resolveNominalForKode('syahriyah_ndalem', dateTarget, 145000);
+          } else if (isVip) {
+            unpaidNom += resolveNominalForKode(
+              'syahriyah_vip',
+              dateTarget,
+              skemaPsb.syahriyah_vip || 500000
+            );
+          } else {
+            unpaidNom += resolveNominalForKode(
+              'syahriyah_reguler',
+              dateTarget,
+              skemaPsb.syahriyah_reguler || 450000
+            );
+          }
+        }
+      }
+
+      const ktlNominal = Number(s.ktl_nominal || 0);
+      const totalTagihan = unpaidNom + ktlNominal;
+      if (unpaidMonths > 0 || ktlNominal > 0) {
+        const jalur: 'WA_1_2' | 'SURAT_3_PLUS' = unpaidMonths >= 3 ? 'SURAT_3_PLUS' : 'WA_1_2';
+        if (jalur === 'SURAT_3_PLUS') tunggakanSuratCount += 1;
+        else tunggakanWaCount += 1;
+        tunggakanTotalNominal += totalTagihan;
+        tunggakanList.push({
+          santriId: s.id,
+          nama: s.nama_lengkap || 'Santri',
+          kamar: s.kamar || '-',
+          jumlahBulan: unpaidMonths,
+          ktlNominal,
+          totalTagihan,
+          jalur,
+        });
+      }
+    }
+    tunggakanList.sort((a, b) => {
+      if (b.jumlahBulan !== a.jumlahBulan) return b.jumlahBulan - a.jumlahBulan;
+      return b.totalTagihan - a.totalTagihan;
+    });
 
     let dirawatUks = 0;
     let dirujuk = 0;
@@ -583,7 +766,6 @@ export default function DashboardPage() {
     let takzirBelumSelesai = 0;
     let kasusBulanIni = 0;
     const poinMap = new Map<string, { totalPoin: number; kasusCount: number }>();
-    const santriById = new Map(santriList.map((s) => [s.id, s]));
 
     for (const p of pelanggaranList) {
       if (p.status_takzir === 'belum_selesai') takzirBelumSelesai += 1;
@@ -746,6 +928,14 @@ export default function DashboardPage() {
         tidakMenginap: izinTidakMenginap,
         menginap: izinMenginap,
       },
+      izinPrioritasList,
+      tunggakanSummary: {
+        totalSantri: tunggakanList.length,
+        waCount: tunggakanWaCount,
+        suratCount: tunggakanSuratCount,
+        totalNominal: tunggakanTotalNominal,
+        previewList: tunggakanList.slice(0, 5),
+      },
       kesehatanStats: {
         dirawatUks,
         dirujuk,
@@ -826,6 +1016,8 @@ export default function DashboardPage() {
       setJamaahToday(result.jamaahToday);
       setJamaahMonthly(result.jamaahMonthly);
       setIzinStats(result.izinStats);
+      setIzinPrioritasList(result.izinPrioritasList);
+      setTunggakanSummary(result.tunggakanSummary);
       setKesehatanStats(result.kesehatanStats);
       setKeamananStats(result.keamananStats);
       setDapurStats(result.dapurStats);
@@ -870,6 +1062,8 @@ export default function DashboardPage() {
         setJamaahToday(result.jamaahToday);
         setJamaahMonthly(result.jamaahMonthly);
         setIzinStats(result.izinStats);
+        setIzinPrioritasList(result.izinPrioritasList);
+        setTunggakanSummary(result.tunggakanSummary);
         setKesehatanStats(result.kesehatanStats);
         setKeamananStats(result.keamananStats);
         setDapurStats(result.dapurStats);
@@ -1008,7 +1202,7 @@ export default function DashboardPage() {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-emerald-200">
             <span className="px-2.5 py-0.5 bg-emerald-700/70 rounded-md border border-emerald-600/50">
-              TA {tahunAjaran}
+              TA {tahunAjaran || '...'}
             </span>
             <span className="truncate">{stats.namaPesantren}</span>
           </div>
@@ -1016,7 +1210,7 @@ export default function DashboardPage() {
             Beranda Pengurus e-annursatu
           </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             type="button"
             onClick={loadDashboard}
@@ -1036,7 +1230,7 @@ export default function DashboardPage() {
           </button>
           <Link
             href="/santri"
-            className="flex-1 sm:flex-none min-h-[38px] px-3.5 py-1.5 bg-white text-emerald-900 text-xs font-bold rounded-xl shadow-xs hover:bg-emerald-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            className="col-span-2 sm:col-span-1 min-h-[38px] px-3.5 py-1.5 bg-white text-emerald-900 text-xs font-bold rounded-xl shadow-xs hover:bg-emerald-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             Data Santri
@@ -1237,6 +1431,188 @@ export default function DashboardPage() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* 2 KARTU PRIORITAS HARIAN: SANTRI PULANG & TERLAMBAT + SANTRI MENUNGGAK SYAHRIYAH */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+        {/* Kartu 1: Santri Pulang & Terlambat */}
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+                <DoorOpen className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-bold text-sm text-slate-900 truncate">
+                  Santri Pulang &amp; Terlambat
+                </h2>
+                <p className="text-[11px] text-slate-500 tabular-nums">
+                  {loading
+                    ? 'Memuat...'
+                    : `${izinStats.sedangPulang} sedang izin pulang · ${izinStats.terlambat} terlambat kembali`}
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/perizinan"
+              className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
+            >
+              Kelola <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {izinPrioritasList.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3.5 text-center text-xs text-slate-500">
+              Seluruh santri berada di pondok (tidak ada izin pulang aktif saat ini).
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {izinPrioritasList.slice(0, 4).map((item) => {
+                const waText = encodeURIComponent(
+                  `Assalamu'alaikum Wali dari *${item.santriNama}* (Kamar ${item.kamar}). Mengingatkan batas waktu kembali ke Pondok Pesantren An-Nur 1 pada ${item.tglRencanaKembali} pukul ${item.batasJam} WIB. Mohon konfirmasinya.`
+                );
+                return (
+                  <div
+                    key={item.id}
+                    className={`rounded-xl border px-3 py-2 flex items-center justify-between gap-2 text-xs ${
+                      item.isLate
+                        ? 'bg-rose-50/80 border-rose-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-bold text-slate-900 truncate">{item.santriNama}</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600">
+                          {item.kamar}
+                        </span>
+                        {item.isLate && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-600 text-white">
+                            Terlambat Kembali
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5 tabular-nums">
+                        Rencana kembali: {item.tglRencanaKembali} ({item.batasJam} WIB)
+                      </p>
+                    </div>
+                    {item.waDigits ? (
+                      <a
+                        href={`https://wa.me/${item.waDigits}?text=${waText}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        WA Wali
+                      </a>
+                    ) : (
+                      <Link
+                        href="/perizinan"
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 text-[11px] font-semibold shrink-0"
+                      >
+                        Detail
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
+              {izinPrioritasList.length > 4 && (
+                <p className="text-[11px] text-slate-500 text-right">
+                  +{izinPrioritasList.length - 4} santri lainnya di menu Perizinan
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Kartu 2: Santri Menunggak Syahriyah */}
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center shrink-0">
+                <Receipt className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-bold text-sm text-slate-900 truncate">
+                  Santri Menunggak Syahriyah
+                </h2>
+                <p className="text-[11px] text-slate-500 tabular-nums">
+                  {loading
+                    ? 'Memuat...'
+                    : `${tunggakanSummary.totalSantri} santri · Total ${formatRupiah(
+                        tunggakanSummary.totalNominal
+                      )}`}
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/keuangan?tab=tunggakan"
+              className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap"
+            >
+              Penagihan <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2">
+              <span className="text-[10.5px] font-semibold text-amber-900 block">
+                Jalur 1–2 Bulan (WA)
+              </span>
+              <strong className="text-base font-extrabold text-amber-950 tabular-nums">
+                {loading ? '...' : `${tunggakanSummary.waCount} santri`}
+              </strong>
+            </div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2">
+              <span className="text-[10.5px] font-semibold text-rose-900 block">
+                Jalur ≥ 3 Bulan (Surat)
+              </span>
+              <strong className="text-base font-extrabold text-rose-800 tabular-nums">
+                {loading ? '...' : `${tunggakanSummary.suratCount} santri`}
+              </strong>
+            </div>
+          </div>
+
+          {tunggakanSummary.previewList.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-emerald-200 bg-emerald-50/60 p-3 text-center text-xs font-medium text-emerald-800">
+              Alhamdulillah, seluruh syahriyah santri sampai jatuh tempo bulan ini sudah lunas.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {tunggakanSummary.previewList.slice(0, 3).map((row) => (
+                <div
+                  key={row.santriId}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <span className="font-bold text-slate-900 truncate block">
+                      {row.nama}{' '}
+                      <span className="font-normal text-slate-500">({row.kamar})</span>
+                    </span>
+                    <span className="text-[10.5px] text-slate-500 tabular-nums">
+                      {row.jumlahBulan} bulan belum bayar
+                      {row.ktlNominal > 0 ? ' + KTL' : ''}
+                    </span>
+                  </div>
+                  <span
+                    className={`font-mono font-bold tabular-nums shrink-0 ${
+                      row.jalur === 'SURAT_3_PLUS' ? 'text-rose-700' : 'text-amber-800'
+                    }`}
+                  >
+                    {formatRupiah(row.totalTagihan)}
+                  </span>
+                </div>
+              ))}
+              <Link
+                href="/keuangan?tab=tunggakan"
+                className="w-full py-2 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-900 text-xs font-bold flex items-center justify-between transition-colors"
+              >
+                <span>Buka Daftar Tunggakan &amp; Penagihan WA/Surat</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* TOAST SARPRAS JIKA BARU KIRIM LAPORAN */}

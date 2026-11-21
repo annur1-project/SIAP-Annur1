@@ -63,12 +63,15 @@ export default function KalenderPage() {
   const { canEditModule } = useAuth();
   const canEdit = canEditModule('kalender');
 
-  const [todayIso, setTodayIso] = useState<string>('2026-11-18');
-  const todayParts = useMemo(() => parseIsoParts(todayIso), [todayIso]);
+  const [todayIso, setTodayIso] = useState<string>('');
+  const todayParts = useMemo(
+    () => (todayIso ? parseIsoParts(todayIso) : { year: 2000, month: 1, day: 1 }),
+    [todayIso]
+  );
 
-  const [viewYear, setViewYear] = useState<number>(2026);
-  const [viewMonth, setViewMonth] = useState<number>(11);
-  const [selectedIso, setSelectedIso] = useState<string>('2026-11-18');
+  const [viewYear, setViewYear] = useState<number>(2000);
+  const [viewMonth, setViewMonth] = useState<number>(1);
+  const [selectedIso, setSelectedIso] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'agenda' | 'hari_besar' | 'puasa'>('agenda');
 
   const [koreksiHijriyah, setKoreksiHijriyah] = useState<number>(0);
@@ -79,7 +82,7 @@ export default function KalenderPage() {
 
   const [agendaKustom, setAgendaKustom] = useState<KalenderAgendaItem[]>([]);
   const [kegiatanAgenda, setKegiatanAgenda] = useState<KegiatanAgendaItem[]>([]);
-  const [nowTick, setNowTick] = useState<Date>(() => new Date('2026-11-18T08:00:00Z'));
+  const [nowTick, setNowTick] = useState<Date | null>(null);
 
   const [showModalAgenda, setShowModalAgenda] = useState(false);
   const [formJudul, setFormJudul] = useState('');
@@ -150,14 +153,17 @@ export default function KalenderPage() {
   }, []);
 
   const cells = useMemo(
-    () => computeMonthCalendarGrid(viewYear, viewMonth, koreksiHijriyah),
-    [viewYear, viewMonth, koreksiHijriyah]
+    () => (todayIso ? computeMonthCalendarGrid(viewYear, viewMonth, koreksiHijriyah) : []),
+    [todayIso, viewYear, viewMonth, koreksiHijriyah]
   );
 
-  const hijriSpanLabel = useMemo(() => getMonthHijriSpanLabel(cells), [cells]);
+  const hijriSpanLabel = useMemo(
+    () => (cells.length > 0 ? getMonthHijriSpanLabel(cells) : '...'),
+    [cells]
+  );
   const hariBesarBulanIni = useMemo(
-    () => getHariBesarInMonth(viewYear, viewMonth, koreksiHijriyah),
-    [viewYear, viewMonth, koreksiHijriyah]
+    () => (todayIso ? getHariBesarInMonth(viewYear, viewMonth, koreksiHijriyah) : []),
+    [todayIso, viewYear, viewMonth, koreksiHijriyah]
   );
 
   const selectedCell: CalendarCell | undefined = useMemo(
@@ -166,22 +172,45 @@ export default function KalenderPage() {
   );
 
   const selectedHijri = useMemo(
-    () => selectedCell?.hijri || getHijriDate(selectedIso, koreksiHijriyah),
+    () =>
+      selectedCell?.hijri ||
+      (selectedIso
+        ? getHijriDate(selectedIso, koreksiHijriyah)
+        : { day: 1, month: 1, year: 1448, monthName: 'Muharram', arabicDay: '١', formatted: 'Memuat...' }),
     [selectedCell, selectedIso, koreksiHijriyah]
   );
 
   const todayHijri = useMemo(
-    () => getHijriDate(todayIso, koreksiHijriyah),
+    () =>
+      todayIso
+        ? getHijriDate(todayIso, koreksiHijriyah)
+        : { day: 1, month: 1, year: 1448, monthName: 'Muharram', arabicDay: '١', formatted: 'Memuat...' },
     [todayIso, koreksiHijriyah]
   );
 
   const jadwalSholatToday = useMemo(
-    () => computeJadwalSholatBululawang(selectedIso),
+    () =>
+      selectedIso
+        ? computeJadwalSholatBululawang(selectedIso)
+        : {
+            isoDate: '',
+            imsak: '--:--',
+            subuh: '--:--',
+            terbit: '--:--',
+            dhuha: '--:--',
+            dzuhur: '--:--',
+            ashar: '--:--',
+            maghrib: '--:--',
+            isya: '--:--',
+          },
     [selectedIso]
   );
 
   const nextPrayerToday = useMemo(
-    () => getNextPrayerCountdown(nowTick, computeJadwalSholatBululawang(todayIso)),
+    () =>
+      nowTick && todayIso
+        ? getNextPrayerCountdown(nowTick, computeJadwalSholatBululawang(todayIso))
+        : { nextName: 'Sholat', nextTime: '--:--', remainingSeconds: 0, remainingFormatted: '- --:--:--' },
     [nowTick, todayIso]
   );
 
@@ -364,18 +393,24 @@ export default function KalenderPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-4">
       <TransparencyBanner moduleLabel="Kalender Pendidikan & Agenda Pondok" isReadOnly={!canEdit} />
-      {/* Header Nuansa NU Online + Jadwal Sholat Bululawang */}
-      <section className="rounded-2xl bg-gradient-to-br from-emerald-800 via-emerald-900 to-teal-950 text-white p-4 sm:p-6 shadow-md">
+      {/* Header Mengikuti Preset Tema Pondok + Jadwal Sholat Bululawang */}
+      <section
+        className="rounded-2xl text-white p-4 sm:p-6 shadow-md"
+        style={{
+          background:
+            'linear-gradient(135deg, var(--siap-sidebar, #064e3b) 0%, var(--siap-primary, #047857) 100%)',
+        }}
+      >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-emerald-200 text-xs font-medium">
+            <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
               <MapPin className="w-3.5 h-3.5" />
               <span>Bululawang, Kab. Malang (WIB)</span>
             </div>
             <h1 className="text-lg sm:text-2xl font-extrabold tracking-tight">
-              {formatHariPasaranIndo(todayIso)}
+              {todayIso ? formatHariPasaranIndo(todayIso) : 'Memuat tanggal...'}
             </h1>
-            <p className="text-sm sm:text-base font-semibold text-emerald-200 flex items-center gap-2">
+            <p className="text-sm sm:text-base font-semibold text-white/85 flex items-center gap-2">
               <Moon className="w-4 h-4" />
               {todayHijri.formatted} H
             </p>
@@ -417,10 +452,11 @@ export default function KalenderPage() {
 
         {/* Strip Jadwal Sholat Bululawang pada tanggal terpilih */}
         <div className="mt-4 pt-3 border-t border-white/15">
-          <div className="flex items-center justify-between text-[11px] text-emerald-200 mb-2">
+          <div className="flex items-center justify-between text-[11px] text-white/80 mb-2">
             <span className="flex items-center gap-1.5 font-semibold">
               <Clock className="w-3.5 h-3.5" />
-              Jadwal Sholat Bululawang ({formatHariPasaranIndo(selectedIso)})
+              Jadwal Sholat Bululawang (
+              {selectedIso ? formatHariPasaranIndo(selectedIso) : 'Memuat...'})
             </span>
           </div>
           <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 sm:gap-2">
@@ -466,7 +502,9 @@ export default function KalenderPage() {
               <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                 {BULAN_INDO[viewMonth - 1]} {viewYear}
               </h2>
-              <p className="text-xs font-medium text-emerald-700">{hijriSpanLabel} H</p>
+              <p className="text-xs font-medium text-[var(--siap-primary,#047857)]">
+                {hijriSpanLabel} H
+              </p>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -528,11 +566,21 @@ export default function KalenderPage() {
                       setViewMonth(cell.month);
                     }
                   }}
+                  style={
+                    isSelected
+                      ? {
+                          borderColor: 'var(--siap-primary, #047857)',
+                          backgroundColor: 'color-mix(in srgb, var(--siap-primary, #047857) 10%, white)',
+                        }
+                      : isToday
+                      ? { borderColor: 'var(--siap-primary, #047857)' }
+                      : undefined
+                  }
                   className={`relative flex flex-col items-center justify-between rounded-xl p-1 sm:p-2 min-h-[58px] sm:min-h-[68px] border text-center transition-all ${
                     isSelected
-                      ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/30 shadow-xs'
+                      ? 'shadow-xs ring-1 ring-[var(--siap-primary,#047857)]'
                       : isToday
-                      ? 'bg-emerald-700/5 border-emerald-400'
+                      ? 'bg-slate-50/70'
                       : cell.inCurrentMonth
                       ? 'bg-white border-slate-100 hover:bg-slate-50'
                       : 'bg-slate-50/60 border-transparent opacity-45 hover:opacity-75'
@@ -605,11 +653,11 @@ export default function KalenderPage() {
         {/* KANAN: Detail Tanggal Terpilih + 3 Tab (Agenda Pondok | Hari Besar | Puasa) */}
         <section className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50/70">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--siap-primary,#047857)]">
               Detail Tanggal Dipilih
             </p>
             <h3 className="text-base font-extrabold text-slate-900 mt-0.5">
-              {formatHariPasaranIndo(selectedIso)}
+              {selectedIso ? formatHariPasaranIndo(selectedIso) : 'Memuat tanggal...'}
             </h3>
             <p className="text-xs font-semibold text-slate-600 mt-0.5">
               {selectedHijri.formatted} H
@@ -629,9 +677,17 @@ export default function KalenderPage() {
                   key={tab.key}
                   type="button"
                   onClick={() => setActiveTab(tab.key as 'agenda' | 'hari_besar' | 'puasa')}
+                  style={
+                    active
+                      ? {
+                          borderBottomColor: 'var(--siap-primary, #047857)',
+                          color: 'var(--siap-primary, #047857)',
+                        }
+                      : undefined
+                  }
                   className={`py-2.5 px-2 text-xs sm:text-sm font-semibold border-b-2 transition-colors ${
                     active
-                      ? 'border-emerald-700 text-emerald-700 bg-emerald-50/40'
+                      ? 'bg-slate-50'
                       : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
@@ -652,7 +708,8 @@ export default function KalenderPage() {
                     <button
                       type="button"
                       onClick={() => setShowModalAgenda(true)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800"
+                      style={{ backgroundColor: 'var(--siap-primary, #047857)' }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-white text-xs font-bold hover:opacity-95"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Tambah Agenda

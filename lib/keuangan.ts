@@ -429,57 +429,115 @@ export async function uploadKeuanganLampiranImage(
   return dataUrl;
 }
 
+export function extractKeuanganError(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const msg = typeof e.message === 'string' ? e.message.trim() : '';
+    const details = typeof e.details === 'string' ? e.details.trim() : '';
+    const hint = typeof e.hint === 'string' ? e.hint.trim() : '';
+    const joined = [msg, details, hint].filter(Boolean).join(' — ');
+    if (joined) return joined;
+  }
+  return fallback;
+}
+
+function isPetugasFkOrUuidError(err: { code?: string; message?: string } | null | undefined): boolean {
+  if (!err) return false;
+  const code = String(err.code || '').toUpperCase();
+  const msg = String(err.message || '').toLowerCase();
+  return (
+    code === '23503' ||
+    code === '22P02' ||
+    msg.includes('petugas_id') ||
+    msg.includes('foreign key')
+  );
+}
+
+/**
+ * Menyimpan baris ke `pembayaran_santri_detail` secara aman (otomatis menghapus kolom
+ * opsional seperti `petugas_nama` jika skema DB lama belum dimigrasi).
+ */
+export async function insertPembayaranDetailResilient(
+  rows: Array<Record<string, unknown>>
+): Promise<{ error: { message?: string; details?: string; hint?: string; code?: string } | null }> {
+  const first = await supabase.from('pembayaran_santri_detail').insert(rows);
+  if (!first.error) return { error: null };
+
+  if (isMissingColumnError(first.error)) {
+    const stripped = rows.map((r) => {
+      const copy = { ...r };
+      delete copy.petugas_nama;
+      return copy;
+    });
+    const second = await supabase.from('pembayaran_santri_detail').insert(stripped);
+    if (!second.error) return { error: null };
+
+    if (isMissingColumnError(second.error)) {
+      const minimal = stripped.map((r) => {
+        const copy = { ...r };
+        delete copy.tgl_bayar;
+        delete copy.metode_pembayaran;
+        return copy;
+      });
+      const third = await supabase.from('pembayaran_santri_detail').insert(minimal);
+      return { error: third.error };
+    }
+    return { error: second.error };
+  }
+
+  return { error: first.error };
+}
+
 /**
  * Menyimpan baris ke `keuangan_transaksi` secara aman (otomatis tetap berhasil walaupun kolom
- * `lampiran_url` belum ditambahkan di Supabase, sambil menjaga URL di localStorage).
+ * `lampiran_url` belum ditambahkan di Supabase atau `petugas_id` tidak cocok FK, sambil menjaga URL di localStorage).
  */
 export async function insertKeuanganTransaksiResilient(
   rows: Array<Record<string, unknown>>,
   attachmentUrl?: string
-): Promise<{ error: { message?: string; code?: string } | null; insertedIds: string[] }> {
+): Promise<{ error: { message?: string; details?: string; hint?: string; code?: string } | null; insertedIds: string[] }> {
   const cleanUrl = String(attachmentUrl || '').trim();
-  const payloadWithLampiran = cleanUrl
+  let workingRows = cleanUrl
     ? rows.map((r) => ({ ...r, lampiran_url: cleanUrl }))
-    : rows;
+    : rows.map((r) => ({ ...r }));
 
-  const { data, error } = await supabase
+  let res = await supabase
     .from('keuangan_transaksi')
-    .insert(payloadWithLampiran)
+    .insert(workingRows)
     .select('id, no_kuitansi');
 
-  if (error && cleanUrl && isMissingColumnError(error)) {
-    const fallbackPayload = rows.map((r) => {
+  if (res.error && cleanUrl && isMissingColumnError(res.error)) {
+    workingRows = workingRows.map((r) => {
       const copy = { ...r };
       delete copy.lampiran_url;
       return copy;
     });
-    const retry = await supabase
+    res = await supabase
       .from('keuangan_transaksi')
-      .insert(fallbackPayload)
+      .insert(workingRows)
       .select('id, no_kuitansi');
-    const insertedRows = Array.isArray(retry.data)
-      ? (retry.data as Array<{ id?: string; no_kuitansi?: string | null }>)
-      : [];
-    insertedRows.forEach((ir) => {
-      writeKeuanganLampiranEntry({ txId: ir.id, noKuitansi: ir.no_kuitansi, url: cleanUrl });
-    });
-    return {
-      error: retry.error,
-      insertedIds: insertedRows.map((r) => String(r.id || '')).filter(Boolean),
-    };
   }
 
-  const insertedRows = Array.isArray(data)
-    ? (data as Array<{ id?: string; no_kuitansi?: string | null }>)
+  if (res.error && isPetugasFkOrUuidError(res.error)) {
+    workingRows = workingRows.map((r) => ({ ...r, petugas_id: null }));
+    res = await supabase
+      .from('keuangan_transaksi')
+      .insert(workingRows)
+      .select('id, no_kuitansi');
+  }
+
+  const insertedRows = Array.isArray(res.data)
+    ? (res.data as Array<{ id?: string; no_kuitansi?: string | null }>)
     : [];
-  if (!error && cleanUrl) {
+  if (!res.error && cleanUrl) {
     insertedRows.forEach((ir) => {
       writeKeuanganLampiranEntry({ txId: ir.id, noKuitansi: ir.no_kuitansi, url: cleanUrl });
     });
   }
 
   return {
-    error,
+    error: res.error,
     insertedIds: insertedRows.map((r) => String(r.id || '')).filter(Boolean),
   };
 }

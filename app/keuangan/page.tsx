@@ -41,6 +41,9 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_SKEMA_PENDAFTARAN,
+  getDynamicTahunAjaranAktif,
+  getDynamicTahunSekarang,
+  getDynamicTodayIsoWib,
   hitungRincianPendaftaran,
   mergeAturanOperasional,
   readExtendedLocal,
@@ -49,8 +52,10 @@ import {
 import {
   ANNUAL_FEE_FALLBACK_NOMINALS,
   computeWalletAndTransferSummary,
+  extractKeuanganError,
   getMigrasiColNameForItem,
   insertKeuanganTransaksiResilient,
+  insertPembayaranDetailResilient,
   NEW_MASTER_PEMBAYARAN_SEEDS,
   readKeuanganLampiranMap,
   readMigrasiAnnualFlag,
@@ -480,10 +485,10 @@ export default function KeuanganPage() {
     DEFAULT_SKEMA_PENDAFTARAN
   );
 
-  // Tahun Ajaran & Tanggal Hari Ini (Client-safe)
-  const [tahunAjaran, setTahunAjaran] = useState<string>('2026/2027');
-  const [todayStr, setTodayStr] = useState<string>('2026-11-15');
-  const [currentMonthStr, setCurrentMonthStr] = useState<string>('2026-11');
+  // Tahun Ajaran & Tanggal Hari Ini (Client-safe dinamis)
+  const [tahunAjaran, setTahunAjaran] = useState<string>('');
+  const [todayStr, setTodayStr] = useState<string>('');
+  const [currentMonthStr, setCurrentMonthStr] = useState<string>('');
 
   // Toast & Dialog Konfirmasi Modern
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -526,7 +531,7 @@ export default function KeuanganPage() {
   const [bayarPsbPaket, setBayarPsbPaket] = useState<'reguler' | 'vip'>('reguler');
   const [bayarPsbFreePangkal, setBayarPsbFreePangkal] = useState<boolean>(true);
   const [metodeBayar, setMetodeBayar] = useState<'tunai' | 'transfer'>('tunai');
-  const [tglBayarInput, setTglBayarInput] = useState<string>('2026-11-15');
+  const [tglBayarInput, setTglBayarInput] = useState<string>('');
   const [savingPayment, setSavingPayment] = useState<boolean>(false);
   const [loketBuktiFile, setLoketBuktiFile] = useState<File | null>(null);
   const [loketBuktiPreview, setLoketBuktiPreview] = useState<string>('');
@@ -549,7 +554,7 @@ export default function KeuanganPage() {
   // ==========================================================================
   // STATE TAB 4: BUKU KAS UMUM & BISYAROH PENGURUS
   // ==========================================================================
-  const [kasBulanFilter, setKasBulanFilter] = useState<string>('2026-11');
+  const [kasBulanFilter, setKasBulanFilter] = useState<string>('SEMUA');
   const [kasDompetFilter, setKasDompetFilter] = useState<string>('SEMUA');
   const [kasTipeFilter, setKasTipeFilter] = useState<string>('SEMUA');
   const [kasMetodeFilter, setKasMetodeFilter] = useState<string>('SEMUA');
@@ -561,7 +566,7 @@ export default function KeuanganPage() {
     kategori: 'Operasional Harian',
     nominal: '',
     metode_pembayaran: 'tunai' as 'tunai' | 'transfer',
-    tgl_transaksi: '2026-11-15',
+    tgl_transaksi: '',
     keterangan: '',
   });
   const [savingKas, setSavingKas] = useState<boolean>(false);
@@ -587,8 +592,8 @@ export default function KeuanganPage() {
 
   // Modal Bisyaroh Pengurus
   const [showBisyarohModal, setShowBisyarohModal] = useState<boolean>(false);
-  const [bisyarohBulanLabel, setBisyarohBulanLabel] = useState<string>('November 2026');
-  const [bisyarohTgl, setBisyarohTgl] = useState<string>('2026-11-15');
+  const [bisyarohBulanLabel, setBisyarohBulanLabel] = useState<string>('');
+  const [bisyarohTgl, setBisyarohTgl] = useState<string>('');
   const [bisyarohMetode, setBisyarohMetode] = useState<'tunai' | 'transfer'>('tunai');
   const [bisyarohDompet, setBisyarohDompet] = useState<DompetType>('operasional');
   const [selectedPengurusBisyaroh, setSelectedPengurusBisyaroh] = useState<Record<string, { checked: boolean; nominal: number }>>({});
@@ -600,7 +605,7 @@ export default function KeuanganPage() {
   const [migrasiSearch, setMigrasiSearch] = useState<string>('');
   const [migrasiKamarFilter, setMigrasiKamarFilter] = useState<string>('SEMUA');
   const [migrasiSantriId, setMigrasiSantriId] = useState<string>('');
-  const [migrasiCutOffBulan, setMigrasiCutOffBulan] = useState<string>('2026-10');
+  const [migrasiCutOffBulan, setMigrasiCutOffBulan] = useState<string>('BELUM_ADA');
   const [migrasiTahunanChecked, setMigrasiTahunanChecked] = useState<string[]>([]);
   const [migrasiKtlNominal, setMigrasiKtlNominal] = useState<string>('0');
   const [migrasiKtlCatatan, setMigrasiKtlCatatan] = useState<string>('');
@@ -622,36 +627,45 @@ export default function KeuanganPage() {
   );
 
   // ==========================================================================
-  // INISIALISASI TANGGAL & USER AUTH
+  // INISIALISASI TANGGAL, QUERY PARAMS & USER AUTH
   // ==========================================================================
   useEffect(() => {
     const timer = setTimeout(() => {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const dd = String(now.getDate()).padStart(2, '0');
-      const isoDate = `${yyyy}-${mm}-${dd}`;
-      const isoMonth = `${yyyy}-${mm}`;
+      const isoDate = getDynamicTodayIsoWib();
+      const isoMonth = isoDate.slice(0, 7);
+      const yyyy = Number(isoDate.slice(0, 4));
+      const mmIndex = Math.max(0, Number(isoDate.slice(5, 7)) - 1);
 
       setTodayStr(isoDate);
       setCurrentMonthStr(isoMonth);
-      setTglBayarInput(isoDate);
-      setKasBulanFilter(isoMonth);
-      setKasForm((prev) => ({ ...prev, tgl_transaksi: isoDate }));
-      setBisyarohTgl(isoDate);
+      setTglBayarInput((prev) => prev || isoDate);
+      setKasBulanFilter((prev) => (prev === 'SEMUA' ? isoMonth : prev));
+      setKasForm((prev) => ({ ...prev, tgl_transaksi: prev.tgl_transaksi || isoDate }));
+      setBisyarohTgl((prev) => prev || isoDate);
 
-      // Tentukan Tahun Ajaran berjalan (Juli = awal TA baru)
-      const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
-      setTahunAjaran(`${startYear}/${startYear + 1}`);
+      // Tentukan Tahun Ajaran berjalan secara dinamis (Juli = awal TA baru)
+      setTahunAjaran((prev) => prev || getDynamicTahunAjaranAktif());
 
       const bulanIndo = [
         'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
         'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
       ];
-      setBisyarohBulanLabel(`${bulanIndo[now.getMonth()]} ${yyyy}`);
+      setBisyarohBulanLabel((prev) => prev || `${bulanIndo[mmIndex]} ${yyyy}`);
+
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab');
+        if (tabParam === 'tunggakan' || tabParam === 'penagihan') {
+          setActiveTab('penagihan');
+        } else if (tabParam === 'bukukas') {
+          setActiveTab('bukukas');
+        } else if (tabParam === 'kuitansi') {
+          setActiveTab('kuitansi');
+        }
+      }
 
       if (authPengurus) {
-        setPetugasId(authPengurus.auth_user_id || authPengurus.id);
+        setPetugasId(authPengurus.id || null);
         setPetugasNama(authPengurus.nama_lengkap || 'Pengurus Pondok');
         setUserRole(isPimpinanInti ? 'super_admin' : canEditKeuangan ? 'keuangan' : 'viewer');
       }
@@ -753,7 +767,7 @@ export default function KeuanganPage() {
         setSelectedPengurusBisyaroh({});
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Terjadi kesalahan saat memuat data keuangan.';
+      const msg = extractKeuanganError(err, 'Terjadi kesalahan saat memuat data keuangan.');
       showToast('error', 'Gagal Memuat Data', msg);
     } finally {
       setLoading(false);
@@ -921,9 +935,11 @@ export default function KeuanganPage() {
     [getNominalByKodeAndDate, skemaPendaftaran.syahriyah_vip, skemaPendaftaran.syahriyah_reguler]
   );
 
-  // Daftar 12 Bulan dalam Tahun Ajaran aktif (e.g., 2026/2027 -> Jul 2026..Jun 2027)
+  // Daftar 12 Bulan dalam Tahun Ajaran aktif
   const periodeListTA = useMemo(() => {
-    const startYear = parseInt(tahunAjaran.split('/')[0] || '2026', 10);
+    const fallbackStart = todayStr ? Number(todayStr.slice(0, 4)) : 0;
+    const startYear = parseInt(tahunAjaran.split('/')[0] || String(fallbackStart), 10);
+    if (!startYear) return [];
     return BULAN_TAHUN_AJARAN.map((b) => {
       const yr = startYear + b.tahunOffset;
       const mm = String(b.index).padStart(2, '0');
@@ -936,17 +952,23 @@ export default function KeuanganPage() {
         labelShort: `${b.singkatan} ${yr}`,
       };
     });
-  }, [tahunAjaran]);
+  }, [tahunAjaran, todayStr]);
 
-  // Item Tahunan Aktif (termasuk 4 pos wajib: Al-Adzkar, Almamater, Kitab Madin, Infaq Madin + pemetaan dompet kanonik)
+  // Item Tahunan Aktif (termasuk 4 pos wajib: Al-Adzkar, Almamater, Kitab Madin, Infaq Madin + pemetaan dompet kanonik, bebas duplikat)
   const itemTahunanList = useMemo(() => {
-    const startYear = parseInt(tahunAjaran.split('/')[0] || '2026', 10);
-    const refDate = `${startYear}-07-01`;
+    const fallbackStart = todayStr ? Number(todayStr.slice(0, 4)) : 0;
+    const startYear = parseInt(tahunAjaran.split('/')[0] || String(fallbackStart), 10);
+    const refDate = startYear ? `${startYear}-07-01` : todayStr || '';
 
     const baseTahunan = masterPembayaran.filter((m) => m.tipe_periode === 'tahunan');
-    const existingKodes = new Set(masterPembayaran.map((m) => m.kode));
+    const existingKodes = new Set(masterPembayaran.map((m) => m.kode.trim().toLowerCase()));
+    const existingNames = new Set(
+      masterPembayaran.map((m) => m.nama_item.trim().toLowerCase())
+    );
     const missingVirtual: MasterPembayaranItem[] = NEW_MASTER_PEMBAYARAN_SEEDS.filter(
-      (seed) => !existingKodes.has(seed.kode)
+      (seed) =>
+        !existingKodes.has(seed.kode.toLowerCase()) &&
+        !existingNames.has(seed.nama_item.trim().toLowerCase())
     ).map((seed) => ({
       id: `seed-${seed.kode}`,
       kode: seed.kode,
@@ -959,8 +981,19 @@ export default function KeuanganPage() {
       urutan: seed.urutan,
     }));
 
+    const seenKodes = new Set<string>();
+    const seenNames = new Set<string>();
+
     return [...baseTahunan, ...missingVirtual]
       .sort((a, b) => Number(a.urutan || 0) - Number(b.urutan || 0))
+      .filter((m) => {
+        const k = m.kode.trim().toLowerCase();
+        const n = m.nama_item.trim().toLowerCase();
+        if (seenKodes.has(k) || seenNames.has(n)) return false;
+        seenKodes.add(k);
+        seenNames.add(n);
+        return true;
+      })
       .map((m) => ({
         ...m,
         dompet_tujuan: resolveCanonicalDompetForItem(m.kode, m.dompet_tujuan),
@@ -970,7 +1003,7 @@ export default function KeuanganPage() {
           ANNUAL_FEE_FALLBACK_NOMINALS[m.kode] || 50000
         ),
       }));
-  }, [masterPembayaran, tahunAjaran, getNominalByKodeAndDate]);
+  }, [masterPembayaran, tahunAjaran, todayStr, getNominalByKodeAndDate]);
 
   // ==========================================================================
   // DAFTAR KAMAR LENGKAP (TANPA DUPLIKAT & NATURAL SORT)
@@ -1226,9 +1259,9 @@ export default function KeuanganPage() {
 
   // Generate Nomor Kuitansi Berurut per Tahun: KWT-YYMMDD-0001
   const generateNextNoKuitansi = async (tglBayar: string): Promise<string> => {
-    const cleanDate = (tglBayar || todayStr).split('T')[0];
+    const cleanDate = (tglBayar || todayStr || getDynamicTodayIsoWib()).split('T')[0];
     const [yyyy, mm, dd] = cleanDate.split('-');
-    const yy = (yyyy || '2026').slice(-2);
+    const yy = (yyyy || String(getDynamicTahunSekarang())).slice(-2);
     const prefixTahun = `KWT-${yy}`;
     const tanggalPart = `${yy}${mm || '01'}${dd || '01'}`;
 
@@ -1266,7 +1299,7 @@ export default function KeuanganPage() {
   // Simpan Pembayaran Santri & Terbitkan Kuitansi
   const handleSimpanPembayaran = async () => {
     if (!canEditKeuangan) {
-      showToast('warning', 'Mode Transparansi', 'Akun Anda dalam mode hanya lihat pada modul Keuangan.');
+      showToast('warning', 'View Only', 'Akun Anda berstatus View Only pada modul Keuangan.');
       return;
     }
     if (!activeSantri) return;
@@ -1279,6 +1312,9 @@ export default function KeuanganPage() {
     let generatedNoKuitansi = '';
 
     try {
+      const effectiveTglBayar = tglBayarInput || todayStr || getDynamicTodayIsoWib();
+      const effectiveTa = tahunAjaran || getDynamicTahunAjaranAktif();
+
       // Cek ulang apakah ada bulan/item tahunan yang sudah lunas sebelumnya
       const nonKtlItems = loketCartSummary.items.filter((i) => i.item_kode !== 'ktl_tahun_lalu');
       if (nonKtlItems.length > 0) {
@@ -1286,7 +1322,7 @@ export default function KeuanganPage() {
           .from('pembayaran_santri_detail')
           .select('item_kode, periode_bulan, label_item')
           .eq('santri_id', activeSantri.id)
-          .eq('tahun_ajaran', tahunAjaran);
+          .eq('tahun_ajaran', effectiveTa);
 
         const existingSet = new Set(
           (existingCheck || []).map((e) => `${e.item_kode}__${e.periode_bulan}`)
@@ -1300,7 +1336,7 @@ export default function KeuanganPage() {
         }
       }
 
-      generatedNoKuitansi = await generateNextNoKuitansi(tglBayarInput);
+      generatedNoKuitansi = await generateNextNoKuitansi(effectiveTglBayar);
 
       let uploadedBuktiUrl = '';
       if (metodeBayar === 'transfer' && loketBuktiFile) {
@@ -1310,7 +1346,7 @@ export default function KeuanganPage() {
       // 1. Siapkan baris untuk pembayaran_santri_detail
       const detailPayload = loketCartSummary.items.map((item, idx) => ({
         santri_id: activeSantri.id,
-        tahun_ajaran: tahunAjaran,
+        tahun_ajaran: effectiveTa,
         item_kode: item.item_kode,
         periode_bulan: item.item_kode === 'ktl_tahun_lalu' ? `KTL-${Date.now()}-${idx}` : item.periode_bulan,
         label_item: item.label_item,
@@ -1319,13 +1355,11 @@ export default function KeuanganPage() {
         is_migrasi: false,
         no_kuitansi: generatedNoKuitansi,
         metode_pembayaran: metodeBayar,
-        tgl_bayar: tglBayarInput,
+        tgl_bayar: effectiveTglBayar,
         petugas_nama: petugasNama,
       }));
 
-      const { error: detailError } = await supabase
-        .from('pembayaran_santri_detail')
-        .insert(detailPayload);
+      const { error: detailError } = await insertPembayaranDetailResilient(detailPayload);
 
       if (detailError) throw detailError;
 
@@ -1441,7 +1475,7 @@ export default function KeuanganPage() {
           : `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk ke Dompet Tunai & Buku Kas.`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal menyimpan transaksi pembayaran.';
+      const msg = extractKeuanganError(err, 'Gagal menyimpan transaksi pembayaran.');
       showToast('error', 'Transaksi Gagal', msg);
     } finally {
       setSavingPayment(false);
@@ -1744,7 +1778,7 @@ export default function KeuanganPage() {
 
       showToast('success', 'PNG Kuitansi Diunduh', `File gambar ${kwt.no_kuitansi}.png siap dikirim via WhatsApp.`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal membuat gambar PNG kuitansi.';
+      const msg = extractKeuanganError(err, 'Gagal membuat gambar PNG kuitansi.');
       showToast('error', 'Gagal Unduh PNG', msg);
     } finally {
       setDownloadingPng(false);
@@ -1817,7 +1851,7 @@ export default function KeuanganPage() {
             `Kuitansi ${kwt.no_kuitansi} telah dihapus dan status tagihan santri dikembalikan.`
           );
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : 'Gagal menghapus transaksi.';
+          const msg = extractKeuanganError(err, 'Gagal menghapus transaksi.');
           showToast('error', 'Gagal Menghapus', msg);
         }
       },
@@ -1828,10 +1862,11 @@ export default function KeuanganPage() {
   // TAB 3: PERHITUNGAN TUNGGAKAN 2 JALUR (JATUH TEMPO TANGGAL 10)
   // ==========================================================================
   const tunggakanData = useMemo(() => {
+    if (!todayStr || !tahunAjaran) return [];
     const parts = todayStr.split('-');
-    const nowYear = parseInt(parts[0] || '2026', 10);
-    const nowMonth = parseInt(parts[1] || '11', 10);
-    const nowDay = parseInt(parts[2] || '15', 10);
+    const nowYear = parseInt(parts[0], 10);
+    const nowMonth = parseInt(parts[1], 10);
+    const nowDay = parseInt(parts[2], 10);
     const jatuhTempoTgl = Number(pengaturan.jatuh_tempo_tanggal || 10);
 
     // Periode jatuh tempo terakhir: jika hari ini > tgl 10, bulan berjalan ikut ditagih; jika <= tgl 10, s/d bulan lalu
@@ -2131,7 +2166,7 @@ export default function KeuanganPage() {
           : `${kasForm.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran'} tunai sebesar ${formatRupiah(nom)} berhasil disimpan.`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal menyimpan transaksi kas.';
+      const msg = extractKeuanganError(err, 'Gagal menyimpan transaksi kas.');
       showToast('error', 'Gagal Menyimpan Kas', msg);
     } finally {
       setSavingKas(false);
@@ -2166,7 +2201,7 @@ export default function KeuanganPage() {
           : 'Foto lampiran tersimpan & siap tampil di Pusat Laporan.'
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal memproses gambar lampiran.';
+      const msg = extractKeuanganError(err, 'Gagal memproses gambar lampiran.');
       showToast('error', 'Gagal Unggah Foto', msg);
     } finally {
       setUploadingLampiranId(null);
@@ -2253,7 +2288,7 @@ export default function KeuanganPage() {
           : `Total ${formatRupiah(totalBisyarohDipilih)} untuk ${dipilih.length} pengurus telah dicatat di Buku Kas Tunai.`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal mencatat pencairan bisyaroh.';
+      const msg = extractKeuanganError(err, 'Gagal mencatat pencairan bisyaroh.');
       showToast('error', 'Gagal Pencairan Bisyaroh', msg);
     } finally {
       setSavingBisyaroh(false);
@@ -2398,9 +2433,7 @@ export default function KeuanganPage() {
       });
 
       if (migrasiRows.length > 0) {
-        const { error: insErr } = await supabase
-          .from('pembayaran_santri_detail')
-          .insert(migrasiRows);
+        const { error: insErr } = await insertPembayaranDetailResilient(migrasiRows);
         if (insErr) throw insErr;
       }
 
@@ -2423,7 +2456,7 @@ export default function KeuanganPage() {
         `Status buku lama & KTL milik ${activeMigrasiSantri.nama_lengkap} diperbarui tanpa mengubah saldo kas hari ini.`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal menyimpan data migrasi.';
+      const msg = extractKeuanganError(err, 'Gagal menyimpan data migrasi.');
       showToast('error', 'Gagal Simpan Migrasi', msg);
     } finally {
       setSavingMigrasi(false);
@@ -2435,13 +2468,14 @@ export default function KeuanganPage() {
     const activeSantris = santriList.filter(
       (s) => s.status !== 'boyong' && s.status !== 'alumni' && s.status !== 'pindah_al_burhany'
     );
+    const defaultCutoff = currentMonthStr || getDynamicTodayIsoWib().slice(0, 7);
 
     const rows = activeSantris.map((s) => {
       const base: Record<string, string | number> = {
         NIS: s.nis,
         Nama_Santri: s.nama_lengkap,
         Kamar: s.kamar,
-        Lunas_Syahriyah_Sampai_YYYY_MM: '2026-10',
+        Lunas_Syahriyah_Sampai_YYYY_MM: defaultCutoff,
       };
       itemTahunanList.forEach((it) => {
         base[getMigrasiColNameForItem(it.kode, it.nama_item)] = 'TIDAK';
@@ -2542,7 +2576,8 @@ export default function KeuanganPage() {
         });
 
         if (insertBatch.length > 0) {
-          await supabase.from('pembayaran_santri_detail').insert(insertBatch);
+          const { error: batchErr } = await insertPembayaranDetailResilient(insertBatch);
+          if (batchErr) throw batchErr;
         }
 
         await supabase
@@ -2563,7 +2598,7 @@ export default function KeuanganPage() {
         `${processedCount} data santri berhasil dimigrasi tanpa mengubah saldo kas hari ini.`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Format file Excel tidak sesuai.';
+      const msg = extractKeuanganError(err, 'Format file Excel tidak sesuai.');
       showToast('error', 'Gagal Import Excel', msg);
     } finally {
       setImportingMigrasi(false);
@@ -3103,28 +3138,34 @@ export default function KeuanganPage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center gap-1.5">
-                <Banknote className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Tunai Bln Ini:</span>
-                <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.tunaiMasukBulanIni)}</strong>
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 text-xs">
+              <div className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between sm:justify-start gap-1.5 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <Banknote className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <span className="truncate">Tunai Bln Ini:</span>
+                </span>
+                <strong className="font-mono tabular-nums shrink-0">{formatRupiah(walletSummary.tunaiMasukBulanIni)}</strong>
               </div>
-              <div className="px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-sky-700" />
-                <span>Pemasukan Transfer Bln Ini:</span>
-                <strong className="font-mono tabular-nums">{formatRupiah(walletSummary.transferMasukBulanIni)}</strong>
+              <div className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 flex items-center justify-between sm:justify-start gap-1.5 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <CreditCard className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                  <span className="truncate">Transfer Bln Ini:</span>
+                </span>
+                <strong className="font-mono tabular-nums shrink-0">{formatRupiah(walletSummary.transferMasukBulanIni)}</strong>
               </div>
-              <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white flex items-center gap-1.5">
-                <span>Total 4 Dompet Tunai:</span>
-                <strong className="text-emerald-300 font-mono tabular-nums">{formatRupiah(walletSummary.grandTotal)}</strong>
+              <div className="col-span-2 sm:col-span-1 flex items-center gap-2">
+                <div className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 text-white flex items-center justify-between sm:justify-start gap-1.5 min-w-0">
+                  <span className="truncate">Total 4 Dompet Tunai:</span>
+                  <strong className="text-emerald-300 font-mono tabular-nums shrink-0">{formatRupiah(walletSummary.grandTotal)}</strong>
+                </div>
+                <button
+                  onClick={fetchAllData}
+                  title="Muat Ulang Data"
+                  className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                </button>
               </div>
-              <button
-                onClick={fetchAllData}
-                title="Muat Ulang Data"
-                className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              </button>
             </div>
           </div>
 
@@ -3204,28 +3245,28 @@ export default function KeuanganPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 sm:gap-5 border-t md:border-t-0 md:border-l border-sky-200/80 pt-2.5 md:pt-0 md:pl-5 shrink-0">
-                <div>
-                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-5 border-t md:border-t-0 md:border-l border-sky-200/80 pt-2.5 md:pt-0 md:pl-5 shrink-0">
+                <div className="flex sm:block items-center justify-between gap-2">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
                     Masuk Bln Ini
                   </span>
-                  <span className="text-xs sm:text-sm font-bold text-sky-900 font-mono tabular-nums whitespace-nowrap">
+                  <span className="text-xs sm:text-sm font-bold text-sky-900 font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.bulanIniMasuk)}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+                <div className="flex sm:block items-center justify-between gap-2">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
                     Keluar Rekening
                   </span>
-                  <span className="text-xs sm:text-sm font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                  <span className="text-xs sm:text-sm font-bold text-slate-700 font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.totalKeluarAllTime)}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] font-semibold text-slate-500 block whitespace-nowrap">
+                <div className="flex sm:block items-center justify-between gap-2">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
                     Netto Rekening Transfer
                   </span>
-                  <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums whitespace-nowrap">
+                  <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.netAllTime)}
                   </span>
                 </div>
@@ -3496,14 +3537,19 @@ export default function KeuanganPage() {
                             className="w-full sm:w-auto px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-bold text-slate-800 text-xs"
                           >
                             {(() => {
-                              const now = new Date();
-                              const activeStart = now.getMonth() + 1 >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-                              const maxStart = Math.max(activeStart + 1, 2026);
+                              if (!todayStr && !tahunAjaran) return null;
+                              const refYr = todayStr
+                                ? Number(todayStr.slice(0, 4))
+                                : Number(tahunAjaran.split('/')[0]);
+                              const refMo = todayStr ? Number(todayStr.slice(5, 7)) : 7;
+                              const activeStart = refMo >= 7 ? refYr : refYr - 1;
+                              const maxStart = activeStart + 1;
+                              const minStart = Math.min(2024, activeStart - 2);
                               const opts: string[] = [];
-                              for (let y = 2024; y <= maxStart; y += 1) {
+                              for (let y = minStart; y <= maxStart; y += 1) {
                                 opts.push(`${y}/${y + 1}`);
                               }
-                              if (!opts.includes(tahunAjaran)) opts.push(tahunAjaran);
+                              if (tahunAjaran && !opts.includes(tahunAjaran)) opts.push(tahunAjaran);
                               return opts.map((ta) => (
                                 <option key={ta} value={ta}>
                                   {ta}
@@ -4297,38 +4343,40 @@ export default function KeuanganPage() {
                 </div>
 
                 {/* CHECKLIST ITEM TAHUNAN DINAMIS */}
-                <div className="flex flex-wrap items-center gap-2 text-[11px] bg-white px-3 py-2 rounded-xl border border-slate-200">
-                  <span className="font-bold text-slate-700 flex items-center gap-1">
-                    <Filter className="w-3 h-3 text-emerald-700" />
+                <div className="bg-white px-3 py-2.5 rounded-xl border border-slate-200 space-y-2 text-[11px]">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <Filter className="w-3 h-3 text-emerald-700 shrink-0" />
                     Sertakan Item Tahunan dalam Tagihan:
                   </span>
-                  {itemTahunanList.map((it) => {
-                    const checked = includedTahunanCodes.includes(it.kode);
-                    return (
-                      <label
-                        key={it.kode}
-                        className={`cursor-pointer px-2 py-0.5 rounded-lg border font-semibold flex items-center gap-1 ${
-                          checked
-                            ? 'bg-emerald-50 border-emerald-400 text-emerald-900'
-                            : 'bg-slate-50 border-slate-200 text-slate-600'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setIncludedTahunanCodes((prev) =>
-                              prev.includes(it.kode)
-                                ? prev.filter((k) => k !== it.kode)
-                                : [...prev, it.kode]
-                            )
-                          }
-                          className="accent-emerald-700"
-                        />
-                        {it.nama_item}
-                      </label>
-                    );
-                  })}
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5">
+                    {itemTahunanList.map((it) => {
+                      const checked = includedTahunanCodes.includes(it.kode);
+                      return (
+                        <label
+                          key={it.kode}
+                          className={`cursor-pointer px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1.5 min-w-0 ${
+                            checked
+                              ? 'bg-emerald-50 border-emerald-400 text-emerald-900'
+                              : 'bg-slate-50 border-slate-200 text-slate-600'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setIncludedTahunanCodes((prev) =>
+                                prev.includes(it.kode)
+                                  ? prev.filter((k) => k !== it.kode)
+                                  : [...prev, it.kode]
+                              )
+                            }
+                            className="accent-emerald-700 shrink-0"
+                          />
+                          <span className="truncate">{it.nama_item}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
@@ -4571,13 +4619,13 @@ export default function KeuanganPage() {
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
                     {canViewBisyaroh && canEditKeuangan && (
                       <button
                         onClick={() => setShowBisyarohModal(true)}
-                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                        className="col-span-2 sm:col-span-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
                       >
-                        <Users className="w-3.5 h-3.5" />
+                        <Users className="w-3.5 h-3.5 shrink-0" />
                         Pencairan Bisyaroh Pengurus
                       </button>
                     )}
@@ -4585,16 +4633,16 @@ export default function KeuanganPage() {
                     {canEditKeuangan && (
                       <button
                         onClick={() => setShowKasModal(true)}
-                        className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                        className="col-span-2 sm:col-span-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-3.5 h-3.5 shrink-0" />
                         Catat Kas Masuk / Keluar
                       </button>
                     )}
 
                     <button
                       onClick={handleExportBukuKasExcel}
-                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                       Excel
@@ -4602,7 +4650,7 @@ export default function KeuanganPage() {
 
                     <button
                       onClick={() => triggerPrint('laporan_kas')}
-                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <Printer className="w-3.5 h-3.5" />
                       Print A4
@@ -4611,12 +4659,12 @@ export default function KeuanganPage() {
                 </div>
 
                 {/* FILTER & RINGKASAN ARUS KAS FILTERED */}
-                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-center gap-2 text-xs flex-1">
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 text-xs">
                     <select
                       value={kasBulanFilter}
                       onChange={(e) => setKasBulanFilter(e.target.value)}
-                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700"
+                      className="min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700"
                     >
                       <option value="SEMUA">Semua Bulan</option>
                       {Array.from(
@@ -4637,7 +4685,7 @@ export default function KeuanganPage() {
                     <select
                       value={kasDompetFilter}
                       onChange={(e) => setKasDompetFilter(e.target.value)}
-                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Semua 4 Dompet</option>
                       <option value="pendaftaran">1. Dompet Pendaftaran</option>
@@ -4649,7 +4697,7 @@ export default function KeuanganPage() {
                     <select
                       value={kasTipeFilter}
                       onChange={(e) => setKasTipeFilter(e.target.value)}
-                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Masuk &amp; Keluar</option>
                       <option value="masuk">Pemasukan Saja</option>
@@ -4659,42 +4707,54 @@ export default function KeuanganPage() {
                     <select
                       value={kasMetodeFilter}
                       onChange={(e) => setKasMetodeFilter(e.target.value)}
-                      className="min-h-[36px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                      className="min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                     >
                       <option value="SEMUA">Tunai &amp; Transfer</option>
                       <option value="tunai">Tunai (Cash)</option>
                       <option value="transfer">Transfer Bank</option>
                     </select>
 
-                    <div className="relative col-span-2 sm:col-span-2 lg:w-52">
+                    <div className="relative col-span-2 sm:col-span-4 lg:col-span-1">
                       <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
                         value={kasSearch}
                         onChange={(e) => setKasSearch(e.target.value)}
                         placeholder="Cari uraian / kuitansi..."
-                        className="w-full min-h-[36px] pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs"
+                        className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs"
                       />
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs tabular-nums shrink-0">
-                    <span className="text-emerald-800 font-bold whitespace-nowrap">
-                      Tunai Masuk: {formatRupiah(kasFilteredTotals.tunaiMasuk)}
-                    </span>
-                    <span className="text-rose-700 font-bold whitespace-nowrap">
-                      Tunai Keluar: {formatRupiah(kasFilteredTotals.tunaiKeluar)}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold whitespace-nowrap">
-                      Tunai Netto: {formatRupiah(kasFilteredTotals.tunaiNetto)}
-                    </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs tabular-nums">
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-emerald-800">Tunai Masuk</span>
+                      <strong className="font-mono font-extrabold text-emerald-900">
+                        {formatRupiah(kasFilteredTotals.tunaiMasuk)}
+                      </strong>
+                    </div>
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-rose-800">Tunai Keluar</span>
+                      <strong className="font-mono font-extrabold text-rose-800">
+                        {formatRupiah(kasFilteredTotals.tunaiKeluar)}
+                      </strong>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 rounded-xl bg-slate-900 text-white px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-300">Saldo Netto Tunai</span>
+                      <strong className="font-mono font-extrabold text-emerald-300">
+                        {formatRupiah(kasFilteredTotals.tunaiNetto)}
+                      </strong>
+                    </div>
                     {(kasFilteredTotals.transferMasuk > 0 || kasFilteredTotals.transferKeluar > 0) && (
-                      <span className="px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-900 font-bold whitespace-nowrap">
-                        Transfer: +{formatRupiah(kasFilteredTotals.transferMasuk)}
-                        {kasFilteredTotals.transferKeluar > 0
-                          ? ` / -${formatRupiah(kasFilteredTotals.transferKeluar)}`
-                          : ''}
-                      </span>
+                      <div className="col-span-2 sm:col-span-3 lg:col-span-1 rounded-xl bg-sky-50 border border-sky-200 px-3 py-2 flex items-center justify-between gap-2 text-sky-900">
+                        <span className="text-[11px] font-semibold">Transfer Filter</span>
+                        <strong className="font-mono font-bold">
+                          +{formatRupiah(kasFilteredTotals.transferMasuk)}
+                          {kasFilteredTotals.transferKeluar > 0
+                            ? ` / -${formatRupiah(kasFilteredTotals.transferKeluar)}`
+                            : ''}
+                        </strong>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -5151,7 +5211,7 @@ export default function KeuanganPage() {
                                   type="text"
                                   value={migrasiKtlCatatan}
                                   onChange={(e) => setMigrasiKtlCatatan(e.target.value)}
-                                  placeholder="Misal: Tunggakan Apr-Jun 2026"
+                                  placeholder="Misal: Tunggakan bulan lalu"
                                   className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg"
                                 />
                               </div>

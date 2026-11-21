@@ -18,17 +18,20 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useAuth, TransparencyBanner } from '@/lib/auth';
+import { useAuth } from '@/lib/auth';
 import { E_ANNURSATU_UPGRADE_SQL } from '@/lib/sql-schema';
 import { supabase } from '@/lib/supabase';
 import {
   applyThemeToDocument,
   DEFAULT_PENGATURAN_FORM,
   extractExtendedPayload,
+  getDynamicTahunAjaranAktif,
+  getDynamicTahunPsbInfo,
   isKeamananThresholdValid,
   isMissingColumnError,
   mergeAturanOperasional,
   readExtendedLocal,
+  readTemaLocal,
   sanitizeCorePayload,
   writeExtendedLocal,
   writeTemaLocal,
@@ -49,6 +52,27 @@ import {
   resolveCanonicalDompetForItem,
 } from '@/lib/keuangan';
 
+const MODULE_DISPLAY_LABELS: Record<string, string> = {
+  beranda: 'Beranda Utama',
+  pendaftaran: 'Pendaftaran Santri Baru (PSB)',
+  santri: 'Data Santri & EMIS',
+  pengurus: 'Data Pengurus',
+  keuangan: 'Keuangan & Syahriyah',
+  bisyaroh: 'Akses Lihat & Kelola Bisyaroh',
+  koperasi: 'Koperasi Pondok',
+  kebersihan: 'Kebersihan & Piket',
+  'absen-jamaah': 'Absen Sholat Jamaah',
+  perizinan: 'Perizinan Pulang',
+  keamanan: 'Keamanan & Poin Pelanggaran',
+  kesehatan: 'Poskestren & Kesehatan',
+  dapur: 'Dapur & Konsumsi',
+  sarpras: 'Sarpras & Inventaris',
+  kegiatan: 'Kegiatan Pondok',
+  kalender: 'Kalender Pondok',
+  laundry: 'Sie Laundry',
+  laporan: 'Pusat Laporan',
+};
+
 const TAB_ITEMS: Array<{
   key: PengaturanTabKey;
   label: string;
@@ -64,16 +88,15 @@ const TAB_ITEMS: Array<{
 
 export default function PengaturanPage() {
   const {
-    canEditModule,
-    isPimpinanInti,
-    isBendahara,
-    canManageAccounts,
+    pengurus,
+    isSuperAdmin,
     jabatanLabels,
+    editableModules,
   } = useAuth();
-  const canEdit = canEditModule('pengaturan');
-  const canManageFinance = isPimpinanInti || isBendahara;
+  const canEdit = isSuperAdmin;
+  const canManageFinance = isSuperAdmin;
 
-  const [activeTab, setActiveTab] = useState<PengaturanTabKey>('identitas');
+  const [activeTab, setActiveTab] = useState<PengaturanTabKey>('tema');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
@@ -129,7 +152,34 @@ export default function PengaturanPage() {
       ]);
 
     const localExt = readExtendedLocal();
+    const localPersonalTema = readTemaLocal();
     const rowObj = (setRow || {}) as Record<string, unknown>;
+    const dynTaAktif = getDynamicTahunAjaranAktif();
+    const dynPsb = getDynamicTahunPsbInfo();
+    const mergedAturan = mergeAturanOperasional(
+      rowObj.aturan_operasional ?? localExt?.aturan_operasional
+    );
+    if (!mergedAturan.tahun_ajaran_aktif) {
+      mergedAturan.tahun_ajaran_aktif = dynTaAktif;
+    }
+    if (!mergedAturan.pendaftaran.tahun_psb || mergedAturan.pendaftaran.tahun_psb <= 0) {
+      mergedAturan.pendaftaran.tahun_psb = dynPsb.tahunPsb;
+    }
+    if (!mergedAturan.pendaftaran.tahun_ajaran_psb) {
+      mergedAturan.pendaftaran.tahun_ajaran_psb = dynPsb.tahunAjaranPsb;
+    }
+    if (!isSuperAdmin && localPersonalTema) {
+      mergedAturan.tema = {
+        ...mergedAturan.tema,
+        preset: localPersonalTema.preset,
+        primaryColor: localPersonalTema.primaryColor,
+        sidebarColor: localPersonalTema.sidebarColor,
+        mode: localPersonalTema.mode,
+        fontFamily: localPersonalTema.fontFamily,
+        radius: localPersonalTema.radius,
+        density: localPersonalTema.density,
+      };
+    }
 
     const nextForm: PengaturanFormState = {
       ...DEFAULT_PENGATURAN_FORM,
@@ -173,9 +223,7 @@ export default function PengaturanPage() {
       kop_surat_url: String(
         rowObj.kop_surat_url ?? localExt?.kop_surat_url ?? ''
       ),
-      aturan_operasional: mergeAturanOperasional(
-        rowObj.aturan_operasional ?? localExt?.aturan_operasional
-      ),
+      aturan_operasional: mergedAturan,
     };
 
     setFormData(nextForm);
@@ -200,6 +248,7 @@ export default function PengaturanPage() {
 
     if (missingSeeds.length > 0) {
       let syncedFromDb = false;
+      const defaultBerlakuMulai = `${dynTaAktif.split('/')[0]}-07-01`;
 
       if (canManageFinance) {
         const { data: upserted } = await supabase
@@ -229,7 +278,7 @@ export default function PengaturanPage() {
               return {
                 item_id: it.id,
                 nominal: seedInfo?.defaultNominal ?? 50000,
-                berlaku_mulai: '2026-07-01',
+                berlaku_mulai: defaultBerlakuMulai,
                 catatan: 'Tarif awal pos pembayaran baru',
               };
             });
@@ -273,7 +322,7 @@ export default function PengaturanPage() {
               id: `seed-riwayat-${seed.kode}`,
               item_id: virtualId,
               nominal: seed.defaultNominal,
-              berlaku_mulai: '2026-07-01',
+              berlaku_mulai: defaultBerlakuMulai,
               catatan: 'Tarif awal pos pembayaran baru',
             },
           ];
@@ -295,10 +344,21 @@ export default function PengaturanPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (isSuperAdmin) {
+        setActiveTab((prev) => (prev === 'tema' ? 'identitas' : prev));
+      } else {
+        setActiveTab('tema');
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
       void loadAllData(false);
     }, 0);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isSuperAdmin]);
 
   const handleUpdateField = <K extends keyof PengaturanFormState>(
     field: K,
@@ -611,10 +671,13 @@ export default function PengaturanPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <Settings className="w-5 h-5 text-emerald-700 shrink-0" />
-            Pengaturan Aplikasi Pondok
+            {isSuperAdmin ? 'Pengaturan Aplikasi Pondok' : 'Pengaturan Pribadi & Tampilan'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Pusat identitas resmi, kop surat JPG, legalitas TTD, tarif &amp; tema &middot; Jabatan:{' '}
+            {isSuperAdmin
+              ? 'Pusat identitas resmi, kop surat JPG, legalitas TTD, tarif & tema'
+              : 'Atur preferensi tema tampilan di perangkat Anda dan tinjau hak akses akun'}
+            {' '}&middot; Jabatan:{' '}
             <span className="font-semibold text-slate-700">
               {jabatanLabels.length > 0 ? jabatanLabels.join(', ') : 'Pengurus Aktif'}
             </span>
@@ -622,7 +685,7 @@ export default function PengaturanPage() {
         </div>
 
         <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 shrink-0">
-          {canManageAccounts && (
+          {isSuperAdmin && (
             <>
               <Link
                 href="/tools/pwa-icon"
@@ -639,33 +702,55 @@ export default function PengaturanPage() {
                 <Database className="w-3.5 h-3.5 text-emerald-700" />
                 Skema SQL &amp; RLS
               </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSavePengaturan()}
+                className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
+              </button>
             </>
-          )}
-          {(canEdit || (activeTab === 'keuangan' && canManageFinance)) && (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSavePengaturan()}
-              className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
-            </button>
           )}
         </div>
       </div>
 
-      <TransparencyBanner
-        moduleLabel="Pengaturan Aplikasi Pondok"
-        isReadOnly={!canEdit}
-        extraNote={
-          isBendahara && !canEdit
-            ? 'Khusus Tab 3 (Keuangan & Tarif) tetap dapat Anda kelola sebagai Bendahara.'
-            : undefined
-        }
-      />
+      {!isSuperAdmin && pengurus && (
+        <section className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">
+                Profil &amp; Hak Akses Modul Saya ({pengurus.nama_lengkap})
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Username: <span className="font-mono font-semibold text-slate-700">@{pengurus.username}</span> &middot; Pengaturan pondok (Identitas, Kop, Keuangan, Aturan) hanya dikelola Admin Utama.
+              </p>
+            </div>
+            <Link
+              href="/profil"
+              className="min-h-[38px] px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              Ubah Kata Sandi / Profil Saya
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+            {Array.from(editableModules)
+              .filter((m) => m !== 'pengaturan' && m !== 'pwa-tools')
+              .map((mod) => (
+                <span
+                  key={mod}
+                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-semibold text-emerald-800"
+                >
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  {MODULE_DISPLAY_LABELS[mod] || mod}
+                </span>
+              ))}
+          </div>
+        </section>
+      )}
 
-      {canManageAccounts && showSqlCard && (
+      {isSuperAdmin && showSqlCard && (
         <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-700 p-4 sm:p-5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -717,69 +802,65 @@ export default function PengaturanPage() {
         </div>
       )}
 
-      {/* NAVIGASI 5 TAB (Rapi di HP & Desktop) */}
-      <div
-        role="tablist"
-        aria-label="Kategori Pengaturan Aplikasi"
-        className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 rounded-xl border border-slate-200"
-      >
-        {TAB_ITEMS.map((tab, idx) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setActiveTab(tab.key)}
-              className={`min-h-[40px] px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center justify-center sm:justify-start gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
-                idx === TAB_ITEMS.length - 1 ? 'col-span-2 sm:col-span-1' : ''
-              } ${
-                active
-                  ? 'bg-white text-emerald-800 shadow-xs border border-slate-200/80'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span className="sm:hidden">{tab.shortLabel}</span>
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* NAVIGASI 5 TAB (Hanya tampil untuk Super Admin) */}
+      {isSuperAdmin && (
+        <div
+          role="tablist"
+          aria-label="Kategori Pengaturan Aplikasi"
+          className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 rounded-xl border border-slate-200"
+        >
+          {TAB_ITEMS.map((tab, idx) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveTab(tab.key)}
+                className={`min-h-[40px] px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center justify-center sm:justify-start gap-1.5 transition-colors whitespace-nowrap cursor-pointer ${
+                  idx === TAB_ITEMS.length - 1 ? 'col-span-2 sm:col-span-1' : ''
+                } ${
+                  active
+                    ? 'bg-white text-emerald-800 shadow-xs border border-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span className="sm:hidden">{tab.shortLabel}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* KONTEN TAB AKTIF */}
-      {activeTab === 'identitas' && (
-        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
-          <IdentitasRekeningTab formData={formData} onUpdateField={handleUpdateField} />
-        </fieldset>
+      {isSuperAdmin && activeTab === 'identitas' && (
+        <IdentitasRekeningTab formData={formData} onUpdateField={handleUpdateField} />
       )}
 
-      {activeTab === 'legalitas' && (
-        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
-          <LogoLegalitasTab
-            formData={formData}
-            onUpdateField={handleUpdateField}
-            onUploadImage={handleUploadImage}
-            uploadingField={uploadingField}
-          />
-        </fieldset>
+      {isSuperAdmin && activeTab === 'legalitas' && (
+        <LogoLegalitasTab
+          formData={formData}
+          onUpdateField={handleUpdateField}
+          onUploadImage={handleUploadImage}
+          uploadingField={uploadingField}
+        />
       )}
 
-      {activeTab === 'keuangan' && (
+      {isSuperAdmin && activeTab === 'keuangan' && (
         <KeuanganTarifTab
           formData={formData}
           onUpdateField={handleUpdateField}
           onUpdateTahunAjaran={(val) => {
-            if (!canManageFinance && !canEdit) return;
             setFormData((prev) => ({
               ...prev,
               aturan_operasional: { ...prev.aturan_operasional, tahun_ajaran_aktif: val },
             }));
           }}
           onUpdatePendaftaran={(updater) => {
-            if (!canManageFinance && !canEdit) return;
             setFormData((prev) => ({
               ...prev,
               aturan_operasional: {
@@ -792,11 +873,8 @@ export default function PengaturanPage() {
           masterItems={masterItems}
           riwayatMap={riwayatMap}
           todayStr={todayStr}
-          onOpenNewModal={() => {
-            if (canManageFinance) setShowModalBaru(true);
-          }}
+          onOpenNewModal={() => setShowModalBaru(true)}
           onOpenEditTarif={(item, nominalAktif) => {
-            if (!canManageFinance) return;
             setEditTarifItem(item);
             setNewNominal(nominalAktif);
             setBerlakuMulai(todayStr);
@@ -807,44 +885,48 @@ export default function PengaturanPage() {
         />
       )}
 
-      {activeTab === 'operasional' && (
-        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
-          <AturanDivisiTab
-            formData={formData}
-            onUpdateAturan={(updater) => {
-              if (!canEdit) return;
-              setFormData((prev) => ({
-                ...prev,
-                aturan_operasional: updater(prev.aturan_operasional),
-              }));
-            }}
-          />
-        </fieldset>
+      {isSuperAdmin && activeTab === 'operasional' && (
+        <AturanDivisiTab
+          formData={formData}
+          onUpdateAturan={(updater) => {
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: updater(prev.aturan_operasional),
+            }));
+          }}
+        />
       )}
 
-      {activeTab === 'tema' && (
-        <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0">
-          <TemaAplikasiTab
-            tema={formData.aturan_operasional.tema}
-            logoUrl={formData.logo_url}
-            onUpdateTema={(updater) => {
-              if (!canEdit) return;
-              const nextTema = updater(formData.aturan_operasional.tema);
-              setFormData((prev) => ({
-                ...prev,
-                aturan_operasional: {
-                  ...prev.aturan_operasional,
-                  tema: nextTema,
-                },
-              }));
-              applyThemeToDocument(nextTema, { logoUrl: formData.logo_url });
-            }}
-          />
-        </fieldset>
+      {(!isSuperAdmin || activeTab === 'tema') && (
+        <TemaAplikasiTab
+          tema={formData.aturan_operasional.tema}
+          logoUrl={formData.logo_url}
+          isSuperAdmin={isSuperAdmin}
+          onSaveLocalTheme={() => {
+            writeTemaLocal(formData.aturan_operasional.tema);
+            applyThemeToDocument(formData.aturan_operasional.tema, { logoUrl: formData.logo_url });
+            setSavedSnapshot(JSON.stringify(formData));
+            showToast('success', 'Preferensi tema pribadi tersimpan di perangkat ini!');
+          }}
+          onUpdateTema={(updater) => {
+            const nextTema = updater(formData.aturan_operasional.tema);
+            setFormData((prev) => ({
+              ...prev,
+              aturan_operasional: {
+                ...prev.aturan_operasional,
+                tema: nextTema,
+              },
+            }));
+            if (!isSuperAdmin) {
+              writeTemaLocal(nextTema);
+            }
+            applyThemeToDocument(nextTema, { logoUrl: formData.logo_url });
+          }}
+        />
       )}
 
       {/* STICKY SAVE BAR SAAT ADA PERUBAHAN BELUM DISIMPAN */}
-      {hasUnsavedChanges && (canEdit || (activeTab === 'keuangan' && canManageFinance)) && (
+      {isSuperAdmin && hasUnsavedChanges && (
         <div className="fixed bottom-16 md:bottom-5 inset-x-4 md:left-72 md:right-8 z-40 max-w-4xl mx-auto">
           <div className="bg-slate-900 text-white rounded-xl px-4 py-2.5 shadow-xl border border-slate-700 flex items-center justify-between gap-3">
             <span className="text-xs font-medium truncate">
