@@ -24,13 +24,14 @@ import {
 } from 'lucide-react';
 import { useAuth, TransparencyBanner } from '@/lib/auth';
 import { addDaysIso } from '@/lib/dapur';
+import { mergeAturanOperasional, readExtendedLocal } from '@/lib/pengaturan';
+import { supabase } from '@/lib/supabase';
 import {
   type HariLaundryKey,
   type LaundryCatatanItem,
   type LaundryJadwalKamar,
   type StatusLaundry,
   HARI_LABEL_MAP,
-  HARI_OPERASIONAL_LIST,
   buildLaundryDailyWaText,
   createLaundryId,
   deleteLaundryCatatanRow,
@@ -42,10 +43,37 @@ import {
   getCurrentHmLocal,
   getHariKeyFromIso,
   getLocalTodayStr,
-  isHariLiburLaundry,
   saveLaundryCatatanRow,
   saveLaundryJadwalDay,
 } from '@/lib/laundry';
+
+const ALL_HARI_LAUNDRY_KEYS: HariLaundryKey[] = [
+  'sabtu',
+  'ahad',
+  'senin',
+  'selasa',
+  'rabu',
+  'kamis',
+  'jumat',
+];
+
+function normalizeHariLiburToKey(val: unknown): HariLaundryKey {
+  const raw = String(val || '')
+    .trim()
+    .toLowerCase();
+  if (raw === 'minggu' || raw === 'ahad') return 'ahad';
+  if (
+    raw === 'senin' ||
+    raw === 'selasa' ||
+    raw === 'rabu' ||
+    raw === 'kamis' ||
+    raw === 'jumat' ||
+    raw === 'sabtu'
+  ) {
+    return raw;
+  }
+  return 'jumat';
+}
 
 type MainTab = 'harian' | 'jadwal' | 'laporan';
 
@@ -68,7 +96,8 @@ export default function LaundryPage() {
   const [activeTab, setActiveTab] = useState<MainTab>('harian');
   const [todayStr, setTodayStr] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [overrideFridayInput, setOverrideFridayInput] = useState<boolean>(false);
+  const [overrideLiburInput, setOverrideLiburInput] = useState<boolean>(false);
+  const [hariLiburKey, setHariLiburKey] = useState<HariLaundryKey>('jumat');
 
   const [loading, setLoading] = useState<boolean>(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -112,12 +141,19 @@ export default function LaundryPage() {
   );
 
   const loadAllData = useCallback(async () => {
-    const [jdw, ctt, kmr] = await Promise.all([
+    const [{ data: pengRow }, jdw, ctt, kmr] = await Promise.all([
+      supabase.from('pengaturan_aplikasi').select('aturan_operasional').eq('id', 1).maybeSingle(),
       fetchLaundryJadwal(),
       fetchLaundryCatatan(),
       fetchAllKamarOptions(),
     ]);
-    return { jdw, ctt, kmr };
+    const localExt = readExtendedLocal();
+    const mergedAturan = mergeAturanOperasional(
+      (pengRow as { aturan_operasional?: unknown } | null)?.aturan_operasional ??
+        localExt?.aturan_operasional
+    );
+    const liburKey = normalizeHariLiburToKey(mergedAturan.jadwal.hari_libur_laundry);
+    return { jdw, ctt, kmr, liburKey };
   }, []);
 
   useEffect(() => {
@@ -130,6 +166,7 @@ export default function LaundryPage() {
         setTodayStr(today);
         setSelectedDate(today);
         setReportMonth(today.slice(0, 7));
+        setHariLiburKey(data.liburKey);
         setJadwalList(data.jdw);
         setCatatanList(data.ctt);
         setKamarOptions(data.kmr);
@@ -147,6 +184,7 @@ export default function LaundryPage() {
     setLoading(true);
     try {
       const data = await loadAllData();
+      setHariLiburKey(data.liburKey);
       setJadwalList(data.jdw);
       setCatatanList(data.ctt);
       setKamarOptions(data.kmr);
@@ -163,17 +201,41 @@ export default function LaundryPage() {
     [selectedDate]
   );
 
-  const isFridaySelected = useMemo<boolean>(
-    () => (selectedDate ? isHariLiburLaundry(selectedDate) : false),
-    [selectedDate]
+  const hariLiburLabel = useMemo<string>(
+    () => HARI_LABEL_MAP[hariLiburKey] || 'Jumat',
+    [hariLiburKey]
+  );
+
+  const operationalDaysList = useMemo<Array<{ key: HariLaundryKey; label: string }>>(() => {
+    const idx = ALL_HARI_LAUNDRY_KEYS.indexOf(hariLiburKey);
+    const ordered: Array<{ key: HariLaundryKey; label: string }> = [];
+    for (let offset = 1; offset < ALL_HARI_LAUNDRY_KEYS.length; offset += 1) {
+      const key = ALL_HARI_LAUNDRY_KEYS[(idx + offset) % ALL_HARI_LAUNDRY_KEYS.length];
+      ordered.push({ key, label: HARI_LABEL_MAP[key] });
+    }
+    return ordered;
+  }, [hariLiburKey]);
+
+  const operationalRangeLabel = useMemo<string>(() => {
+    if (operationalDaysList.length === 0) return 'Sabtu–Kamis';
+    return `${operationalDaysList[0].label}–${operationalDaysList[operationalDaysList.length - 1].label}`;
+  }, [operationalDaysList]);
+
+  const nextDayAfterLiburLabel = useMemo<string>(() => {
+    return operationalDaysList[0]?.label || 'Sabtu';
+  }, [operationalDaysList]);
+
+  const isLiburSelected = useMemo<boolean>(
+    () => (selectedDate ? selectedHariKey === hariLiburKey : false),
+    [selectedDate, selectedHariKey, hariLiburKey]
   );
 
   // Kamar terjadwal pada hari terpilih
   const scheduledRoomsForDay = useMemo<string[]>(() => {
-    if (selectedHariKey === 'jumat') return [];
+    if (selectedHariKey === hariLiburKey) return [];
     const found = jadwalList.find((j) => j.hari_key === selectedHariKey);
     return found ? found.kamar_list : [];
-  }, [jadwalList, selectedHariKey]);
+  }, [jadwalList, selectedHariKey, hariLiburKey]);
 
   // Catatan pada tanggal terpilih
   const dailyRecords = useMemo<LaundryCatatanItem[]>(() => {
@@ -444,9 +506,12 @@ export default function LaundryPage() {
       updated_at: new Date().toISOString(),
     };
     const saved = await saveLaundryJadwalDay(updated);
-    setJadwalList((prev) =>
-      prev.map((j) => (j.hari_key === saved.hari_key ? saved : j))
-    );
+    setJadwalList((prev) => {
+      const exists = prev.some((j) => j.hari_key === saved.hari_key);
+      return exists
+        ? prev.map((j) => (j.hari_key === saved.hari_key ? saved : j))
+        : [...prev, saved];
+    });
     pushToast(
       'success',
       `Jadwal ${saved.hari_label} Disimpan`,
@@ -634,32 +699,34 @@ export default function LaundryPage() {
               Sie Laundry Pondok
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Pencatatan jumlah potong (Pcs) per kamar setiap hari Senin–Kamis &amp; Sabtu–Ahad (Hari Jumat Libur Laundry).
+              Pencatatan jumlah potong (Pcs) per kamar setiap hari {operationalRangeLabel} (Hari {hariLiburLabel} Libur Laundry).
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={loading}
-              className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Muat Ulang
-            </button>
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
-              Export Excel
-            </button>
+          <div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={loading}
+                className="min-h-[40px] w-full sm:w-auto px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Muat Ulang
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="min-h-[40px] w-full sm:w-auto px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
+                Export Excel
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => window.print()}
-              className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className="min-h-[40px] w-full sm:w-auto px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Printer className="w-4 h-4" />
               Cetak Rekap
@@ -679,8 +746,8 @@ export default function LaundryPage() {
               {loading ? '...' : dailySummary.totalKamarSetor}
             </strong>
             <span className="text-[11px] text-slate-500 tabular-nums">
-              {isFridaySelected
-                ? 'Hari Jumat libur operasional'
+              {isLiburSelected
+                ? `Hari ${hariLiburLabel} libur operasional`
                 : `${dailySummary.totalScheduled} kamar sesuai giliran hari ini`}
             </span>
           </div>
@@ -711,42 +778,44 @@ export default function LaundryPage() {
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit overflow-x-auto">
+        <div className="grid grid-cols-3 sm:inline-flex items-stretch sm:items-center gap-1 sm:gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit">
           <button
             type="button"
             onClick={() => setActiveTab('harian')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[40px] sm:min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               activeTab === 'harian'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Calendar className="w-3.5 h-3.5" />
-            Catatan Harian
+            <Calendar className="w-3.5 h-3.5 shrink-0" />
+            <span>Catatan Harian</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('jadwal')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[40px] sm:min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               activeTab === 'jadwal'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Settings2 className="w-3.5 h-3.5" />
-            Jadwal Giliran Kamar
+            <Settings2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="sm:hidden">Jadwal Giliran</span>
+            <span className="hidden sm:inline">Jadwal Giliran Kamar</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('laporan')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[40px] sm:min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               activeTab === 'laporan'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <FileText className="w-3.5 h-3.5" />
-            Laporan Laundry
+            <FileText className="w-3.5 h-3.5 shrink-0" />
+            <span className="sm:hidden">Laporan</span>
+            <span className="hidden sm:inline">Laporan Laundry</span>
           </button>
         </div>
 
@@ -763,7 +832,7 @@ export default function LaundryPage() {
                   onClick={() => {
                     if (!selectedDate) return;
                     setSelectedDate(addDaysIso(selectedDate, -1));
-                    setOverrideFridayInput(false);
+                    setOverrideLiburInput(false);
                   }}
                   aria-label="Hari sebelumnya"
                   className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
@@ -775,7 +844,7 @@ export default function LaundryPage() {
                   value={selectedDate}
                   onChange={(e) => {
                     setSelectedDate(e.target.value);
-                    setOverrideFridayInput(false);
+                    setOverrideLiburInput(false);
                   }}
                   className="flex-1 min-w-[140px] sm:flex-none min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-mono tabular-nums border border-slate-200 rounded-xl bg-white focus:outline-none siap-ring-focus"
                 />
@@ -784,7 +853,7 @@ export default function LaundryPage() {
                   onClick={() => {
                     if (!selectedDate) return;
                     setSelectedDate(addDaysIso(selectedDate, 1));
-                    setOverrideFridayInput(false);
+                    setOverrideLiburInput(false);
                   }}
                   aria-label="Hari berikutnya"
                   className="min-h-[40px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
@@ -796,7 +865,7 @@ export default function LaundryPage() {
                     type="button"
                     onClick={() => {
                       setSelectedDate(todayStr);
-                      setOverrideFridayInput(false);
+                      setOverrideLiburInput(false);
                     }}
                     className="min-h-[40px] px-3 py-1.5 rounded-xl border siap-soft-box text-xs font-semibold whitespace-nowrap"
                   >
@@ -807,7 +876,7 @@ export default function LaundryPage() {
                   {selectedDate ? formatHariTanggalIndo(selectedDate) : '-'}
                   <span className="font-normal text-slate-500">
                     {' '}
-                    &middot; {isFridaySelected ? 'Libur Laundry' : 'Hari Operasional'}
+                    &middot; {isLiburSelected ? 'Libur Laundry' : 'Hari Operasional'}
                   </span>
                 </div>
               </div>
@@ -839,16 +908,16 @@ export default function LaundryPage() {
                 <Loader2 className="w-5 h-5 animate-spin siap-text-accent" />
                 <span>Memuat catatan laundry...</span>
               </div>
-            ) : isFridaySelected && !overrideFridayInput && dailyRecords.length === 0 ? (
+            ) : isLiburSelected && !overrideLiburInput && dailyRecords.length === 0 ? (
               <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-3">
                 <CalendarOff className="w-10 h-10 text-slate-400 mx-auto" />
                 <div className="max-w-md mx-auto space-y-1">
                   <h2 className="text-base font-bold text-slate-900">
-                    Hari Jumat — Jadwal Libur Laundry
+                    Hari {hariLiburLabel} — Jadwal Libur Laundry
                   </h2>
                   <p className="text-xs text-slate-500">
-                    Operasional Sie Laundry berjalan setiap hari Senin–Kamis &amp; Sabtu–Ahad.
-                    Tidak ada giliran kamar terjadwal pada hari Jumat.
+                    Operasional Sie Laundry berjalan setiap hari {operationalRangeLabel}.
+                    Tidak ada giliran kamar terjadwal pada hari {hariLiburLabel}.
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-2 pt-1">
@@ -857,12 +926,12 @@ export default function LaundryPage() {
                     onClick={() => setSelectedDate(addDaysIso(selectedDate, 1))}
                     className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl"
                   >
-                    Lanjut ke Hari Sabtu
+                    Lanjut ke Hari {nextDayAfterLiburLabel}
                   </button>
                   {canEdit && (
                     <button
                       type="button"
-                      onClick={() => setOverrideFridayInput(true)}
+                      onClick={() => setOverrideLiburInput(true)}
                       className="min-h-[40px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl"
                     >
                       Catat Setoran Susulan / Darurat
@@ -873,7 +942,7 @@ export default function LaundryPage() {
             ) : (
               <div className="space-y-5">
                 {/* BAGIAN A: KAMAR SESUAI JADWAL GILIRAN HARI INI */}
-                {!isFridaySelected && (
+                {!isLiburSelected && (
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                     <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                       <div>
@@ -1310,19 +1379,19 @@ export default function LaundryPage() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm sm:text-base font-bold text-slate-900">
-                  Pembagian Jadwal Giliran Kamar Tetap (Sabtu–Kamis)
+                  Pembagian Jadwal Giliran Kamar Tetap ({operationalRangeLabel})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Atur kamar mana saja yang terjadwal setor cucian pada tiap hari operasional. Hari Jumat otomatis libur laundry.
+                  Atur kamar mana saja yang terjadwal setor cucian pada tiap hari operasional. Hari {hariLiburLabel} otomatis libur laundry.
                 </p>
               </div>
               <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold whitespace-nowrap shrink-0">
-                Jumat: Libur Operasional
+                {hariLiburLabel}: Libur Operasional
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {HARI_OPERASIONAL_LIST.map((hari) => {
+              {operationalDaysList.map((hari) => {
                 const row = jadwalList.find((j) => j.hari_key === hari.key) || {
                   id: `ljk-${hari.key}`,
                   hari_key: hari.key,
@@ -1413,12 +1482,12 @@ export default function LaundryPage() {
                   className="min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium text-slate-700"
                 >
                   <option value="semua">Semua Hari</option>
-                  {HARI_OPERASIONAL_LIST.map((h) => (
+                  {operationalDaysList.map((h) => (
                     <option key={h.key} value={h.key}>
                       Hari {h.label}
                     </option>
                   ))}
-                  <option value="jumat">Hari Jumat (Susulan)</option>
+                  <option value={hariLiburKey}>Hari {hariLiburLabel} (Susulan)</option>
                 </select>
 
                 <select
