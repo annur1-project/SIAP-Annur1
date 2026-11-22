@@ -3229,72 +3229,72 @@ export default function KeuanganPage() {
           </div>
 
           {/* KARTU LAPORAN TERPISAH: PEMASUKAN TRANSFER (REKENING BANK, TERPISAH DARI KAS TUNAI) */}
-          <div className="rounded-xl border border-sky-200 bg-sky-50/55 overflow-hidden text-xs">
+          <div className="rounded-xl border border-sky-200 dark:border-white/20 bg-sky-50/55 dark:!bg-slate-800/90 overflow-hidden text-xs">
             <div className="px-3.5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="flex items-start sm:items-center gap-3 min-w-0">
                 <div className="w-9 h-9 rounded-lg bg-sky-700 text-white flex items-center justify-center shrink-0">
                   <CreditCard className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-xs font-extrabold text-slate-900 uppercase tracking-wide">
+                  <h2 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wide">
                     Pemasukan Transfer
                   </h2>
-                  <p className="text-[11px] text-sky-900/80 mt-0.5">
+                  <p className="text-[11px] text-sky-900/80 dark:text-sky-200 mt-0.5">
                     Rekening Transfer Bank &middot; Laporan khusus (tidak memengaruhi saldo kas tunai 4 dompet)
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-5 border-t md:border-t-0 md:border-l border-sky-200/80 pt-2.5 md:pt-0 md:pl-5 shrink-0">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-5 border-t md:border-t-0 md:border-l border-sky-200/80 dark:border-white/15 pt-2.5 md:pt-0 md:pl-5 shrink-0">
                 <div className="flex sm:block items-center justify-between gap-2">
-                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500 dark:text-slate-300">
                     Masuk Bln Ini
                   </span>
-                  <span className="text-xs sm:text-sm font-bold text-sky-900 font-mono tabular-nums sm:block">
+                  <span className="text-xs sm:text-sm font-bold text-sky-900 dark:text-sky-300 font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.bulanIniMasuk)}
                   </span>
                 </div>
                 <div className="flex sm:block items-center justify-between gap-2">
-                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500 dark:text-slate-300">
                     Keluar Rekening
                   </span>
-                  <span className="text-xs sm:text-sm font-bold text-slate-700 font-mono tabular-nums sm:block">
+                  <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-100 font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.totalKeluarAllTime)}
                   </span>
                 </div>
                 <div className="flex sm:block items-center justify-between gap-2">
-                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500">
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-slate-500 dark:text-slate-300">
                     Netto Rekening Transfer
                   </span>
-                  <span className="text-sm sm:text-base font-extrabold text-sky-950 font-mono tabular-nums sm:block">
+                  <span className="text-sm sm:text-base font-extrabold text-sky-950 dark:text-white font-mono tabular-nums sm:block">
                     {formatRupiah(walletSummary.syahriyahTransfer.netAllTime)}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-sky-200/80 bg-white/75 divide-y lg:divide-y-0 divide-x divide-sky-100">
+            <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-sky-200/80 dark:border-white/15 bg-white/75 dark:!bg-slate-900/90 divide-y lg:divide-y-0 divide-x divide-sky-100 dark:divide-white/15">
               <div className="px-3.5 py-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-slate-600 truncate">Syahriyah &amp; Tahunan</span>
-                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">Syahriyah &amp; Tahunan</span>
+                <strong className="text-[11px] font-bold text-slate-900 dark:text-white font-mono tabular-nums whitespace-nowrap">
                   {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.operasional)}
                 </strong>
               </div>
               <div className="px-3.5 py-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-slate-600 truncate">Pendaftaran</span>
-                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">Pendaftaran</span>
+                <strong className="text-[11px] font-bold text-slate-900 dark:text-white font-mono tabular-nums whitespace-nowrap">
                   {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.pendaftaran)}
                 </strong>
               </div>
               <div className="px-3.5 py-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-slate-600 truncate">Dompet MDA</span>
-                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">Dompet MDA</span>
+                <strong className="text-[11px] font-bold text-slate-900 dark:text-white font-mono tabular-nums whitespace-nowrap">
                   {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.mda)}
                 </strong>
               </div>
               <div className="px-3.5 py-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-slate-600 truncate">Kas Umum</span>
-                <strong className="text-[11px] font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap">
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">Kas Umum</span>
+                <strong className="text-[11px] font-bold text-slate-900 dark:text-white font-mono tabular-nums whitespace-nowrap">
                   {formatRupiah(walletSummary.syahriyahTransfer.byDompetMasuk.kas_pondok)}
                 </strong>
               </div>

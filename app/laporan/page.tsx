@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   ChevronDown,
@@ -15,6 +15,7 @@ import {
 import * as XLSX from 'xlsx';
 import LaporanDocument from '@/components/LaporanDocument';
 import { TransparencyBanner, useAuth } from '@/lib/auth';
+import { getTahunAjaranForDate } from '@/lib/pengaturan';
 import { supabase } from '@/lib/supabase';
 import {
   addDaysIso,
@@ -68,6 +69,150 @@ interface ExtraRawData {
   koperasiTransaksiRows: Array<Record<string, unknown>>;
   koperasiProdukRows: Array<Record<string, unknown>>;
   psbRows: Array<Record<string, unknown>>;
+}
+
+interface RawJabatanPersonalia {
+  divisi: string;
+  nama_jabatan: string;
+  urutan_struktur: number;
+}
+
+interface RawPengurusPersonalia {
+  id: string;
+  nama_lengkap: string;
+  status: string;
+  masa_khidmat: string;
+  jabatan_list: RawJabatanPersonalia[];
+}
+
+interface PengaturanApprovalInfo {
+  nama_pesantren: string;
+  kota_surat: string;
+  tahun_ajaran_aktif: string;
+  nama_pengasuh: string;
+  nama_kepala_pondok: string;
+  nama_sekretaris: string;
+  ttd_pengasuh_url: string | null;
+  ttd_kepala_pondok_url: string | null;
+  ttd_sekretaris_url: string | null;
+  stempel_url: string | null;
+}
+
+const DEWAN_HARIAN_ORDER = [
+  'Kepala Pondok',
+  'Wakil Kepala Pondok',
+  'Sekretaris',
+  'Wakil Sekretaris',
+  'Bendahara',
+  'Wakil Bendahara',
+] as const;
+
+const PLENO_DIVISI_ORDER: Array<{
+  letter: string;
+  label: string;
+  aliases: string[];
+}> = [
+  { letter: 'A', label: 'Sie Kegiatan', aliases: ['sie kegiatan'] },
+  { letter: 'B', label: 'Sie Keamanan', aliases: ['sie keamanan'] },
+  { letter: 'C', label: 'Sie Kesehatan', aliases: ['sie kesehatan'] },
+  { letter: 'D', label: 'Sie Kebersihan', aliases: ['sie kebersihan'] },
+  { letter: 'E', label: 'Sie Sarpras', aliases: ['sie sarpras'] },
+  { letter: 'F', label: 'Sie Dapur', aliases: ['sie dapur'] },
+  { letter: 'G', label: 'Sie Koperasi', aliases: ['sie koperasi', 'sie koprasi'] },
+  { letter: 'H', label: 'Sie Laundry', aliases: ['sie laundry'] },
+  { letter: 'I', label: 'Operator EMIS', aliases: ['operator emis'] },
+  { letter: 'J', label: 'Guru Bantu', aliases: ['guru bantu'] },
+  { letter: 'K', label: 'Musyrif Kamar', aliases: ['musyrif kamar'] },
+];
+
+const DEFAULT_KAMAR_ORDER = [
+  'A1',
+  'A2',
+  'A3',
+  'A4',
+  'A5',
+  'A6',
+  'A7',
+  'A8',
+  'A9',
+  'A10',
+  'C1',
+  'C2',
+  'C3',
+  'C4',
+  'C5',
+  'C6',
+  'Tahfidz',
+  'Al-Fachriyah 1 (VIP)',
+  'Al-Fachriyah 2 (VIP)',
+  'Al-Fachriyah 3 (VIP)',
+  'Al-Fachriyah 4 (VIP)',
+];
+
+function normalizeDivisiName(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (trimmed === 'Pimpinan & Harian') return 'Dewan Harian';
+  if (trimmed === 'Pengasuh') return 'Pengasuh Pondok';
+  return trimmed;
+}
+
+function isExcludedTopLeadership(divisi: string, namaJabatan: string): boolean {
+  const d = normalizeDivisiName(divisi).toLowerCase();
+  const j = (namaJabatan || '').trim().toLowerCase();
+  const excluded = [
+    'pengasuh pondok',
+    'pengasuh',
+    'dewan pengasuh (dzurriyah)',
+    'dewan pengasuh',
+    'direktur pendidikan',
+  ];
+  return excluded.includes(d) || excluded.includes(j);
+}
+
+function getRoleRank(namaJabatan: string, urutanStruktur: number): number {
+  const lower = (namaJabatan || '').trim().toLowerCase();
+  if (lower.includes('wakil') && lower.includes('koordinator')) return 2;
+  if (lower.includes('koordinator')) return 1;
+  if (lower.includes('anggota')) return 3;
+  if (urutanStruktur === 1) return 1;
+  if (urutanStruktur === 2) return 2;
+  return 3;
+}
+
+function formatCleanSectionRole(divisi: string, namaJabatan: string, urutanStruktur: number): string {
+  const raw = (namaJabatan || '').trim();
+  const div = (divisi || '').trim();
+  const rank = getRoleRank(raw, urutanStruktur);
+  if (!raw || raw.toLowerCase() === div.toLowerCase()) {
+    return rank === 1 ? 'Koordinator' : rank === 2 ? 'Wakil Koordinator' : 'Anggota';
+  }
+  const escapedDiv = div.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const stripped = raw
+    .replace(new RegExp(`\\s*${escapedDiv}$`, 'i'), '')
+    .replace(/\s*(Sie\s+Koperasi|Sie\s+Koprasi|Operator\s+EMIS)$/i, '')
+    .trim();
+  return stripped || raw;
+}
+
+function formatTanggalSuratIndo(iso: string): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '-';
+  const bulan = [
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember',
+  ];
+  const [y, m, d] = iso.split('-');
+  const mIdx = Math.max(0, Math.min(11, Number(m) - 1));
+  return `${Number(d)} ${bulan[mIdx]} ${y}`;
 }
 
 function isExtraKey(key: string): key is ExtraDivisionKey {
@@ -248,9 +393,27 @@ export default function PusatLaporanPage() {
     koperasiProdukRows: [],
     psbRows: [],
   });
+  const [pengurusRows, setPengurusRows] = useState<RawPengurusPersonalia[]>([]);
+  const [kamarOrder, setKamarOrder] = useState<string[]>(DEFAULT_KAMAR_ORDER);
+  const [pengaturanApproval, setPengaturanApproval] = useState<PengaturanApprovalInfo>({
+    nama_pesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
+    kota_surat: 'Bululawang, Malang',
+    tahun_ajaran_aktif: '',
+    nama_pengasuh: 'Dr. KH. A. Fahrur Rozi',
+    nama_kepala_pondok: 'Ust. M. Fajar Wahyudi',
+    nama_sekretaris: 'Ust. Moh. Sayid Ali',
+    ttd_pengasuh_url: null,
+    ttd_kepala_pondok_url: null,
+    ttd_sekretaris_url: null,
+    stempel_url: null,
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const docWrapperRef = useRef<HTMLDivElement>(null);
+  const personaliaSourceRef = useRef<HTMLDivElement>(null);
+  const extraSourceRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -271,6 +434,10 @@ export default function PusatLaporanPage() {
         psb1,
         psb2,
         psb3,
+        settingRows,
+        amanRows,
+        jabatanRows,
+        santriKamarRows,
       ] = await Promise.all([
         fetchAllLaporanRawData({ canViewBisyaroh }),
         fetchSafeTable('kebersihan_log'),
@@ -287,6 +454,10 @@ export default function PusatLaporanPage() {
         fetchSafeTable('psb_pendaftaran'),
         fetchSafeTable('pendaftaran_santri'),
         fetchSafeTable('calon_santri'),
+        fetchSafeTable('pengaturan_aplikasi'),
+        fetchSafeTable('v_pengurus_aman'),
+        fetchSafeTable('pengurus_jabatan'),
+        fetchSafeTable('santri'),
       ]);
       setRawData(data);
       setExtraRaw({
@@ -307,6 +478,81 @@ export default function PusatLaporanPage() {
           ['psb', 'pendaftaran']
         ),
       });
+
+      const settingRow =
+        settingRows.find((r) => Number(r.id) === 1) || settingRows[0] || null;
+      if (settingRow) {
+        setPengaturanApproval((prev) => ({
+          nama_pesantren: String(settingRow.nama_pesantren || prev.nama_pesantren),
+          kota_surat: String(settingRow.kota_surat || prev.kota_surat),
+          tahun_ajaran_aktif: String(settingRow.tahun_ajaran_aktif || prev.tahun_ajaran_aktif),
+          nama_pengasuh: String(settingRow.nama_pengasuh || prev.nama_pengasuh),
+          nama_kepala_pondok: String(settingRow.nama_kepala_pondok || prev.nama_kepala_pondok),
+          nama_sekretaris: String(settingRow.nama_sekretaris || prev.nama_sekretaris),
+          ttd_pengasuh_url: (settingRow.ttd_pengasuh_url as string | null) || null,
+          ttd_kepala_pondok_url: (settingRow.ttd_kepala_pondok_url as string | null) || null,
+          ttd_sekretaris_url: (settingRow.ttd_sekretaris_url as string | null) || null,
+          stempel_url: (settingRow.stempel_url as string | null) || null,
+        }));
+      }
+
+      const mergedRooms = [...DEFAULT_KAMAR_ORDER];
+      for (const s of santriKamarRows) {
+        const km = String(s.kamar || '').trim();
+        if (km && !mergedRooms.some((r) => r.toLowerCase() === km.toLowerCase())) {
+          mergedRooms.push(km);
+        }
+      }
+      setKamarOrder(mergedRooms);
+
+      let resolvedPengurus: RawPengurusPersonalia[] = [];
+      if (amanRows.length > 0) {
+        const jabMap = new Map<string, RawJabatanPersonalia[]>();
+        for (const j of jabatanRows) {
+          const pid = String(j.pengurus_id || '');
+          if (!pid) continue;
+          const list = jabMap.get(pid) || [];
+          list.push({
+            divisi: normalizeDivisiName(String(j.divisi || '')),
+            nama_jabatan: String(j.nama_jabatan || ''),
+            urutan_struktur: Number(j.urutan_struktur || 10),
+          });
+          jabMap.set(pid, list);
+        }
+        resolvedPengurus = amanRows.map((p) => {
+          const pid = String(p.id || '');
+          const embedded = Array.isArray(p.jabatan_list)
+            ? (p.jabatan_list as Array<Record<string, unknown>>).map((j) => ({
+                divisi: normalizeDivisiName(String(j.divisi || '')),
+                nama_jabatan: String(j.nama_jabatan || ''),
+                urutan_struktur: Number(j.urutan_struktur || 10),
+              }))
+            : [];
+          return {
+            id: pid,
+            nama_lengkap: String(p.nama_lengkap || ''),
+            status: String(p.status || 'aktif'),
+            masa_khidmat: String(p.masa_khidmat || ''),
+            jabatan_list: jabMap.get(pid) || embedded,
+          };
+        });
+      } else {
+        const lengkapRows = await fetchSafeTable('v_pengurus_lengkap');
+        resolvedPengurus = lengkapRows.map((p) => ({
+          id: String(p.id || ''),
+          nama_lengkap: String(p.nama_lengkap || ''),
+          status: String(p.status || 'aktif'),
+          masa_khidmat: String(p.masa_khidmat || ''),
+          jabatan_list: Array.isArray(p.jabatan_list)
+            ? (p.jabatan_list as Array<Record<string, unknown>>).map((j) => ({
+                divisi: normalizeDivisiName(String(j.divisi || '')),
+                nama_jabatan: String(j.nama_jabatan || ''),
+                urutan_struktur: Number(j.urutan_struktur || 10),
+              }))
+            : [],
+        }));
+      }
+      setPengurusRows(resolvedPengurus);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal memuat data laporan.';
       setErrorMsg(msg);
@@ -511,6 +757,316 @@ export default function PusatLaporanPage() {
     [selectedDivisions]
   );
 
+  const strukturPersonalia = useMemo(() => {
+    const activeTa =
+      pengaturanApproval.tahun_ajaran_aktif ||
+      (todayStr ? getTahunAjaranForDate(todayStr) : '');
+    const aktifAll = pengurusRows.filter((p) => p.status === 'aktif');
+    const matchedTa = activeTa ? aktifAll.filter((p) => p.masa_khidmat === activeTa) : [];
+    const sourcePeople = matchedTa.length > 0 ? matchedTa : aktifAll;
+
+    const dewanHarianSlots = DEWAN_HARIAN_ORDER.map((jabatan, index) => {
+      const names: string[] = [];
+      for (const person of sourcePeople) {
+        for (const jab of person.jabatan_list) {
+          if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
+          if (
+            normalizeDivisiName(jab.divisi).toLowerCase() === 'dewan harian' &&
+            jab.nama_jabatan.trim().toLowerCase() === jabatan.toLowerCase()
+          ) {
+            names.push(person.nama_lengkap);
+          }
+        }
+      }
+      return {
+        nomor: index + 1,
+        jabatan,
+        names,
+      };
+    });
+
+    const plenoSections = PLENO_DIVISI_ORDER.map((sec) => {
+      interface MemberEntry {
+        nama: string;
+        peran: string;
+        rank: number;
+        urutan: number;
+        kamarIdx: number;
+        kamarName: string;
+      }
+      const members: MemberEntry[] = [];
+      for (const person of sourcePeople) {
+        for (const jab of person.jabatan_list) {
+          if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
+          const divLower = normalizeDivisiName(jab.divisi).toLowerCase();
+          if (!sec.aliases.includes(divLower)) continue;
+
+          const rank = getRoleRank(jab.nama_jabatan, jab.urutan_struktur);
+          if (sec.letter === 'K') {
+            const kamarName = jab.nama_jabatan.replace(/^Musyrif\s+Kamar\s+/i, '').trim();
+            const kIdx = kamarOrder.findIndex(
+              (k) => k.toLowerCase() === kamarName.toLowerCase()
+            );
+            members.push({
+              nama: person.nama_lengkap,
+              peran: kamarName ? `Musyrif Kamar ${kamarName}` : jab.nama_jabatan || 'Musyrif Kamar',
+              rank,
+              urutan: jab.urutan_struktur || 10,
+              kamarIdx: kIdx === -1 ? 999 : kIdx,
+              kamarName,
+            });
+          } else {
+            members.push({
+              nama: person.nama_lengkap,
+              peran: formatCleanSectionRole(jab.divisi, jab.nama_jabatan, jab.urutan_struktur),
+              rank,
+              urutan: jab.urutan_struktur || 10,
+              kamarIdx: 0,
+              kamarName: '',
+            });
+          }
+        }
+      }
+
+      members.sort((a, b) => {
+        if (sec.letter === 'K') {
+          if (a.kamarIdx !== b.kamarIdx) return a.kamarIdx - b.kamarIdx;
+          const kCmp = a.kamarName.localeCompare(b.kamarName, 'id', { numeric: true });
+          if (kCmp !== 0) return kCmp;
+        }
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.urutan !== b.urutan) return a.urutan - b.urutan;
+        return a.nama.localeCompare(b.nama, 'id');
+      });
+
+      return {
+        letter: sec.letter,
+        label: sec.label,
+        members,
+      };
+    });
+
+    return {
+      dewanHarianSlots,
+      plenoSections,
+      totalOperationalAssignments:
+        dewanHarianSlots.reduce((acc, s) => acc + s.names.length, 0) +
+        plenoSections.reduce((acc, s) => acc + s.members.length, 0),
+    };
+  }, [pengurusRows, kamarOrder, pengaturanApproval.tahun_ajaran_aktif, todayStr]);
+
+  useLayoutEffect(() => {
+    const docRoot = docWrapperRef.current;
+    const personaliaSource = personaliaSourceRef.current;
+    const extraSource = extraSourceRef.current;
+
+    const cleanupDomPatches = () => {
+      if (docRoot) {
+        docRoot
+          .querySelectorAll('[data-siap-personalia-clone="true"], [data-siap-extra-clone="true"]')
+          .forEach((node) => node.remove());
+        docRoot
+          .querySelectorAll('[data-siap-hidden-personalia="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-personalia'));
+      }
+    };
+
+    cleanupDomPatches();
+
+    if (loading || !bundle || !docRoot) {
+      return cleanupDomPatches;
+    }
+
+    const searchContainer =
+      (docRoot.querySelector('#pusat-laporan-dokumen') as HTMLElement | null) ||
+      (docRoot.firstElementChild as HTMLElement | null) ||
+      docRoot;
+
+    // Identifikasi blok Lembar Pengesahan di bagian akhir dokumen utama
+    const allSectionDivs = Array.from(
+      searchContainer.querySelectorAll('section, div, footer')
+    ) as HTMLElement[];
+
+    const approvalCandidates = allSectionDivs.filter((el) => {
+      if (el === searchContainer) return false;
+      const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (txt.length === 0 || txt.length > 2200) return false;
+      if (/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/i.test(txt)) return false;
+      if (/Ringkasan\s+Eksekutif|Struktur\s+Personalia|Lampiran\s+Nota/i.test(txt)) return false;
+      return (
+        (/Mengetahui/i.test(txt) && /Pengasuh/i.test(txt)) ||
+        /Lembar\s+Pengesahan/i.test(txt) ||
+        (txt.includes('Sekretaris') &&
+          txt.includes('Kepala Pondok') &&
+          txt.includes('Pengasuh'))
+      );
+    });
+
+    const outermostApprovalCandidates = approvalCandidates.filter(
+      (cand) => !approvalCandidates.some((other) => other !== cand && other.contains(cand))
+    );
+    const approvalEl =
+      outermostApprovalCandidates[outermostApprovalCandidates.length - 1] || null;
+
+    // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku Bagian I & Bagian II
+    const administrasiVisible =
+      !isExtraKey(scope) &&
+      (scope === 'gabungan'
+        ? baseSelectedDivisions.includes('administrasi')
+        : scope === 'administrasi');
+
+    if (administrasiVisible && personaliaSource) {
+      const div1Candidates = allSectionDivs.filter((el) => {
+        if (el === searchContainer) return false;
+        if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return (
+          /\bDivisi\s+I\b/i.test(txt) &&
+          !/\bDivisi\s+II\b/i.test(txt) &&
+          /Administrasi|Santri/i.test(txt) &&
+          txt.length < 25000
+        );
+      });
+      const adminScopeEl =
+        div1Candidates[div1Candidates.length - 1] || searchContainer;
+
+      const adminEls = Array.from(adminScopeEl.querySelectorAll('*')) as HTMLElement[];
+      const headingMatches = adminEls.filter((el) => {
+        if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+        if (approvalEl && (el === approvalEl || approvalEl.contains(el))) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return (
+          txt.length > 0 &&
+          txt.length < 140 &&
+          /struktur\s+(personalia|kepengurusan|pengurus)|personalia\s+pengurus|susunan\s+(pengurus|personalia|kepengurusan)|daftar\s+(pengurus|personalia)/i.test(
+            txt
+          )
+        );
+      });
+      const headingEl = headingMatches[headingMatches.length - 1] || null;
+
+      if (headingEl && headingEl.parentElement) {
+        const cloneWrap = document.createElement('div');
+        cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+        cloneWrap.innerHTML = personaliaSource.innerHTML;
+
+        const parent = headingEl.parentElement;
+        const parentText = (parent.textContent || '').replace(/\s+/g, ' ');
+        const isDedicatedWrapper =
+          parent !== adminScopeEl &&
+          parent !== searchContainer &&
+          parentText.length < 12000 &&
+          !/Santri\s+Aktif|\bDivisi\s+I\b|Ringkasan\s+Eksekutif/i.test(parentText);
+
+        if (isDedicatedWrapper && parent.parentElement) {
+          parent.setAttribute('data-siap-hidden-personalia', 'true');
+          parent.parentElement.insertBefore(cloneWrap, parent);
+        } else {
+          headingEl.setAttribute('data-siap-hidden-personalia', 'true');
+          parent.insertBefore(cloneWrap, headingEl);
+          let sibling = headingEl.nextElementSibling as HTMLElement | null;
+          while (sibling) {
+            const sibTxt = (sibling.textContent || '').trim();
+            if (/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/i.test(sibTxt)) break;
+            if (/Lembar\s+Pengesahan|Mengetahui,\s*Pengasuh/i.test(sibTxt)) break;
+            sibling.setAttribute('data-siap-hidden-personalia', 'true');
+            sibling = sibling.nextElementSibling as HTMLElement | null;
+          }
+        }
+      } else {
+        // Fallback jika tidak memakai heading eksplisit: cari sub-blok daftar pengurus di dalam Divisi Administrasi
+        const fallbackCandidates = adminEls.filter((el) => {
+          if (el === adminScopeEl || el === searchContainer) return false;
+          if (approvalEl && (el === approvalEl || el.contains(approvalEl) || approvalEl.contains(el))) {
+            return false;
+          }
+          const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (txt.length === 0 || txt.length > 12000) return false;
+          if (/Santri\s+Aktif|Ringkasan\s+Eksekutif|Lembar\s+Pengesahan|\bDivisi\s+(I|II|III)\b/i.test(txt)) {
+            return false;
+          }
+          return (
+            (txt.includes('Pengasuh Pondok') ||
+              txt.includes('Dewan Pengasuh') ||
+              txt.includes('Direktur Pendidikan') ||
+              txt.includes('Dewan Harian')) &&
+            txt.includes('Kepala Pondok')
+          );
+        });
+        const outermostFallback = fallbackCandidates.find(
+          (cand) => !fallbackCandidates.some((other) => other !== cand && other.contains(cand))
+        );
+        if (outermostFallback && outermostFallback.parentElement) {
+          const cloneWrap = document.createElement('div');
+          cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+          cloneWrap.innerHTML = personaliaSource.innerHTML;
+          outermostFallback.setAttribute('data-siap-hidden-personalia', 'true');
+          outermostFallback.parentElement.insertBefore(cloneWrap, outermostFallback);
+        }
+      }
+    }
+
+    // 2. Tempel blok Divisi XI, XII, XIII ke dalam kontainer kertas laporan utama
+    //    TEPAT SETELAH blok Divisi terakhir (mis. DIVISI X · SIE LAUNDRY) & SEBELUM Lembar Pengesahan
+    const shouldInjectExtrasInsidePaper =
+      scope === 'gabungan' &&
+      baseSelectedDivisions.length > 0 &&
+      extraSelectedDivisions.length > 0 &&
+      Boolean(extraSource);
+
+    if (shouldInjectExtrasInsidePaper && extraSource) {
+      const singleDivSections = allSectionDivs.filter((el) => {
+        if (el === searchContainer) return false;
+        if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (txt.length === 0 || txt.length > 35000) return false;
+        if (/Ringkasan\s+Eksekutif/i.test(txt)) return false;
+        const romans = txt.match(/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/gi) || [];
+        const uniqueRomans = new Set(romans.map((r) => r.toUpperCase().replace(/\s+/g, ' ')));
+        return uniqueRomans.size === 1;
+      });
+
+      const outermostDivSections = singleDivSections.filter(
+        (cand) => !singleDivSections.some((other) => other !== cand && other.contains(cand))
+      );
+      const lastBaseDivEl =
+        outermostDivSections[outermostDivSections.length - 1] || null;
+
+      const extraWrap = document.createElement('div');
+      extraWrap.setAttribute('data-siap-extra-clone', 'true');
+      extraWrap.className = 'mt-6 space-y-6 print:mt-5 print:space-y-5';
+      extraWrap.innerHTML = extraSource.innerHTML;
+
+      if (
+        lastBaseDivEl &&
+        (!approvalEl ||
+          Boolean(
+            lastBaseDivEl.compareDocumentPosition(approvalEl) &
+              Node.DOCUMENT_POSITION_FOLLOWING
+          ))
+      ) {
+        lastBaseDivEl.insertAdjacentElement('afterend', extraWrap);
+      } else if (approvalEl && approvalEl.parentElement) {
+        approvalEl.parentElement.insertBefore(extraWrap, approvalEl);
+      } else {
+        searchContainer.appendChild(extraWrap);
+      }
+    }
+
+    return cleanupDomPatches;
+  }, [
+    loading,
+    bundle,
+    scope,
+    baseSelectedDivisions,
+    extraSelectedDivisions,
+    showCoverAndApproval,
+    showNotaLampiran,
+    mobilePreviewOpen,
+    strukturPersonalia,
+    extraReports,
+  ]);
+
   const handleRefresh = () => {
     setRefreshing(true);
     void loadData();
@@ -583,10 +1139,280 @@ export default function PusatLaporanPage() {
     exportLaporanToExcel(bundle, baseScope, baseDivs);
   };
 
+  const renderExtraDivisionSections = () => (
+    <>
+      {(scope === 'kebersihan' ||
+        (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'))) && (
+        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                Divisi XI · Kebersihan &amp; Piket
+              </span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Laporan Kebersihan Lingkungan &amp; Piket Kamar
+              </h3>
+            </div>
+            <span className="text-xs text-slate-500 font-medium">
+              {periodWindow?.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Total Jadwal / Tugas</span>
+              <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
+                {extraReports.kebersihan.totalTugas}
+              </strong>
+              <span className="text-[11px] text-slate-500 block">
+                Periode lalu: {extraReports.kebersihan.prevTotalTugas}
+              </span>
+            </div>
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <span className="text-emerald-800 block">Selesai / Bersih</span>
+              <strong className="text-lg font-extrabold text-emerald-950 tabular-nums">
+                {extraReports.kebersihan.selesai}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <span className="text-amber-800 block">Belum / Evaluasi</span>
+              <strong className="text-lg font-extrabold text-amber-950 tabular-nums">
+                {extraReports.kebersihan.belum}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Tingkat Kepatuhan</span>
+              <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
+                {extraReports.kebersihan.persenBersih}%
+              </strong>
+            </div>
+          </div>
+
+          {extraReports.kebersihan.detail.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">
+              Belum ada catatan piket atau tugas kebersihan tercatat pada periode ini.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 text-left">
+                    <th className="p-2 border border-slate-200">Tanggal</th>
+                    <th className="p-2 border border-slate-200">Area / Kamar</th>
+                    <th className="p-2 border border-slate-200">Tugas / Petugas</th>
+                    <th className="p-2 border border-slate-200">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {extraReports.kebersihan.detail.map((row, i) => (
+                    <tr key={i}>
+                      <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                        {row.tanggal}
+                      </td>
+                      <td className="p-2 border border-slate-200 font-semibold text-slate-800">
+                        {row.area}
+                      </td>
+                      <td className="p-2 border border-slate-200 text-slate-700">{row.tugas}</td>
+                      <td className="p-2 border border-slate-200 font-semibold text-slate-800">
+                        {row.status}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {(scope === 'koperasi' ||
+        (scope === 'gabungan' && extraSelectedDivisions.includes('koperasi'))) && (
+        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                Divisi XII · Koperasi Pondok
+              </span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Laporan Operasional &amp; Arus Kas Koperasi
+              </h3>
+            </div>
+            <span className="text-xs text-slate-500 font-medium">
+              {periodWindow?.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <span className="text-emerald-800 block">Pemasukan / Penjualan</span>
+              <strong className="text-base font-extrabold text-emerald-950 tabular-nums">
+                {formatRupiah(extraReports.koperasi.pemasukan)}
+              </strong>
+              <span className="text-[11px] text-emerald-700 block">
+                Lalu: {formatRupiah(extraReports.koperasi.prevPemasukan)}
+              </span>
+            </div>
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200">
+              <span className="text-rose-800 block">Pengeluaran / Kulaan</span>
+              <strong className="text-base font-extrabold text-rose-950 tabular-nums">
+                {formatRupiah(extraReports.koperasi.pengeluaran)}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Surplus Periode</span>
+              <strong className="text-base font-extrabold text-slate-900 tabular-nums">
+                {formatRupiah(extraReports.koperasi.surplus)}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Transaksi &amp; Produk</span>
+              <strong className="text-base font-extrabold text-slate-900 tabular-nums">
+                {extraReports.koperasi.totalTransaksi} Trx · {extraReports.koperasi.totalProduk} Item
+              </strong>
+            </div>
+          </div>
+
+          {extraReports.koperasi.detail.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">
+              Belum ada transaksi koperasi tercatat pada periode ini.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 text-left">
+                    <th className="p-2 border border-slate-200">Tanggal</th>
+                    <th className="p-2 border border-slate-200">Keterangan / Barang</th>
+                    <th className="p-2 border border-slate-200">Jenis / Metode</th>
+                    <th className="p-2 border border-slate-200 text-right">Nominal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {extraReports.koperasi.detail.map((row, i) => (
+                    <tr key={i}>
+                      <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                        {row.tanggal}
+                      </td>
+                      <td className="p-2 border border-slate-200 font-semibold text-slate-800">
+                        {row.keterangan}
+                      </td>
+                      <td className="p-2 border border-slate-200 text-slate-700">{row.jenis}</td>
+                      <td
+                        className={`p-2 border border-slate-200 text-right font-mono font-bold tabular-nums ${
+                          row.isKeluar ? 'text-rose-700' : 'text-emerald-800'
+                        }`}
+                      >
+                        {row.isKeluar ? '-' : '+'}
+                        {formatRupiah(row.nominal)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {(scope === 'psb' ||
+        (scope === 'gabungan' && extraSelectedDivisions.includes('psb'))) && (
+        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                Divisi XIII · Pendaftaran Santri Baru (PSB)
+              </span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Laporan Penerimaan &amp; Verifikasi Calon Santri Baru
+              </h3>
+            </div>
+            <span className="text-xs text-slate-500 font-medium">
+              {periodWindow?.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Pendaftar Periode Ini</span>
+              <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
+                {extraReports.psb.pendaftarPeriode}
+              </strong>
+              <span className="text-[11px] text-slate-500 block">
+                Total data PSB: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
+              </span>
+            </div>
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <span className="text-emerald-800 block">Terverifikasi / Diterima</span>
+              <strong className="text-lg font-extrabold text-emerald-950 tabular-nums">
+                {extraReports.psb.terverifikasi}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <span className="text-amber-800 block">Menunggu / Proses</span>
+              <strong className="text-lg font-extrabold text-amber-950 tabular-nums">
+                {extraReports.psb.menunggu}
+              </strong>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="text-slate-500 block">Pembayaran Masuk PSB</span>
+              <strong className="text-base font-extrabold text-slate-900 tabular-nums">
+                {formatRupiah(extraReports.psb.totalBayar)}
+              </strong>
+            </div>
+          </div>
+
+          {extraReports.psb.detail.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">
+              Belum ada pendaftaran santri baru tercatat pada periode ini.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 text-left">
+                    <th className="p-2 border border-slate-200">Tanggal</th>
+                    <th className="p-2 border border-slate-200">No. Reg</th>
+                    <th className="p-2 border border-slate-200">Nama Calon Santri</th>
+                    <th className="p-2 border border-slate-200">Program / Asal</th>
+                    <th className="p-2 border border-slate-200">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {extraReports.psb.detail.map((row, i) => (
+                    <tr key={i}>
+                      <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                        {row.tanggal}
+                      </td>
+                      <td className="p-2 border border-slate-200 font-mono font-semibold text-slate-700">
+                        {row.noReg}
+                      </td>
+                      <td className="p-2 border border-slate-200 font-semibold text-slate-900">
+                        {row.nama}
+                      </td>
+                      <td className="p-2 border border-slate-200 text-slate-700">
+                        {row.program}
+                      </td>
+                      <td className="p-2 border border-slate-200 font-semibold text-slate-800">
+                        {row.status}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </>
+  );
+
   return (
     <div className="max-w-7xl mx-auto space-y-5 print:max-w-none print:space-y-0">
       {/* Aturan Cetak A4 untuk PDF Bersih */}
       <style jsx global>{`
+        [data-siap-hidden-personalia="true"] {
+          display: none !important;
+        }
         @media print {
           @page {
             size: A4 portrait;
@@ -1028,19 +1854,129 @@ export default function PusatLaporanPage() {
             </div>
           </div>
 
+          {/* Sumber tersembunyi Struktur Personalia baku (Bagian I Dewan Harian + Bagian II Pleno/Divisi A-K) */}
+          <div ref={personaliaSourceRef} className="hidden" aria-hidden="true">
+            <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
+                    Struktur Personalia Pengurus Aktif
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Susunan Dewan Harian &amp; Pleno Divisi (tidak termasuk Pengasuh, Dewan Pengasuh/Dzurriyah, dan Direktur Pendidikan)
+                  </p>
+                </div>
+                <span className="text-[11px] font-semibold text-slate-600">
+                  Total {strukturPersonalia.totalOperationalAssignments} Penugasan
+                </span>
+              </div>
+
+              {/* BAGIAN I: DEWAN HARIAN */}
+              <div className="space-y-1.5">
+                <h5 className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
+                  Bagian I · Dewan Harian
+                </h5>
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 text-left">
+                      <th className="p-2 border border-slate-200 w-10 text-center">No</th>
+                      <th className="p-2 border border-slate-200 w-56">Jabatan</th>
+                      <th className="p-2 border border-slate-200">Nama Pengurus</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {strukturPersonalia.dewanHarianSlots.map((slot) => (
+                      <tr key={slot.nomor}>
+                        <td className="p-2 border border-slate-200 text-center font-mono tabular-nums">
+                          {slot.nomor}
+                        </td>
+                        <td className="p-2 border border-slate-200 font-semibold text-slate-800">
+                          {slot.jabatan}
+                        </td>
+                        <td className="p-2 border border-slate-200 text-slate-900">
+                          {slot.names.length > 0 ? slot.names.join(', ') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* BAGIAN II: PLENO / DIVISI (A - K) */}
+              <div className="space-y-2">
+                <h5 className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
+                  Bagian II · Pleno / Divisi
+                </h5>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {strukturPersonalia.plenoSections.map((sec) => (
+                    <div
+                      key={sec.letter}
+                      className="border border-slate-200 rounded-lg overflow-hidden break-inside-avoid"
+                    >
+                      <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-extrabold text-slate-900">
+                          {sec.letter}. {sec.label}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-600 tabular-nums">
+                          {sec.members.length} Org
+                        </span>
+                      </div>
+                      {sec.members.length === 0 ? (
+                        <p className="px-3 py-2 text-[11px] italic text-slate-400">
+                          Belum ada personel ditugaskan
+                        </p>
+                      ) : (
+                        <table className="w-full text-[11px] border-collapse">
+                          <tbody>
+                            {sec.members.map((m, idx) => (
+                              <tr key={`${sec.letter}-${idx}`} className="border-t first:border-t-0 border-slate-100">
+                                <td className="px-2.5 py-1.5 w-6 text-slate-500 font-mono tabular-nums align-top">
+                                  {idx + 1}.
+                                </td>
+                                <td className="px-2 py-1.5 font-semibold text-slate-900 align-top">
+                                  {m.nama}
+                                </td>
+                                <td className="px-2.5 py-1.5 text-right text-slate-600 whitespace-nowrap align-top">
+                                  {m.peran}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sumber tersembunyi Divisi XI-XIII untuk disuntikkan ke dalam kontainer kertas laporan tepat setelah Divisi X & sebelum Lembar Pengesahan */}
+          <div ref={extraSourceRef} className="hidden" aria-hidden="true">
+            {scope === 'gabungan' &&
+              baseSelectedDivisions.length > 0 &&
+              extraSelectedDivisions.length > 0 &&
+              renderExtraDivisionSections()}
+          </div>
+
           <div className={`${mobilePreviewOpen ? 'block' : 'hidden'} lg:block print:block space-y-6 print:space-y-5`}>
             {!isExtraKey(scope) && (scope !== 'gabungan' || baseSelectedDivisions.length > 0) && (
-              <LaporanDocument
-                bundle={bundle}
-                scope={scope}
-                selectedDivisions={baseSelectedDivisions}
-                showCoverAndApproval={showCoverAndApproval}
-                showNotaLampiran={showNotaLampiran}
-                todayStr={todayStr}
-              />
+              <div ref={docWrapperRef}>
+                <LaporanDocument
+                  bundle={bundle}
+                  scope={scope}
+                  selectedDivisions={baseSelectedDivisions}
+                  showCoverAndApproval={showCoverAndApproval}
+                  showNotaLampiran={showNotaLampiran}
+                  todayStr={todayStr}
+                />
+              </div>
             )}
 
-            {(isExtraKey(scope) || (scope === 'gabungan' && extraSelectedDivisions.length > 0)) && (
+            {(isExtraKey(scope) ||
+              (scope === 'gabungan' &&
+                baseSelectedDivisions.length === 0 &&
+                extraSelectedDivisions.length > 0)) && (
               <div className="max-w-[210mm] mx-auto space-y-5 print:max-w-none">
                 {isExtraKey(scope) && showCoverAndApproval && (
                   <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-0 print:rounded-none print:p-0 print:pb-4 border-b-2 border-b-slate-800">
@@ -1057,266 +1993,75 @@ export default function PusatLaporanPage() {
                   </div>
                 )}
 
-                {(scope === 'kebersihan' ||
-                  (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'))) && (
-                  <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                          Divisi XI · Kebersihan &amp; Piket
-                        </span>
-                        <h3 className="text-base font-extrabold text-slate-900">
-                          Laporan Kebersihan Lingkungan &amp; Piket Kamar
-                        </h3>
-                      </div>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {periodWindow?.label}
-                      </span>
-                    </div>
+                {renderExtraDivisionSections()}
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Total Jadwal / Tugas</span>
-                        <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
-                          {extraReports.kebersihan.totalTugas}
-                        </strong>
-                        <span className="text-[11px] text-slate-500 block">
-                          Periode lalu: {extraReports.kebersihan.prevTotalTugas}
-                        </span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
-                        <span className="text-emerald-800 block">Selesai / Bersih</span>
-                        <strong className="text-lg font-extrabold text-emerald-950 tabular-nums">
-                          {extraReports.kebersihan.selesai}
-                        </strong>
-                      </div>
-                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-                        <span className="text-amber-800 block">Belum / Evaluasi</span>
-                        <strong className="text-lg font-extrabold text-amber-950 tabular-nums">
-                          {extraReports.kebersihan.belum}
-                        </strong>
-                      </div>
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Tingkat Kepatuhan</span>
-                        <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
-                          {extraReports.kebersihan.persenBersih}%
-                        </strong>
-                      </div>
-                    </div>
-
-                    {extraReports.kebersihan.detail.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic py-2">
-                        Belum ada catatan piket atau tugas kebersihan tercatat pada periode ini.
+                {showCoverAndApproval && (
+                  <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid">
+                    <div className="text-center border-b border-slate-200 pb-3 mb-6">
+                      <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
+                        Lembar Pengesahan
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        {pengaturanApproval.kota_surat}, {formatTanggalSuratIndo(todayStr)}
                       </p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-100 text-slate-700 text-left">
-                              <th className="p-2 border border-slate-200">Tanggal</th>
-                              <th className="p-2 border border-slate-200">Area / Kamar</th>
-                              <th className="p-2 border border-slate-200">Tugas / Petugas</th>
-                              <th className="p-2 border border-slate-200">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {extraReports.kebersihan.detail.map((row, i) => (
-                              <tr key={i}>
-                                <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                                  {row.tanggal}
-                                </td>
-                                <td className="p-2 border border-slate-200 font-semibold text-slate-800">
-                                  {row.area}
-                                </td>
-                                <td className="p-2 border border-slate-200 text-slate-700">{row.tugas}</td>
-                                <td className="p-2 border border-slate-200 font-semibold text-slate-800">
-                                  {row.status}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-                )}
-
-                {(scope === 'koperasi' ||
-                  (scope === 'gabungan' && extraSelectedDivisions.includes('koperasi'))) && (
-                  <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                          Divisi XII · Koperasi Pondok
-                        </span>
-                        <h3 className="text-base font-extrabold text-slate-900">
-                          Laporan Operasional &amp; Arus Kas Koperasi
-                        </h3>
-                      </div>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {periodWindow?.label}
-                      </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
-                        <span className="text-emerald-800 block">Pemasukan / Penjualan</span>
-                        <strong className="text-base font-extrabold text-emerald-950 tabular-nums">
-                          {formatRupiah(extraReports.koperasi.pemasukan)}
-                        </strong>
-                        <span className="text-[11px] text-emerald-700 block">
-                          Lalu: {formatRupiah(extraReports.koperasi.prevPemasukan)}
-                        </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
+                      <div className="space-y-2">
+                        <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
+                        <div className="h-16 flex items-center justify-center">
+                          {pengaturanApproval.ttd_sekretaris_url && (
+                            <img
+                              src={pengaturanApproval.ttd_sekretaris_url}
+                              alt="TTD Sekretaris"
+                              className="max-h-14 object-contain"
+                            />
+                          )}
+                        </div>
+                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                          {pengaturanApproval.nama_sekretaris}
+                        </p>
                       </div>
-                      <div className="p-3 rounded-lg bg-rose-50 border border-rose-200">
-                        <span className="text-rose-800 block">Pengeluaran / Kulaan</span>
-                        <strong className="text-base font-extrabold text-rose-950 tabular-nums">
-                          {formatRupiah(extraReports.koperasi.pengeluaran)}
-                        </strong>
+
+                      <div className="space-y-2">
+                        <p className="font-semibold text-slate-700">Kepala Pondok</p>
+                        <div className="h-16 flex items-center justify-center relative">
+                          {pengaturanApproval.stempel_url && (
+                            <img
+                              src={pengaturanApproval.stempel_url}
+                              alt="Stempel Pondok"
+                              className="max-h-14 object-contain opacity-80 absolute"
+                            />
+                          )}
+                          {pengaturanApproval.ttd_kepala_pondok_url && (
+                            <img
+                              src={pengaturanApproval.ttd_kepala_pondok_url}
+                              alt="TTD Kepala Pondok"
+                              className="max-h-14 object-contain relative z-10"
+                            />
+                          )}
+                        </div>
+                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                          {pengaturanApproval.nama_kepala_pondok}
+                        </p>
                       </div>
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Surplus Periode</span>
-                        <strong className="text-base font-extrabold text-slate-900 tabular-nums">
-                          {formatRupiah(extraReports.koperasi.surplus)}
-                        </strong>
-                      </div>
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Transaksi &amp; Produk</span>
-                        <strong className="text-base font-extrabold text-slate-900 tabular-nums">
-                          {extraReports.koperasi.totalTransaksi} Trx · {extraReports.koperasi.totalProduk} Item
-                        </strong>
+
+                      <div className="space-y-2">
+                        <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
+                        <div className="h-16 flex items-center justify-center">
+                          {pengaturanApproval.ttd_pengasuh_url && (
+                            <img
+                              src={pengaturanApproval.ttd_pengasuh_url}
+                              alt="TTD Pengasuh"
+                              className="max-h-14 object-contain"
+                            />
+                          )}
+                        </div>
+                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                          {pengaturanApproval.nama_pengasuh}
+                        </p>
                       </div>
                     </div>
-
-                    {extraReports.koperasi.detail.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic py-2">
-                        Belum ada transaksi koperasi tercatat pada periode ini.
-                      </p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-100 text-slate-700 text-left">
-                              <th className="p-2 border border-slate-200">Tanggal</th>
-                              <th className="p-2 border border-slate-200">Keterangan / Barang</th>
-                              <th className="p-2 border border-slate-200">Jenis / Metode</th>
-                              <th className="p-2 border border-slate-200 text-right">Nominal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {extraReports.koperasi.detail.map((row, i) => (
-                              <tr key={i}>
-                                <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                                  {row.tanggal}
-                                </td>
-                                <td className="p-2 border border-slate-200 font-semibold text-slate-800">
-                                  {row.keterangan}
-                                </td>
-                                <td className="p-2 border border-slate-200 text-slate-700">{row.jenis}</td>
-                                <td
-                                  className={`p-2 border border-slate-200 text-right font-mono font-bold tabular-nums ${
-                                    row.isKeluar ? 'text-rose-700' : 'text-emerald-800'
-                                  }`}
-                                >
-                                  {row.isKeluar ? '-' : '+'}
-                                  {formatRupiah(row.nominal)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-                )}
-
-                {(scope === 'psb' ||
-                  (scope === 'gabungan' && extraSelectedDivisions.includes('psb'))) && (
-                  <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                          Divisi XIII · Pendaftaran Santri Baru (PSB)
-                        </span>
-                        <h3 className="text-base font-extrabold text-slate-900">
-                          Laporan Penerimaan &amp; Verifikasi Calon Santri Baru
-                        </h3>
-                      </div>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {periodWindow?.label}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Pendaftar Periode Ini</span>
-                        <strong className="text-lg font-extrabold text-slate-900 tabular-nums">
-                          {extraReports.psb.pendaftarPeriode}
-                        </strong>
-                        <span className="text-[11px] text-slate-500 block">
-                          Total data PSB: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
-                        </span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
-                        <span className="text-emerald-800 block">Terverifikasi / Diterima</span>
-                        <strong className="text-lg font-extrabold text-emerald-950 tabular-nums">
-                          {extraReports.psb.terverifikasi}
-                        </strong>
-                      </div>
-                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-                        <span className="text-amber-800 block">Menunggu / Proses</span>
-                        <strong className="text-lg font-extrabold text-amber-950 tabular-nums">
-                          {extraReports.psb.menunggu}
-                        </strong>
-                      </div>
-                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                        <span className="text-slate-500 block">Pembayaran Masuk PSB</span>
-                        <strong className="text-base font-extrabold text-slate-900 tabular-nums">
-                          {formatRupiah(extraReports.psb.totalBayar)}
-                        </strong>
-                      </div>
-                    </div>
-
-                    {extraReports.psb.detail.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic py-2">
-                        Belum ada pendaftaran santri baru tercatat pada periode ini.
-                      </p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-100 text-slate-700 text-left">
-                              <th className="p-2 border border-slate-200">Tanggal</th>
-                              <th className="p-2 border border-slate-200">No. Reg</th>
-                              <th className="p-2 border border-slate-200">Nama Calon Santri</th>
-                              <th className="p-2 border border-slate-200">Program / Asal</th>
-                              <th className="p-2 border border-slate-200">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {extraReports.psb.detail.map((row, i) => (
-                              <tr key={i}>
-                                <td className="p-2 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                                  {row.tanggal}
-                                </td>
-                                <td className="p-2 border border-slate-200 font-mono font-semibold text-slate-700">
-                                  {row.noReg}
-                                </td>
-                                <td className="p-2 border border-slate-200 font-semibold text-slate-900">
-                                  {row.nama}
-                                </td>
-                                <td className="p-2 border border-slate-200 text-slate-700">
-                                  {row.program}
-                                </td>
-                                <td className="p-2 border border-slate-200 font-semibold text-slate-800">
-                                  {row.status}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </section>
                 )}
               </div>
