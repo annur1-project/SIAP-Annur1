@@ -5,9 +5,6 @@ import {
   AlertCircle,
   Building2,
   CheckCircle2,
-  Copy,
-  Database,
-  Download,
   Landmark,
   Palette,
   Save,
@@ -19,7 +16,6 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
-import { E_ANNURSATU_UPGRADE_SQL } from '@/lib/sql-schema';
 import { supabase } from '@/lib/supabase';
 import {
   applyThemeToDocument,
@@ -103,7 +99,6 @@ export default function PengaturanPage() {
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [todayStr, setTodayStr] = useState('');
-  const [showSqlCard, setShowSqlCard] = useState(false);
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -699,14 +694,6 @@ export default function PengaturanPage() {
               </Link>
               <button
                 type="button"
-                onClick={() => setShowSqlCard((v) => !v)}
-                className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <Database className="w-3.5 h-3.5 text-emerald-700" />
-                Skema SQL &amp; RLS
-              </button>
-              <button
-                type="button"
                 disabled={saving}
                 onClick={() => handleSavePengaturan()}
                 className="w-full sm:w-auto min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
@@ -751,58 +738,6 @@ export default function PengaturanPage() {
               ))}
           </div>
         </section>
-      )}
-
-      {isSuperAdmin && showSqlCard && (
-        <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-700 p-4 sm:p-5 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                <Database className="w-4 h-4 text-emerald-400" />
-                Skrip Migrasi Supabase PostgreSQL &amp; RLS (e-annursatu)
-              </h2>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Salin dan jalankan di Supabase SQL Editor untuk mengaktifkan tabel Kebersihan, Koperasi, Dapur 2 Buku, dan RLS Multi-Jabatan.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(E_ANNURSATU_UPGRADE_SQL);
-                    showToast('success', 'Skrip SQL berhasil disalin ke clipboard.');
-                  } catch {
-                    showToast('error', 'Gagal menyalin skrip SQL.');
-                  }
-                }}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                Salin SQL
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const blob = new Blob([E_ANNURSATU_UPGRADE_SQL], { type: 'text/sql;charset=utf-8' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = 'e-annursatu-supabase-upgrade.sql';
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 border border-slate-600 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Unduh .sql
-              </button>
-            </div>
-          </div>
-          <pre className="max-h-56 overflow-auto rounded-xl bg-slate-950 p-3 text-[11px] font-mono text-emerald-200 border border-slate-800">
-            {E_ANNURSATU_UPGRADE_SQL}
-          </pre>
-        </div>
       )}
 
       {/* NAVIGASI 5 TAB (Hanya tampil untuk Super Admin) */}

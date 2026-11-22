@@ -26,7 +26,7 @@ export type HariLaundryKey =
   | 'sabtu'
   | 'ahad';
 
-export type HariOperasionalKey = Exclude<HariLaundryKey, 'jumat'>;
+export type HariOperasionalKey = HariLaundryKey;
 export type StatusLaundry = 'masuk' | 'selesai';
 export type TipeSetoranLaundry = 'terjadwal' | 'susulan';
 
@@ -125,8 +125,11 @@ export function getHariKeyFromIso(isoDate: string): HariLaundryKey {
   return map[dt.getDay()] || 'senin';
 }
 
-export function isHariLiburLaundry(isoDate: string): boolean {
-  return getHariKeyFromIso(isoDate) === 'jumat';
+export function isHariLiburLaundry(
+  isoDate: string,
+  hariLibur: HariLaundryKey = 'jumat'
+): boolean {
+  return getHariKeyFromIso(isoDate) === hariLibur;
 }
 
 export function getCurrentHmLocal(): string {
@@ -184,9 +187,9 @@ export function buildDefaultJadwalKamar(): LaundryJadwalKamar[] {
 
 function normalizeJadwalRows(rows: LaundryJadwalKamar[]): LaundryJadwalKamar[] {
   const defaults = buildDefaultJadwalKamar();
-  const byKey = new Map<HariOperasionalKey, LaundryJadwalKamar>();
+  const byKey = new Map<HariLaundryKey, LaundryJadwalKamar>();
   for (const r of rows) {
-    if (r.hari_key && r.hari_key !== ('jumat' as string)) {
+    if (r.hari_key && HARI_LABEL_MAP[r.hari_key]) {
       byKey.set(r.hari_key, {
         ...r,
         hari_label: HARI_LABEL_MAP[r.hari_key] || r.hari_label,
@@ -194,7 +197,12 @@ function normalizeJadwalRows(rows: LaundryJadwalKamar[]): LaundryJadwalKamar[] {
       });
     }
   }
-  return defaults.map((def) => byKey.get(def.hari_key) || def);
+  const merged = defaults.map((def) => byKey.get(def.hari_key) || def);
+  const extraJumat = byKey.get('jumat');
+  if (extraJumat) {
+    merged.push(extraJumat);
+  }
+  return merged;
 }
 
 export async function fetchLaundryJadwal(): Promise<LaundryJadwalKamar[]> {
@@ -215,9 +223,10 @@ export async function saveLaundryJadwalDay(
 ): Promise<LaundryJadwalKamar> {
   const currentLocal = readLocalArray<LaundryJadwalKamar>(LS_LAUNDRY_JADWAL_KEY);
   const normalizedBase = normalizeJadwalRows(currentLocal);
-  const nextLocal = normalizedBase.map((r) =>
-    r.hari_key === item.hari_key ? item : r
-  );
+  const exists = normalizedBase.some((r) => r.hari_key === item.hari_key);
+  const nextLocal = exists
+    ? normalizedBase.map((r) => (r.hari_key === item.hari_key ? item : r))
+    : [...normalizedBase, item];
   writeLocalArray(LS_LAUNDRY_JADWAL_KEY, nextLocal);
 
   try {

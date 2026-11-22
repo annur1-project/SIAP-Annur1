@@ -1529,7 +1529,7 @@ export default function PendaftaranInternalPage() {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Tanggal Masuk Resmi (NIS {tglMasukAktual.slice(2, 4) || dynamicPsbInfo.nisPrefix || 'XX'}XXXX) *
+                        Tanggal Masuk Resmi (NIS {tglMasukAktual.slice(2, 4) || String(skema.tahun_psb || dynamicPsbInfo.tahunPsb || '').slice(-2) || 'XX'}XXXX) *
                       </label>
                       <input
                         type="date"

@@ -416,21 +416,21 @@ export default function KalenderPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="bg-white/10 border border-white/15 rounded-xl px-4 py-2.5 backdrop-blur-xs">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 w-full lg:w-auto">
+            <div className="bg-white/10 border border-white/15 rounded-xl px-4 py-2.5 backdrop-blur-xs w-full sm:w-auto">
               <p className="text-[11px] text-white/80 font-medium">Waktu Sholat Berikutnya</p>
-              <div className="flex items-baseline gap-2.5 mt-0.5">
+              <div className="flex items-baseline justify-between w-full gap-3 mt-0.5">
                 <span className="text-base sm:text-lg font-extrabold text-white tabular-nums">
                   {nextPrayerToday.nextName} {nextPrayerToday.nextTime} WIB
                 </span>
-                <span className="text-xs font-mono text-white/80 tabular-nums">
+                <span className="text-xs font-mono text-white/80 tabular-nums shrink-0">
                   {nextPrayerToday.remainingFormatted}
                 </span>
               </div>
             </div>
 
-            <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 flex items-center gap-2">
-              <span className="text-[11px] font-medium text-white/90 whitespace-nowrap">
+            <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-[11px] font-medium text-white/90 whitespace-nowrap shrink-0">
                 Koreksi Hijriyah:
               </span>
               <select
@@ -438,7 +438,7 @@ export default function KalenderPage() {
                 disabled={!canEdit}
                 value={koreksiHijriyah}
                 onChange={(e) => handleUpdateKoreksi(Number(e.target.value))}
-                className="bg-black/30 border border-white/25 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                className="w-full flex-1 bg-black/30 border border-white/25 text-white text-xs font-bold rounded-lg px-2.5 py-1.5 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <option value={-2} className="bg-slate-900 text-white">-2 hari</option>
                 <option value={-1} className="bg-slate-900 text-white">-1 hari</option>

@@ -864,29 +864,31 @@ export default function KegiatanPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={loading}
-              className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Muat Ulang
-            </button>
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              className="min-h-[40px] px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
-              Export Excel
-            </button>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full md:w-auto shrink-0">
+            <div className="grid grid-cols-2 w-full gap-2 sm:flex sm:w-auto sm:items-center">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={loading}
+                className="min-h-[40px] w-full sm:w-auto justify-center px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Muat Ulang
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="min-h-[40px] w-full sm:w-auto justify-center px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 siap-text-accent" />
+                Export Excel
+              </button>
+            </div>
             {canEdit && (
               <button
                 type="button"
                 onClick={() => setAgendaModal({ open: true, editing: null })}
-                className="min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="min-h-[40px] w-full sm:w-auto justify-center px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 Jadwalkan Kegiatan
@@ -937,42 +939,46 @@ export default function KegiatanPage() {
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit overflow-x-auto">
+        <div className="grid grid-cols-3 sm:inline-flex items-stretch sm:items-center gap-1 sm:gap-1.5 p-1 bg-slate-200/70 rounded-xl w-full sm:w-fit">
           <button
             type="button"
             onClick={() => setMainTab('agenda')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               mainTab === 'agenda'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Calendar className="w-3.5 h-3.5" />
-            Agenda &amp; Jadwal
+            <Calendar className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+            <span>Agenda &amp; Jadwal</span>
           </button>
           <button
             type="button"
             onClick={() => setMainTab('format')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               mainTab === 'format'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" />
-            Format Pengisi ({formats.length})
+            <Layers className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+            <span>
+              Format Pengisi
+              <span className="hidden sm:inline"> ({formats.length})</span>
+            </span>
           </button>
           <button
             type="button"
             onClick={() => setMainTab('arsip')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[38px] px-1.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 transition-colors text-center leading-tight sm:whitespace-nowrap ${
               mainTab === 'arsip'
                 ? 'bg-white siap-text-accent shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Archive className="w-3.5 h-3.5" />
-            Arsip &amp; Dokumentasi
+            <Archive className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+            <span className="sm:hidden">Arsip</span>
+            <span className="hidden sm:inline">Arsip &amp; Dokumentasi</span>
           </button>
         </div>
 
