@@ -1230,8 +1230,8 @@ export default function DashboardPage() {
           </button>
           <Link
             href="/santri"
-            style={{ color: 'var(--siap-sidebar)' }}
-            className="col-span-2 sm:col-span-1 min-h-[38px] px-3.5 py-1.5 bg-white text-xs font-bold rounded-xl shadow-xs hover:bg-slate-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            style={{ backgroundColor: '#ffffff', color: 'var(--siap-sidebar)' }}
+            className="col-span-2 sm:col-span-1 min-h-[38px] px-3.5 py-1.5 bg-white dark:!bg-white text-xs font-bold rounded-xl shadow-xs hover:bg-slate-50 dark:hover:!bg-slate-100 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             Data Santri

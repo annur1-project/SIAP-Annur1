@@ -19,13 +19,17 @@
   --siap-primary-soft-hover: color-mix(in srgb, var(--siap-primary) 19%, transparent);
   --siap-primary-border: color-mix(in srgb, var(--siap-primary) 32%, transparent);
   --siap-primary-text: var(--siap-primary);
+  --siap-primary-bright: var(--siap-primary);
+  --theme-primary: var(--siap-primary);
 }
 
 html.dark {
-  --siap-primary-soft: color-mix(in srgb, var(--siap-primary) 22%, transparent);
-  --siap-primary-soft-hover: color-mix(in srgb, var(--siap-primary) 32%, transparent);
-  --siap-primary-border: color-mix(in srgb, var(--siap-primary) 44%, transparent);
-  --siap-primary-text: color-mix(in srgb, var(--siap-primary) 54%, #ffffff);
+  --siap-primary-bright: color-mix(in srgb, var(--siap-primary) 76%, #ffffff);
+  --theme-primary: var(--siap-primary-bright);
+  --siap-primary-soft: color-mix(in srgb, var(--siap-primary) 24%, transparent);
+  --siap-primary-soft-hover: color-mix(in srgb, var(--siap-primary) 34%, transparent);
+  --siap-primary-border: color-mix(in srgb, var(--siap-primary) 50%, rgba(255, 255, 255, 0.18));
+  --siap-primary-text: color-mix(in srgb, var(--siap-primary) 46%, #ffffff);
 }
 
 @theme inline {
@@ -208,61 +212,113 @@ html[data-theme-resolved="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):n
     color: #f1f5f9;
   }
 
+  html.dark .siap-btn-primary,
+  html.dark .siap-progress-fill,
+  html.dark [data-siap-nav-active="true"],
+  html.dark main .bg-emerald-600:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .bg-emerald-700:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .bg-emerald-800:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark[data-theme-custom-accent="true"] .bg-emerald-600:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark[data-theme-custom-accent="true"] .bg-emerald-700:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark[data-theme-custom-accent="true"] .bg-emerald-800:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark[data-theme-custom-accent="true"] .bg-\[\#065f46\]:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    background-color: var(--theme-primary);
+    color: #ffffff;
+  }
+
+  html.dark .siap-btn-primary:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--theme-primary) 88%, #ffffff);
+  }
+
+  html.dark .siap-btn-outline {
+    border-color: var(--siap-primary-text);
+    color: var(--siap-primary-text);
+  }
+
   html.dark main .bg-white:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-white\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/75:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/80:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/85:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-white\/90:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-white\/95:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *) {
     background-color: #111827;
-    border-color: #1e293b;
+    border-color: rgba(255, 255, 255, 0.16);
     color: #f1f5f9;
   }
 
   html.dark main .bg-slate-50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-50\/40:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-slate-50\/50:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-slate-50\/60:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-slate-50\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-50\/80:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-slate-100:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
+  html.dark main .bg-slate-100\/70:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *),
   html.dark main .bg-slate-200:not(#pusat-laporan-dokumen):not(#pusat-laporan-dokumen *):not(.print-clean-surface):not(.print-clean-surface *) {
     background-color: #0f172a;
-    border-color: #1e293b;
+    border-color: rgba(255, 255, 255, 0.16);
     color: #e2e8f0;
   }
 
-  html.dark main .hover\:bg-slate-50:hover:not(#pusat-laporan-dokumen *),
-  html.dark main .hover\:bg-slate-100:hover:not(#pusat-laporan-dokumen *) {
-    background-color: #1e293b;
+  html.dark main button.bg-white:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main button.bg-slate-50:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main button.bg-slate-100:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main a.bg-white:not(.siap-hero a):not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main a.bg-slate-50:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main a.bg-slate-100:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    background-color: #172136;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f1f5f9;
+  }
+
+  html.dark main .hover\:bg-white:hover:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .hover\:bg-slate-50:hover:not(.siap-hero *):not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .hover\:bg-slate-100:hover:not(.siap-hero *):not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    background-color: #22304a;
   }
 
   html.dark main .bg-emerald-50:not(#pusat-laporan-dokumen *),
   html.dark main .bg-emerald-50\/70:not(#pusat-laporan-dokumen *),
-  html.dark main .bg-emerald-50\/80:not(#pusat-laporan-dokumen *) {
+  html.dark main .bg-emerald-50\/80:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-emerald-100:not(#pusat-laporan-dokumen *) {
     background-color: var(--siap-primary-soft);
     border-color: var(--siap-primary-border);
     color: color-mix(in srgb, var(--siap-primary) 25%, #f8fafc);
   }
 
   html.dark main .bg-amber-50:not(#pusat-laporan-dokumen *),
-  html.dark main .bg-amber-50\/70:not(#pusat-laporan-dokumen *) {
-    background-color: rgba(120, 53, 15, 0.28);
-    border-color: rgba(245, 158, 11, 0.35);
+  html.dark main .bg-amber-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-amber-50\/80:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-amber-100:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(120, 53, 15, 0.3);
+    border-color: rgba(245, 158, 11, 0.42);
     color: #fef3c7;
   }
 
   html.dark main .bg-rose-50:not(#pusat-laporan-dokumen *),
   html.dark main .bg-rose-50\/60:not(#pusat-laporan-dokumen *),
   html.dark main .bg-rose-50\/70:not(#pusat-laporan-dokumen *),
-  html.dark main .bg-rose-50\/80:not(#pusat-laporan-dokumen *) {
-    background-color: rgba(136, 19, 55, 0.28);
-    border-color: rgba(244, 63, 94, 0.38);
+  html.dark main .bg-rose-50\/80:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-rose-100:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(136, 19, 55, 0.3);
+    border-color: rgba(244, 63, 94, 0.42);
     color: #ffe4e6;
   }
 
   html.dark main .bg-sky-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-sky-50\/55:not(#pusat-laporan-dokumen *),
   html.dark main .bg-sky-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-sky-50\/80:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-sky-100:not(#pusat-laporan-dokumen *),
   html.dark main .bg-indigo-50:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-indigo-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-indigo-100:not(#pusat-laporan-dokumen *),
   html.dark main .bg-purple-50:not(#pusat-laporan-dokumen *),
-  html.dark main .bg-purple-50\/70:not(#pusat-laporan-dokumen *) {
-    background-color: rgba(30, 58, 138, 0.26);
-    border-color: rgba(96, 165, 250, 0.32);
+  html.dark main .bg-purple-50\/70:not(#pusat-laporan-dokumen *),
+  html.dark main .bg-purple-100:not(#pusat-laporan-dokumen *) {
+    background-color: rgba(30, 58, 138, 0.3);
+    border-color: rgba(96, 165, 250, 0.38);
     color: #e0f2fe;
   }
 
@@ -289,9 +345,19 @@ html[data-theme-resolved="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):n
     color: var(--siap-primary-text);
   }
 
+  html.dark main .text-sky-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-sky-800:not(#pusat-laporan-dokumen *) {
+    color: #7dd3fc;
+  }
+
   html.dark main .text-sky-900:not(#pusat-laporan-dokumen *),
   html.dark main .text-sky-950:not(#pusat-laporan-dokumen *) {
     color: #bae6fd;
+  }
+
+  html.dark main .text-amber-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-amber-800:not(#pusat-laporan-dokumen *) {
+    color: #fcd34d;
   }
 
   html.dark main .text-amber-900:not(#pusat-laporan-dokumen *),
@@ -299,38 +365,88 @@ html[data-theme-resolved="warm"] main .bg-slate-50:not(#pusat-laporan-dokumen):n
     color: #fde68a;
   }
 
+  html.dark main .text-rose-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-rose-800:not(#pusat-laporan-dokumen *) {
+    color: #fda4af;
+  }
+
   html.dark main .text-rose-900:not(#pusat-laporan-dokumen *),
   html.dark main .text-rose-950:not(#pusat-laporan-dokumen *) {
     color: #fecdd3;
   }
 
+  html.dark main .text-indigo-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-indigo-800:not(#pusat-laporan-dokumen *),
+  html.dark main .text-indigo-900:not(#pusat-laporan-dokumen *) {
+    color: #c7d2fe;
+  }
+
+  html.dark main .text-purple-700:not(#pusat-laporan-dokumen *),
+  html.dark main .text-purple-800:not(#pusat-laporan-dokumen *),
   html.dark main .text-purple-900:not(#pusat-laporan-dokumen *),
   html.dark main .text-purple-950:not(#pusat-laporan-dokumen *) {
     color: #e9d5ff;
   }
 
-  html.dark main .border-slate-300:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
   html.dark main .border-slate-200:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
   html.dark main .border-slate-100:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
-    border-color: #1e293b;
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  html.dark main .border-slate-300:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+
+  html.dark main .border-sky-200:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main .border-sky-200\/80:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    border-color: rgba(125, 211, 252, 0.28);
+  }
+
+  html.dark main .border-rose-200:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    border-color: rgba(251, 113, 133, 0.35);
+  }
+
+  html.dark main .border-amber-200:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
+    border-color: rgba(251, 191, 36, 0.35);
   }
 
   html.dark main .divide-slate-100 > :not(:last-child),
-  html.dark main .divide-slate-200 > :not(:last-child) {
-    border-color: #1e293b;
+  html.dark main .divide-slate-200 > :not(:last-child),
+  html.dark main .divide-sky-100 > :not(:last-child) {
+    border-color: rgba(255, 255, 255, 0.16);
   }
 
-  html.dark main input:not(#pusat-laporan-dokumen *):not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-  html.dark main select:not(#pusat-laporan-dokumen *),
-  html.dark main textarea:not(#pusat-laporan-dokumen *) {
+  html.dark main input:not(#pusat-laporan-dokumen *):not(.print-clean-surface *):not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  html.dark main select:not(#pusat-laporan-dokumen *):not(.print-clean-surface *),
+  html.dark main textarea:not(#pusat-laporan-dokumen *):not(.print-clean-surface *) {
     background-color: #0f172a;
-    border-color: #334155;
-    color: #f1f5f9;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f8fafc;
+  }
+
+  html.dark main input:not(#pusat-laporan-dokumen *):not(.print-clean-surface *):not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+  html.dark main select:not(#pusat-laporan-dokumen *):not(.print-clean-surface *):focus,
+  html.dark main textarea:not(#pusat-laporan-dokumen *):not(.print-clean-surface *):focus {
+    border-color: var(--siap-primary-text);
   }
 
   html.dark [data-siap-mobile-bottom-nav] {
     background-color: rgba(15, 23, 42, 0.96);
-    border-color: #1e293b;
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  html.dark [data-siap-mobile-bottom-nav] .siap-text-accent,
+  html.dark [data-siap-mobile-bottom-nav] .text-emerald-700,
+  html.dark [data-siap-mobile-bottom-nav] .text-emerald-800,
+  html.dark [data-siap-mobile-bottom-nav] .text-emerald-600 {
+    color: var(--siap-primary-text);
+  }
+
+  html.dark [data-siap-mobile-bottom-nav] [data-siap-nav-active="true"],
+  html.dark [data-siap-mobile-bottom-nav] [aria-current="page"],
+  html.dark [data-siap-mobile-bottom-nav] [data-active="true"] {
+    background-color: var(--theme-primary);
+    color: #ffffff;
   }
 }
 

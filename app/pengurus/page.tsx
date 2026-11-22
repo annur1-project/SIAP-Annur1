@@ -174,6 +174,31 @@ function isTenDivisi(divisi: string): boolean {
   return (SEPULUH_DIVISI as readonly string[]).includes(divisi);
 }
 
+// Jabatan puncak di atas Kepala Pondok tidak dihitung sebagai "Pengurus Aktif" operasional
+function isExcludedTopDivisi(divisi: string): boolean {
+  const norm = normalizeDivisi(divisi || "").trim().toLowerCase();
+  return (
+    norm === "pengasuh pondok" ||
+    norm === "pengasuh" ||
+    norm.startsWith("dewan pengasuh") ||
+    norm.includes("dzurriyah") ||
+    norm === "direktur pendidikan"
+  );
+}
+
+function getOperasionalJabatanList(person: PengurusItem): JabatanItem[] {
+  return (person.jabatan_list || []).filter((j) => {
+    if (isExcludedTopDivisi(j.divisi)) return false;
+    if (isExcludedTopDivisi(j.nama_jabatan)) return false;
+    return true;
+  });
+}
+
+function isPengurusAktifOperasional(person: PengurusItem): boolean {
+  if (person.status !== "aktif") return false;
+  return getOperasionalJabatanList(person).length > 0;
+}
+
 // Bersihkan nama posisi di dalam divisi (mengatasi data lama yang isinya sama dengan nama divisi)
 function resolveCleanDivisiRole(jab: {
   divisi: string;
@@ -658,17 +683,29 @@ export default function DataPengurusPage() {
   }, [pengurusList, masaKhidmat]);
 
   const stats = useMemo(() => {
-    const aktifList = pengurusByMasaKhidmat.filter((p) => p.status === "aktif");
+    const aktifList = pengurusByMasaKhidmat.filter(isPengurusAktifOperasional);
     const totalPersonel = aktifList.length;
-    const totalPosisi = aktifList.reduce((acc, p) => acc + p.jabatan_list.length, 0);
-    const rangkapJabatan = aktifList.filter((p) => p.jabatan_list.length > 1).length;
+    const totalPosisi = aktifList.reduce(
+      (acc, p) => acc + getOperasionalJabatanList(p).length,
+      0
+    );
+    const rangkapJabatan = aktifList.filter(
+      (p) => getOperasionalJabatanList(p).length > 1
+    ).length;
     const totalBisyaroh = aktifList.reduce((acc, p) => acc + (p.nominal_bisyaroh || 0), 0);
     return { totalPersonel, totalPosisi, rangkapJabatan, totalBisyaroh };
   }, [pengurusByMasaKhidmat]);
 
   const filteredPengurus = useMemo(() => {
     const filtered = pengurusByMasaKhidmat.filter((p) => {
-      const matchStatus = filterStatus === "semua" ? true : p.status === filterStatus;
+      const matchStatus =
+        filterStatus === "semua"
+          ? true
+          : filterStatus === "aktif"
+          ? isExcludedTopDivisi(filterDivisi)
+            ? p.status === "aktif"
+            : isPengurusAktifOperasional(p)
+          : p.status === filterStatus;
       const matchDivisi =
         filterDivisi === "semua"
           ? true
@@ -1644,7 +1681,7 @@ export default function DataPengurusPage() {
             <Users className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Personel Aktif</p>
+            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">Pengurus Aktif</p>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-xl sm:text-2xl font-bold text-slate-800 tabular-nums">{stats.totalPersonel}</span>
               <span className="text-[11px] text-slate-400">Orang</span>
