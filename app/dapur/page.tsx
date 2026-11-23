@@ -17,10 +17,8 @@ import {
   Printer,
   FileSpreadsheet,
   Wallet,
-  TrendingUp,
   TrendingDown,
   Users,
-  UserPlus,
   UserCheck,
   BarChart3,
   Calendar,
@@ -49,15 +47,12 @@ import {
   type DapurKasItem,
   type DapurBukuMasakItem,
   type DapurJualanMalamItem,
-  type TipeBukuMasak,
-  type TipeJualanMalam,
   type StatusAbsenPetugas,
   type JenisKasDapur,
   SHIFT_TARGET_TIME,
   DEFAULT_JATAH_MASAK_HARIAN,
   LS_DAPUR_SESI_KEY,
   LS_DAPUR_MENU_KEY,
-  LS_DAPUR_PETUGAS_KEY,
   LS_DAPUR_ABSEN_KEY,
   LS_DAPUR_KAS_KEY,
   LS_DAPUR_BUKU_MASAK_KEY,
@@ -93,6 +88,8 @@ interface PengurusSourceRow {
   nama_lengkap: string;
   no_wa?: string | null;
   status?: string | null;
+  divisi?: string | null;
+  jabatan?: string | null;
   jabatan_list?: Array<{
     divisi?: string;
     nama_jabatan?: string;
@@ -119,6 +116,17 @@ function formatMonthLabel(ym: string): string {
   return `${NAMA_BULAN[idx] || m} ${y}`;
 }
 
+function createUuidFallback(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export default function DapurPage() {
   const { canEditModule, pengurus } = useAuth();
   const canEditDapur = canEditModule('dapur');
@@ -136,8 +144,9 @@ export default function DapurPage() {
   // Core Data States
   const [sesiList, setSesiList] = useState<DapurSesiMasak[]>([]);
   const [menuList, setMenuList] = useState<DapurMenuJadwal[]>([]);
-  const [petugasList, setPetugasList] = useState<DapurPetugas[]>([]);
   const [absenList, setAbsenList] = useState<DapurAbsenPetugas[]>([]);
+  const [absenDbError, setAbsenDbError] = useState<string | null>(null);
+  const [absenSavingKey, setAbsenSavingKey] = useState<string | null>(null);
   const [kasList, setKasList] = useState<DapurKasItem[]>([]);
   const [bukuMasakList, setBukuMasakList] = useState<DapurBukuMasakItem[]>([]);
   const [jualanMalamList, setJualanMalamList] = useState<DapurJualanMalamItem[]>([]);
@@ -165,10 +174,6 @@ export default function DapurPage() {
   // Tab 3: Absen & Petugas States
   const [absenShiftView, setAbsenShiftView] = useState<DapurShift>('pagi');
   const [absenSearch, setAbsenSearch] = useState<string>('');
-  const [showPetugasModal, setShowPetugasModal] = useState<boolean>(false);
-  const [newPetugasNama, setNewPetugasNama] = useState<string>('');
-  const [newPetugasJabatan, setNewPetugasJabatan] = useState<string>('Petugas Dapur');
-  const [newPetugasWa, setNewPetugasWa] = useState<string>('');
   const [editingKetTarget, setEditingKetTarget] = useState<{
     petugas: DapurPetugas;
     shift: DapurShift;
@@ -213,7 +218,7 @@ export default function DapurPage() {
 
   // Delete confirmation modal
   const [deleteDialog, setDeleteDialog] = useState<{
-    kind: 'menu' | 'petugas' | 'kas' | 'buku_masak' | 'jualan_malam';
+    kind: 'menu' | 'kas' | 'buku_masak' | 'jualan_malam';
     id: string;
     label: string;
   } | null>(null);
@@ -252,7 +257,7 @@ export default function DapurPage() {
   const loadAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sesiRes, menuRes, petugasRes, absenRes, kasRes, bukuMasakRes, jualanMalamRes, pengurusRes] =
+      const [sesiRes, menuRes, absenRes, kasRes, bukuMasakRes, jualanMalamRes, pengurusRes] =
         await Promise.all([
           fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY, {
             col: 'tanggal',
@@ -262,14 +267,10 @@ export default function DapurPage() {
             col: 'tanggal',
             ascending: true,
           }),
-          fetchTableWithFallback<DapurPetugas>('dapur_petugas', LS_DAPUR_PETUGAS_KEY, {
-            col: 'nama',
-            ascending: true,
-          }),
-          fetchTableWithFallback<DapurAbsenPetugas>('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, {
-            col: 'tanggal',
-            ascending: false,
-          }),
+          supabase
+            .from('dapur_absen_petugas')
+            .select('*')
+            .order('tanggal', { ascending: false }),
           fetchTableWithFallback<DapurKasItem>('dapur_kas', LS_DAPUR_KAS_KEY, {
             col: 'tanggal',
             ascending: false,
@@ -288,18 +289,61 @@ export default function DapurPage() {
 
       setSesiList(sesiRes.rows);
       setMenuList(menuRes.rows);
-      setPetugasList(petugasRes.rows);
-      setAbsenList(absenRes.rows);
+
+      if (!absenRes.error && Array.isArray(absenRes.data)) {
+        const rows = absenRes.data as DapurAbsenPetugas[];
+        setAbsenList(rows);
+        setAbsenDbError(null);
+        writeLocalArray(LS_DAPUR_ABSEN_KEY, rows);
+      } else {
+        const msg = extractSupabaseError(
+          absenRes.error,
+          'Gagal memuat data absensi petugas dapur dari Supabase.'
+        );
+        setAbsenDbError(msg);
+        const fallbackAbsen = await fetchTableWithFallback<DapurAbsenPetugas>(
+          'dapur_absen_petugas',
+          LS_DAPUR_ABSEN_KEY,
+          { col: 'tanggal', ascending: false }
+        );
+        setAbsenList(fallbackAbsen.rows);
+      }
+
       setKasList(kasRes.rows);
       setBukuMasakList(bukuMasakRes.rows);
       setJualanMalamList(jualanMalamRes.rows);
 
-      if (!pengurusRes.error && Array.isArray(pengurusRes.data)) {
-        const activePengurus = (pengurusRes.data as PengurusSourceRow[]).filter(
-          (p) => !p.status || p.status === 'aktif'
-        );
-        setPengurusSource(activePengurus);
+      let loadedPengurus: PengurusSourceRow[] = [];
+      if (!pengurusRes.error && Array.isArray(pengurusRes.data) && pengurusRes.data.length > 0) {
+        loadedPengurus = pengurusRes.data as PengurusSourceRow[];
+      } else {
+        const [pgFallback, pjFallback] = await Promise.all([
+          supabase.from('pengurus').select('*').order('nama_lengkap', { ascending: true }),
+          supabase.from('pengurus_jabatan').select('*'),
+        ]);
+        if (!pgFallback.error && Array.isArray(pgFallback.data)) {
+          const jabRows = (
+            !pjFallback.error && Array.isArray(pjFallback.data) ? pjFallback.data : []
+          ) as Array<{
+            pengurus_id?: string;
+            divisi?: string;
+            nama_jabatan?: string;
+            is_utama?: boolean;
+          }>;
+          loadedPengurus = (pgFallback.data as PengurusSourceRow[]).map((pg) => ({
+            ...pg,
+            jabatan_list:
+              Array.isArray(pg.jabatan_list) && pg.jabatan_list.length > 0
+                ? pg.jabatan_list
+                : jabRows.filter((j) => String(j.pengurus_id) === String(pg.id)),
+          }));
+        }
       }
+
+      const activePengurus = loadedPengurus.filter(
+        (p) => !p.status || p.status.trim().toLowerCase() === 'aktif'
+      );
+      setPengurusSource(activePengurus);
     } catch (err) {
       showToast('error', 'Gagal Memuat Data', extractSupabaseError(err, 'Terjadi kendala koneksi.'));
     } finally {
@@ -376,6 +420,58 @@ export default function DapurPage() {
     [sesiList, selectedDate]
   );
 
+  // Petugas Dapur Otomatis dari Tabel Pengurus (Status Aktif & Jabatan Divisi / Sie Dapur)
+  const petugasList = useMemo<DapurPetugas[]>(() => {
+    const rows: DapurPetugas[] = [];
+    for (const p of pengurusSource) {
+      const isAktif = !p.status || p.status.trim().toLowerCase() === 'aktif';
+      if (!isAktif) continue;
+
+      const jabList = Array.isArray(p.jabatan_list) ? p.jabatan_list : [];
+      const dapurJab = jabList.find((j) => {
+        const div = (j.divisi || '').toLowerCase();
+        const jab = (j.nama_jabatan || '').toLowerCase();
+        return div.includes('dapur') || jab.includes('dapur');
+      });
+
+      const directDiv = (p.divisi || '').toLowerCase();
+      const directJab = (p.jabatan || '').toLowerCase();
+      const hasDirectDapur = directDiv.includes('dapur') || directJab.includes('dapur');
+
+      if (!dapurJab && !hasDirectDapur) continue;
+
+      rows.push({
+        id: String(p.id),
+        nama: p.nama_lengkap,
+        divisi: dapurJab?.divisi || p.divisi || 'Sie Dapur',
+        jabatan: dapurJab?.nama_jabatan || p.jabatan || 'Petugas Dapur',
+        no_wa: p.no_wa || '',
+        sumber: 'pengurus',
+        aktif: true,
+      });
+    }
+    return rows.sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+  }, [pengurusSource]);
+
+  const normalizedAbsenList = useMemo<DapurAbsenPetugas[]>(() => {
+    return absenList.map((a) => {
+      const matched = petugasList.find(
+        (pt) =>
+          a.petugas_id === pt.id ||
+          a.petugas_id === `pg-${pt.id}` ||
+          (a.petugas_nama &&
+            a.petugas_nama.trim().toLowerCase() === pt.nama.trim().toLowerCase())
+      );
+      if (!matched) return a;
+      if (a.petugas_id === matched.id && a.petugas_nama === matched.nama) return a;
+      return {
+        ...a,
+        petugas_id: matched.id,
+        petugas_nama: matched.nama,
+      };
+    });
+  }, [absenList, petugasList]);
+
   // Cooking Timeliness Analytics (Selected Month)
   const timelinessStats = useMemo(
     () => computeCookingTimelinessStats(sesiList, selectedMonth),
@@ -384,8 +480,8 @@ export default function DapurPage() {
 
   // Petugas Analytics & Automated Behavior Analysis (Selected Month)
   const { rekap: petugasRekap, analisis: analisisOtomatis } = useMemo(
-    () => computePetugasAnalytics(petugasList, absenList, selectedMonth),
-    [petugasList, absenList, selectedMonth]
+    () => computePetugasAnalytics(petugasList, normalizedAbsenList, selectedMonth),
+    [petugasList, normalizedAbsenList, selectedMonth]
   );
 
   // Buku Kas Dapur Running Balance & Summary
@@ -716,66 +812,99 @@ export default function DapurPage() {
   };
 
   // =========================================================
-  // HANDLERS TAB 3: PETUGAS & ABSENSI + ANALISIS OTOMATIS
+  // HANDLERS TAB 3: ABSENSI LANGSUNG KE SUPABASE + ANALISIS OTOMATIS
   // =========================================================
-  const handleAddLocalPetugas = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPetugasNama.trim()) {
-      showToast('error', 'Validasi', 'Nama petugas wajib diisi.');
-      return;
-    }
-    setSaving(true);
-    try {
-      const nextItem: DapurPetugas = {
-        id: createDapurId('ptg'),
-        nama: newPetugasNama.trim(),
-        divisi: 'Sie Konsumsi / Dapur',
-        jabatan: newPetugasJabatan.trim() || 'Petugas Dapur',
-        no_wa: newPetugasWa.trim(),
-        sumber: 'lokal',
-        aktif: true,
-        created_at: new Date().toISOString(),
-      };
-      const nextList = [...petugasList, nextItem].sort((a, b) => a.nama.localeCompare(b.nama));
-      setPetugasList(nextList);
-      await persistUpsert('dapur_petugas', LS_DAPUR_PETUGAS_KEY, nextList, nextItem);
-      setNewPetugasNama('');
-      setNewPetugasWa('');
-      showToast('success', 'Petugas Ditambahkan', `${nextItem.nama} masuk ke daftar piket dapur.`);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const upsertAbsenRecordToSupabase = useCallback(
+    async (params: {
+      tanggal: string;
+      shift: DapurShift;
+      petugas: DapurPetugas;
+      status: StatusAbsenPetugas;
+      jamCatat: string;
+      keterangan: string;
+    }): Promise<DapurAbsenPetugas> => {
+      const { tanggal, shift, petugas, status, jamCatat, keterangan } = params;
 
-  const handleImportPengurus = async (p: PengurusSourceRow) => {
-    const exists = petugasList.some(
-      (item) => item.nama.toLowerCase() === p.nama_lengkap.toLowerCase()
-    );
-    if (exists) {
-      showToast('info', 'Sudah Terdaftar', `${p.nama_lengkap} sudah ada di daftar petugas dapur.`);
-      return;
-    }
-    setSaving(true);
-    try {
-      const utamaJab = p.jabatan_list?.find((j) => j.is_utama) || p.jabatan_list?.[0];
-      const nextItem: DapurPetugas = {
-        id: `pg-${p.id}`,
-        nama: p.nama_lengkap,
-        divisi: utamaJab?.divisi || 'Pengurus Pondok',
-        jabatan: utamaJab?.nama_jabatan || 'Petugas Dapur',
-        no_wa: p.no_wa || '',
-        sumber: 'pengurus',
-        aktif: true,
-        created_at: new Date().toISOString(),
+      const { data: existingRows, error: findErr } = await supabase
+        .from('dapur_absen_petugas')
+        .select('id')
+        .eq('tanggal', tanggal)
+        .eq('shift', shift)
+        .in('petugas_id', [petugas.id, `pg-${petugas.id}`])
+        .limit(1);
+
+      if (findErr) throw findErr;
+
+      if (existingRows && existingRows.length > 0) {
+        const existingId = existingRows[0].id;
+        const { data: updated, error: updErr } = await supabase
+          .from('dapur_absen_petugas')
+          .update({
+            petugas_id: petugas.id,
+            petugas_nama: petugas.nama,
+            status,
+            jam_catat: jamCatat,
+            keterangan,
+          })
+          .eq('id', existingId)
+          .select('*')
+          .single();
+        if (updErr) throw updErr;
+        return updated as DapurAbsenPetugas;
+      }
+
+      const basePayload = {
+        tanggal,
+        shift,
+        petugas_id: petugas.id,
+        petugas_nama: petugas.nama,
+        status,
+        jam_catat: jamCatat,
+        keterangan,
       };
-      const nextList = [...petugasList, nextItem].sort((a, b) => a.nama.localeCompare(b.nama));
-      setPetugasList(nextList);
-      await persistUpsert('dapur_petugas', LS_DAPUR_PETUGAS_KEY, nextList, nextItem);
-      showToast('success', 'Pengurus Disinkronkan', `${nextItem.nama} ditambahkan ke roster dapur.`);
-    } finally {
-      setSaving(false);
-    }
-  };
+
+      const { data: inserted, error: insErr } = await supabase
+        .from('dapur_absen_petugas')
+        .insert(basePayload)
+        .select('*')
+        .single();
+
+      if (!insErr && inserted) {
+        return inserted as DapurAbsenPetugas;
+      }
+
+      if (insErr?.code === '23502') {
+        const { data: retried, error: retryErr } = await supabase
+          .from('dapur_absen_petugas')
+          .insert({ id: createUuidFallback(), ...basePayload })
+          .select('*')
+          .single();
+        if (retryErr) throw retryErr;
+        return retried as DapurAbsenPetugas;
+      }
+
+      if (insErr?.code === '23505') {
+        const { data: updatedConflict, error: conflictUpdErr } = await supabase
+          .from('dapur_absen_petugas')
+          .update({
+            petugas_nama: petugas.nama,
+            status,
+            jam_catat: jamCatat,
+            keterangan,
+          })
+          .eq('tanggal', tanggal)
+          .eq('shift', shift)
+          .eq('petugas_id', petugas.id)
+          .select('*')
+          .single();
+        if (conflictUpdErr) throw conflictUpdErr;
+        return updatedConflict as DapurAbsenPetugas;
+      }
+
+      throw insErr;
+    },
+    []
+  );
 
   const handleMarkAbsen = async (
     petugas: DapurPetugas,
@@ -784,11 +913,12 @@ export default function DapurPage() {
   ) => {
     if (!selectedDate) return;
     const nowTime = formatTimeClock(new Date().toISOString(), false);
-    const existing = absenList.find(
+    const existing = normalizedAbsenList.find(
       (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === petugas.id
     );
-    const nextItem: DapurAbsenPetugas = {
-      id: existing?.id || createDapurId('abs'),
+    const optimisticId = existing?.id || createUuidFallback();
+    const optimisticItem: DapurAbsenPetugas = {
+      id: optimisticId,
       tanggal: selectedDate,
       shift,
       petugas_id: petugas.id,
@@ -798,46 +928,159 @@ export default function DapurPage() {
       keterangan: existing?.keterangan || '',
       created_at: existing?.created_at || new Date().toISOString(),
     };
-    const nextList = [nextItem, ...absenList.filter((a) => a.id !== nextItem.id)];
-    setAbsenList(nextList);
-    await persistUpsert('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, nextList, nextItem);
+
+    const prevAbsenSnapshot = absenList;
+    const optimisticList = [
+      optimisticItem,
+      ...absenList.filter(
+        (a) =>
+          a.id !== optimisticId &&
+          !(
+            a.tanggal === selectedDate &&
+            a.shift === shift &&
+            (a.petugas_id === petugas.id || a.petugas_id === `pg-${petugas.id}`)
+          )
+      ),
+    ];
+    setAbsenList(optimisticList);
+    setAbsenSavingKey(`${petugas.id}-${shift}`);
+
+    try {
+      const savedRow = await upsertAbsenRecordToSupabase({
+        tanggal: selectedDate,
+        shift,
+        petugas,
+        status,
+        jamCatat: nowTime,
+        keterangan: existing?.keterangan || '',
+      });
+      setAbsenDbError(null);
+      setAbsenList((prev) => {
+        const merged = [
+          savedRow,
+          ...prev.filter(
+            (a) =>
+              a.id !== savedRow.id &&
+              a.id !== optimisticId &&
+              !(
+                a.tanggal === selectedDate &&
+                a.shift === shift &&
+                (a.petugas_id === petugas.id || a.petugas_id === `pg-${petugas.id}`)
+              )
+          ),
+        ];
+        writeLocalArray(LS_DAPUR_ABSEN_KEY, merged);
+        return merged;
+      });
+    } catch (err) {
+      setAbsenList(prevAbsenSnapshot);
+      const errMsg = extractSupabaseError(err, 'Gagal menyimpan absensi ke database Supabase.');
+      setAbsenDbError(errMsg);
+      showToast('error', 'Gagal Menyimpan Absensi', errMsg);
+    } finally {
+      setAbsenSavingKey(null);
+    }
   };
 
   const handleMarkAllHadir = async (shift: DapurShift) => {
     if (!selectedDate || petugasList.length === 0) return;
     const nowTime = formatTimeClock(new Date().toISOString(), false);
+    const activeRoster = petugasList.filter((x) => x.aktif !== false);
     setSaving(true);
     try {
-      let nextList = [...absenList];
-      const updatedItems: DapurAbsenPetugas[] = [];
-      for (const p of petugasList.filter((x) => x.aktif !== false)) {
-        const existing = nextList.find(
-          (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === p.id
+      const { data: existingRows, error: fetchErr } = await supabase
+        .from('dapur_absen_petugas')
+        .select('*')
+        .eq('tanggal', selectedDate)
+        .eq('shift', shift);
+      if (fetchErr) throw fetchErr;
+
+      const existingDb = (existingRows || []) as DapurAbsenPetugas[];
+      const savedRows: DapurAbsenPetugas[] = [];
+
+      const toInsert: Array<{
+        tanggal: string;
+        shift: DapurShift;
+        petugas_id: string;
+        petugas_nama: string;
+        status: StatusAbsenPetugas;
+        jam_catat: string;
+        keterangan: string;
+      }> = [];
+
+      for (const p of activeRoster) {
+        const found = existingDb.find(
+          (r) =>
+            r.petugas_id === p.id ||
+            r.petugas_id === `pg-${p.id}` ||
+            (r.petugas_nama && r.petugas_nama.trim().toLowerCase() === p.nama.trim().toLowerCase())
         );
-        const item: DapurAbsenPetugas = {
-          id: existing?.id || createDapurId('abs'),
-          tanggal: selectedDate,
-          shift,
-          petugas_id: p.id,
-          petugas_nama: p.nama,
-          status: 'hadir',
-          jam_catat: nowTime,
-          keterangan: existing?.keterangan || '',
-          created_at: existing?.created_at || new Date().toISOString(),
-        };
-        nextList = [item, ...nextList.filter((a) => a.id !== item.id)];
-        updatedItems.push(item);
+        if (found) {
+          const { data: updated, error: updErr } = await supabase
+            .from('dapur_absen_petugas')
+            .update({
+              petugas_id: p.id,
+              petugas_nama: p.nama,
+              status: 'hadir',
+              jam_catat: nowTime,
+            })
+            .eq('id', found.id)
+            .select('*')
+            .single();
+          if (updErr) throw updErr;
+          if (updated) savedRows.push(updated as DapurAbsenPetugas);
+        } else {
+          const localExisting = normalizedAbsenList.find(
+            (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === p.id
+          );
+          toInsert.push({
+            tanggal: selectedDate,
+            shift,
+            petugas_id: p.id,
+            petugas_nama: p.nama,
+            status: 'hadir',
+            jam_catat: nowTime,
+            keterangan: localExisting?.keterangan || '',
+          });
+        }
       }
-      setAbsenList(nextList);
-      writeLocalArray(LS_DAPUR_ABSEN_KEY, nextList);
-      for (const item of updatedItems) {
-        await persistUpsert('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, nextList, item);
+
+      if (toInsert.length > 0) {
+        const { data: inserted, error: insErr } = await supabase
+          .from('dapur_absen_petugas')
+          .insert(toInsert)
+          .select('*');
+        if (!insErr && Array.isArray(inserted)) {
+          savedRows.push(...(inserted as DapurAbsenPetugas[]));
+        } else if (insErr?.code === '23502') {
+          const withIds = toInsert.map((row) => ({ id: createUuidFallback(), ...row }));
+          const { data: retried, error: retryErr } = await supabase
+            .from('dapur_absen_petugas')
+            .insert(withIds)
+            .select('*');
+          if (retryErr) throw retryErr;
+          if (Array.isArray(retried)) savedRows.push(...(retried as DapurAbsenPetugas[]));
+        } else if (insErr) {
+          throw insErr;
+        }
       }
+
+      setAbsenDbError(null);
+      setAbsenList((prev) => {
+        const rest = prev.filter((a) => !(a.tanggal === selectedDate && a.shift === shift));
+        const merged = [...savedRows, ...rest];
+        writeLocalArray(LS_DAPUR_ABSEN_KEY, merged);
+        return merged;
+      });
       showToast(
         'success',
         `Semua Hadir (${shift === 'pagi' ? 'Pagi' : 'Sore'})`,
-        `${updatedItems.length} petugas ditandai Hadir.`
+        `${activeRoster.length} petugas ditandai Hadir dan tersimpan ke database.`
       );
+    } catch (err) {
+      const errMsg = extractSupabaseError(err, 'Gagal menyimpan absen massal ke Supabase.');
+      setAbsenDbError(errMsg);
+      showToast('error', 'Gagal Menyimpan Absensi', errMsg);
     } finally {
       setSaving(false);
     }
@@ -847,25 +1090,48 @@ export default function DapurPage() {
     e.preventDefault();
     if (!editingKetTarget || !selectedDate) return;
     const { petugas, shift } = editingKetTarget;
-    const existing = absenList.find(
+    const existing = normalizedAbsenList.find(
       (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === petugas.id
     );
-    const nextItem: DapurAbsenPetugas = {
-      id: existing?.id || createDapurId('abs'),
-      tanggal: selectedDate,
-      shift,
-      petugas_id: petugas.id,
-      petugas_nama: petugas.nama,
-      status: existing?.status || 'izin',
-      jam_catat: existing?.jam_catat || formatTimeClock(new Date().toISOString(), false),
-      keterangan: ketInput.trim(),
-      created_at: existing?.created_at || new Date().toISOString(),
-    };
-    const nextList = [nextItem, ...absenList.filter((a) => a.id !== nextItem.id)];
-    setAbsenList(nextList);
-    await persistUpsert('dapur_absen_petugas', LS_DAPUR_ABSEN_KEY, nextList, nextItem);
-    setEditingKetTarget(null);
-    showToast('success', 'Keterangan Disimpan', `Catatan untuk ${petugas.nama} diperbarui.`);
+    const jamCatat = existing?.jam_catat || formatTimeClock(new Date().toISOString(), false);
+    const statusToSave: StatusAbsenPetugas = existing?.status || 'izin';
+
+    setSaving(true);
+    try {
+      const savedRow = await upsertAbsenRecordToSupabase({
+        tanggal: selectedDate,
+        shift,
+        petugas,
+        status: statusToSave,
+        jamCatat,
+        keterangan: ketInput.trim(),
+      });
+      setAbsenDbError(null);
+      setAbsenList((prev) => {
+        const merged = [
+          savedRow,
+          ...prev.filter(
+            (a) =>
+              a.id !== savedRow.id &&
+              !(
+                a.tanggal === selectedDate &&
+                a.shift === shift &&
+                (a.petugas_id === petugas.id || a.petugas_id === `pg-${petugas.id}`)
+              )
+          ),
+        ];
+        writeLocalArray(LS_DAPUR_ABSEN_KEY, merged);
+        return merged;
+      });
+      setEditingKetTarget(null);
+      showToast('success', 'Keterangan Disimpan', `Catatan untuk ${petugas.nama} tersimpan ke database.`);
+    } catch (err) {
+      const errMsg = extractSupabaseError(err, 'Gagal menyimpan catatan absensi ke Supabase.');
+      setAbsenDbError(errMsg);
+      showToast('error', 'Gagal Menyimpan Catatan', errMsg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCopyAnalitikWa = async () => {
@@ -1141,10 +1407,6 @@ export default function DapurPage() {
         const next = menuList.filter((m) => m.id !== deleteDialog.id);
         setMenuList(next);
         await persistDelete('dapur_menu_jadwal', LS_DAPUR_MENU_KEY, next, deleteDialog.id);
-      } else if (deleteDialog.kind === 'petugas') {
-        const next = petugasList.filter((p) => p.id !== deleteDialog.id);
-        setPetugasList(next);
-        await persistDelete('dapur_petugas', LS_DAPUR_PETUGAS_KEY, next, deleteDialog.id);
       } else if (deleteDialog.kind === 'kas') {
         const next = kasList.filter((k) => k.id !== deleteDialog.id);
         setKasList(next);
@@ -1613,7 +1875,7 @@ export default function DapurPage() {
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
             aria-label="Periode bulan analitik"
-            className="min-h-[40px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 tabular-nums"
+            className="min-w-[185px] sm:min-w-[205px] w-full sm:w-auto min-h-[40px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 tabular-nums"
           />
 
           <button
@@ -2334,22 +2596,35 @@ export default function DapurPage() {
                   Absen Petugas Dapur &mdash; {formatHariTanggalIndo(selectedDate)}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Catat kehadiran setiap kali masak Shift Pagi dan Shift Sore secara terpisah.
+                  Daftar petugas diambil otomatis dari Pengurus aktif Divisi / Sie Dapur. Catat kehadiran Shift Pagi &amp; Sore langsung ke database.
                 </p>
               </div>
-              {canEditDapur && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowPetugasModal(true)}
-                    className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    Kelola Petugas ({petugasList.filter((p) => p.aktif !== false).length})
-                  </button>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-h-[38px] px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                  <Users className="w-3.5 h-3.5" />
+                  {petugasList.length} Petugas Sie Dapur Aktif
+                </span>
+                <button
+                  type="button"
+                  onClick={loadAllData}
+                  disabled={loading}
+                  className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  Sinkron Pengurus
+                </button>
+              </div>
             </div>
+
+            {absenDbError && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">Perhatian Koneksi Tabel Absensi Supabase</p>
+                  <p className="text-amber-900">{absenDbError}</p>
+                </div>
+              </div>
+            )}
 
             {/* Shift Switcher + Search + Mark All */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2405,34 +2680,38 @@ export default function DapurPage() {
             </div>
 
             {rosterFiltered.length === 0 ? (
-              <div className="p-8 border border-dashed border-slate-300 rounded-xl text-center space-y-3 bg-slate-50/60">
+              <div className="p-8 border border-dashed border-slate-300 rounded-xl text-center space-y-2 bg-slate-50/60">
                 <Users className="w-8 h-8 text-slate-400 mx-auto" />
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-slate-800">
-                    Daftar Petugas Dapur Masih Kosong
-                  </p>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    Tambahkan nama petugas dapur secara langsung atau pilih dari daftar Pengurus Pondok aktif untuk mulai mencatat absensi Pagi &amp; Sore.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPetugasModal(true)}
-                  className="min-h-[42px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Tambah / Ambil Petugas Dapur
-                </button>
+                {petugasList.length === 0 ? (
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-800">
+                      Belum Ada Pengurus Aktif di Divisi / Sie Dapur
+                    </p>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Daftar petugas dapur diambil otomatis dari tabel Pengurus berstatus Aktif yang memiliki jabatan di Divisi / Sie Dapur. Tambahkan atau atur jabatan Sie Dapur pada menu Pengurus Pondok.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-800">
+                      Petugas Tidak Ditemukan
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Tidak ada petugas Sie Dapur yang cocok dengan kata kunci &ldquo;{absenSearch}&rdquo;.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
                 {rosterFiltered.map((p) => {
-                  const rec = absenList.find(
+                  const rec = normalizedAbsenList.find(
                     (a) =>
                       a.tanggal === selectedDate &&
                       a.shift === absenShiftView &&
                       a.petugas_id === p.id
                   );
+                  const isRowSaving = absenSavingKey === `${p.id}-${absenShiftView}`;
                   return (
                     <div
                       key={p.id}
@@ -2445,6 +2724,11 @@ export default function DapurPage() {
                           {rec && (
                             <span className="text-[11px] text-slate-400 font-mono tabular-nums">
                               ({rec.jam_catat})
+                            </span>
+                          )}
+                          {isRowSaving && (
+                            <span className="text-[11px] text-emerald-700 font-semibold">
+                              Menyimpan...
                             </span>
                           )}
                         </div>
@@ -2485,7 +2769,7 @@ export default function DapurPage() {
                             <button
                               key={opt.val}
                               type="button"
-                              disabled={!canEditDapur}
+                              disabled={!canEditDapur || isRowSaving}
                               onClick={() => canEditDapur && handleMarkAbsen(p, absenShiftView, opt.val)}
                               className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap shrink-0 disabled:opacity-60 ${
                                 isSelected
@@ -2501,6 +2785,7 @@ export default function DapurPage() {
                         {canEditDapur && (
                           <button
                             type="button"
+                            disabled={isRowSaving}
                             onClick={() => {
                               setEditingKetTarget({
                                 petugas: p,
@@ -3115,7 +3400,7 @@ export default function DapurPage() {
             {/* Riwayat Buku 1 */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <h3 className="font-bold text-sm text-slate-900">
                     Mutasi Buku 1 &mdash; Belanja Masak ({formatMonthLabel(selectedMonth)})
                   </h3>
@@ -3123,7 +3408,7 @@ export default function DapurPage() {
                     Jatah harian masuk, belanja pagi/sore, dan subsidi penutup kekurangan.
                   </p>
                 </div>
-                <span className="text-xs font-mono font-bold text-emerald-700 tabular-nums">
+                <span className="text-xs font-mono font-bold text-emerald-700 tabular-nums whitespace-nowrap shrink-0">
                   {bukuMasakDisplay.length} entri
                 </span>
               </div>
@@ -3206,7 +3491,7 @@ export default function DapurPage() {
             {/* Riwayat Buku 2 */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <h3 className="font-bold text-sm text-slate-900">
                     Mutasi Buku 2 &mdash; Kas Jualan Malam ({formatMonthLabel(selectedMonth)})
                   </h3>
@@ -3214,7 +3499,7 @@ export default function DapurPage() {
                     Omzet penjualan malam, belanja modal, dan penarikan subsidi jika Buku 1 minus.
                   </p>
                 </div>
-                <span className="text-xs font-mono font-bold text-indigo-700 tabular-nums">
+                <span className="text-xs font-mono font-bold text-indigo-700 tabular-nums whitespace-nowrap shrink-0">
                   {jualanMalamDisplay.length} entri
                 </span>
               </div>
@@ -3294,7 +3579,7 @@ export default function DapurPage() {
           {/* ARSIP BUKU KAS DAPUR UMUM (JIKA ADA DATA LAMA) */}
           {(kasList.length > 0 || canEditDapur) && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="p-4 border-b border-slate-200 flex flex-col gap-3">
                 <div>
                   <h3 className="font-bold text-sm text-slate-900">
                     Catatan Kas Dapur Umum / Arsip
@@ -3304,28 +3589,28 @@ export default function DapurPage() {
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col gap-2 w-full">
                   {canEditDapur && (
-                    <>
+                    <div className="grid grid-cols-2 gap-2 w-full">
                       <button
                         type="button"
                         onClick={() => openKasModal('masuk')}
-                        className="min-h-[38px] px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                        className="w-full min-h-[38px] px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-3.5 h-3.5 shrink-0" />
                         Kas Masuk Lain
                       </button>
                       <button
                         type="button"
                         onClick={() => openKasModal('keluar')}
-                        className="min-h-[38px] px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                        className="w-full min-h-[38px] px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-3.5 h-3.5 shrink-0" />
                         Belanja Lain
                       </button>
-                    </>
+                    </div>
                   )}
-                  <div className="relative sm:w-44">
+                  <div className="relative w-full">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
@@ -3335,31 +3620,33 @@ export default function DapurPage() {
                       className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500"
                     />
                   </div>
-                  <select
-                    value={kasFilterPeriode}
-                    onChange={(e) => setKasFilterPeriode(e.target.value as 'bulan_ini' | 'semua')}
-                    className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                  >
-                    <option value="bulan_ini">Bulan {formatMonthLabel(selectedMonth)}</option>
-                    <option value="semua">Semua Riwayat</option>
-                  </select>
-                  <select
-                    value={kasFilterJenis}
-                    onChange={(e) => setKasFilterJenis(e.target.value as 'semua' | JenisKasDapur)}
-                    className="min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                  >
-                    <option value="semua">Semua Jenis</option>
-                    <option value="masuk">Uang Masuk</option>
-                    <option value="keluar">Pengeluaran</option>
-                  </select>
+                  <div className="grid grid-cols-2 gap-2 w-full">
+                    <select
+                      value={kasFilterPeriode}
+                      onChange={(e) => setKasFilterPeriode(e.target.value as 'bulan_ini' | 'semua')}
+                      className="w-full min-w-0 min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                    >
+                      <option value="bulan_ini">Bulan {formatMonthLabel(selectedMonth)}</option>
+                      <option value="semua">Semua Riwayat</option>
+                    </select>
+                    <select
+                      value={kasFilterJenis}
+                      onChange={(e) => setKasFilterJenis(e.target.value as 'semua' | JenisKasDapur)}
+                      className="w-full min-w-0 min-h-[38px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                    >
+                      <option value="semua">Semua Jenis</option>
+                      <option value="masuk">Uang Masuk</option>
+                      <option value="keluar">Pengeluaran</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={handleExportKasExcel}
                     disabled={kasFiltered.length === 0}
-                    className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
+                    className="w-full min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
                   >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    Excel
+                    <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                    Export Excel
                   </button>
                 </div>
               </div>
@@ -3620,150 +3907,6 @@ export default function DapurPage() {
               </button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* Modal Kelola Petugas Dapur */}
-      {showPetugasModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-xl border border-slate-200 overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="font-bold text-base text-slate-900">Kelola Daftar Petugas Dapur</h3>
-              <button
-                type="button"
-                onClick={() => setShowPetugasModal(false)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto space-y-5 text-xs">
-              {/* Tambah Manual */}
-              <form
-                onSubmit={handleAddLocalPetugas}
-                className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3"
-              >
-                <span className="font-bold text-slate-800 block">
-                  + Tambah Petugas Dapur Baru
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <input
-                    type="text"
-                    required
-                    value={newPetugasNama}
-                    onChange={(e) => setNewPetugasNama(e.target.value)}
-                    placeholder="Nama Lengkap Petugas *"
-                    className="min-h-[38px] px-3 py-1.5 bg-white border border-slate-200 rounded-xl"
-                  />
-                  <input
-                    type="text"
-                    value={newPetugasJabatan}
-                    onChange={(e) => setNewPetugasJabatan(e.target.value)}
-                    placeholder="Jabatan (mis: Koki Utama / Piket)"
-                    className="min-h-[38px] px-3 py-1.5 bg-white border border-slate-200 rounded-xl"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={newPetugasWa}
-                    onChange={(e) => setNewPetugasWa(e.target.value)}
-                    placeholder="No. WhatsApp (opsional)"
-                    className="flex-1 min-h-[38px] px-3 py-1.5 bg-white border border-slate-200 rounded-xl"
-                  />
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="min-h-[38px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold whitespace-nowrap shrink-0"
-                  >
-                    Tambahkan
-                  </button>
-                </div>
-              </form>
-
-              {/* Sinkron dari Pengurus Pondok */}
-              {pengurusSource.length > 0 && (
-                <div className="space-y-2">
-                  <span className="font-bold text-slate-800 block">
-                    Ambil Cepat dari Data Pengurus Aktif:
-                  </span>
-                  <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
-                    {pengurusSource.map((p) => {
-                      const already = petugasList.some(
-                        (item) => item.nama.toLowerCase() === p.nama_lengkap.toLowerCase()
-                      );
-                      return (
-                        <div
-                          key={p.id}
-                          className="px-3 py-2 flex items-center justify-between gap-2 bg-white"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-semibold text-slate-800 truncate">{p.nama_lengkap}</p>
-                            <p className="text-[11px] text-slate-500 truncate">
-                              {p.jabatan_list?.[0]?.divisi || 'Pengurus Pondok'}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={already || saving}
-                            onClick={() => handleImportPengurus(p)}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 ${
-                              already
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-slate-900 hover:bg-slate-800 text-white'
-                            }`}
-                          >
-                            {already ? 'Sudah Masuk' : '+ Pilih'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Daftar Petugas Dapur Aktif */}
-              <div className="space-y-2">
-                <span className="font-bold text-slate-800 block">
-                  Petugas Dapur Terdaftar ({petugasList.length}):
-                </span>
-                {petugasList.length === 0 ? (
-                  <p className="text-slate-500 italic">Belum ada petugas terdaftar.</p>
-                ) : (
-                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-                    {petugasList.map((pt) => (
-                      <div
-                        key={pt.id}
-                        className="px-3 py-2 flex items-center justify-between gap-2 bg-white"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-bold text-slate-900 truncate">{pt.nama}</p>
-                          <p className="text-[11px] text-slate-500">
-                            {pt.jabatan} &bull; Sumber: {pt.sumber === 'pengurus' ? 'Pengurus' : 'Lokal'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setDeleteDialog({
-                              kind: 'petugas',
-                              id: pt.id,
-                              label: `Petugas ${pt.nama}`,
-                            })
-                          }
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg shrink-0"
-                          aria-label="Hapus petugas"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

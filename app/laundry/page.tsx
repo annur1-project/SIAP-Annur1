@@ -1456,30 +1456,33 @@ export default function LaundryPage() {
         {/* ======================================================= */}
         {activeTab === 'laporan' && (
           <div className="space-y-4">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col gap-2.5">
+              {/* Baris 1: Dropdown bulan + tombol Semua Bulan */}
+              <div className="flex items-center gap-2 w-full">
                 <input
                   type="month"
                   value={reportMonth}
                   onChange={(e) => setReportMonth(e.target.value)}
-                  className="w-full sm:w-auto min-w-0 min-h-[40px] px-3 py-1.5 text-xs font-mono tabular-nums border border-slate-200 rounded-xl bg-white"
+                  className="flex-1 min-w-[165px] min-h-[40px] px-3 py-1.5 text-xs font-mono tabular-nums border border-slate-200 rounded-xl bg-white"
                 />
-                {reportMonth && (
-                  <button
-                    type="button"
-                    onClick={() => setReportMonth('')}
-                    className="min-h-[40px] px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
-                  >
-                    Semua Bulan
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setReportMonth('')}
+                  disabled={!reportMonth}
+                  className="shrink-0 min-h-[40px] px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl whitespace-nowrap"
+                >
+                  Semua Bulan
+                </button>
+              </div>
 
+              {/* Baris 2: Dropdown Semua Hari & Semua Kamar */}
+              <div className="grid grid-cols-2 gap-2 w-full">
                 <select
                   value={reportHariFilter}
                   onChange={(e) =>
                     setReportHariFilter(e.target.value as 'semua' | HariLaundryKey)
                   }
-                  className="min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium text-slate-700"
+                  className="w-full min-w-0 min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium text-slate-700"
                 >
                   <option value="semua">Semua Hari</option>
                   {operationalDaysList.map((h) => (
@@ -1493,7 +1496,7 @@ export default function LaundryPage() {
                 <select
                   value={reportKamarFilter}
                   onChange={(e) => setReportKamarFilter(e.target.value)}
-                  className="min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium text-slate-700"
+                  className="w-full min-w-0 min-h-[40px] px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-medium text-slate-700"
                 >
                   <option value="semua">Semua Kamar</option>
                   {kamarOptions.map((k) => (
@@ -1504,16 +1507,15 @@ export default function LaundryPage() {
                 </select>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleCopyWaPeriod}
-                  className="min-h-[40px] px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap"
-                >
-                  <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
-                  Salin Rekap WA
-                </button>
-              </div>
+              {/* Baris 3: Tombol Salin Rekap WA */}
+              <button
+                type="button"
+                onClick={handleCopyWaPeriod}
+                className="w-full min-h-[40px] px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent shrink-0" />
+                Salin Rekap WA
+              </button>
             </div>
 
             {/* RINGKASAN PERIODE LAPORAN */}
@@ -1554,19 +1556,19 @@ export default function LaundryPage() {
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap w-36 min-w-[130px]">
                           Hari &amp; Tanggal
                         </th>
-                        <th className="px-4 py-3 font-semibold">
-                          Rincian Kamar &amp; Jumlah Potong
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap min-w-[240px]">
+                          Rincian Kamar
                         </th>
-                        <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">
-                          Total Potong
+                        <th className="px-4 py-3 font-semibold text-right whitespace-nowrap w-28 min-w-[96px]">
+                          Total
                         </th>
-                        <th className="px-4 py-3 font-semibold text-center whitespace-nowrap">
+                        <th className="px-4 py-3 font-semibold text-center whitespace-nowrap w-32 min-w-[115px]">
                           Status
                         </th>
-                        <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">
+                        <th className="px-4 py-3 font-semibold text-right whitespace-nowrap w-28 min-w-[104px]">
                           Aksi
                         </th>
                       </tr>
@@ -1574,7 +1576,7 @@ export default function LaundryPage() {
                     <tbody className="divide-y divide-slate-100">
                       {reportDailyGroups.map((group) => (
                         <tr key={group.tanggal} className="hover:bg-slate-50/60 align-top">
-                          <td className="px-4 py-3 whitespace-nowrap">
+                          <td className="px-4 py-3 whitespace-nowrap w-36 min-w-[130px]">
                             <span className="font-bold text-slate-900 block">
                               {group.hariLabel}
                             </span>
@@ -1582,32 +1584,32 @@ export default function LaundryPage() {
                               {formatTanggalPendek(group.tanggal)}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1.5">
+                          <td className="px-4 py-3 min-w-[240px]">
+                            <div className="flex flex-wrap gap-1">
                               {group.items.map((x) => (
                                 <span
                                   key={x.id}
-                                  className={`px-2 py-1 rounded-lg border text-[11px] font-medium tabular-nums ${
+                                  className={`px-2 py-1 rounded-lg border text-[11px] font-medium tabular-nums whitespace-nowrap inline-flex items-center gap-1 ${
                                     x.status === 'selesai'
                                       ? 'siap-soft-box'
                                       : 'bg-amber-50/70 border-amber-200 text-amber-900'
                                   }`}
                                 >
-                                  <strong>{x.kamar}</strong>: {x.jumlah_potong} pcs
+                                  <strong>{x.kamar}:</strong> {x.jumlah_potong} pcs
                                   {x.tipe_setoran === 'susulan' ? ' (Susulan)' : ''}
                                 </span>
                               ))}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap font-mono font-bold text-slate-900 tabular-nums">
+                          <td className="px-4 py-3 text-right whitespace-nowrap w-28 min-w-[96px] font-mono font-bold text-slate-900 tabular-nums">
                             {group.totalPotong} pcs
                             <span className="block font-sans font-normal text-[11px] text-slate-500">
                               {group.totalKamar} kamar
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center whitespace-nowrap">
+                          <td className="px-4 py-3 text-center whitespace-nowrap w-32 min-w-[115px]">
                             <span
-                              className={`px-2 py-0.5 rounded-md border text-[11px] font-bold tabular-nums ${
+                              className={`inline-block px-2 py-0.5 rounded-md border text-[11px] font-bold tabular-nums whitespace-nowrap ${
                                 group.selesaiCount === group.totalKamar
                                   ? 'siap-soft-box'
                                   : 'bg-amber-50 text-amber-800 border-amber-200'
@@ -1616,7 +1618,7 @@ export default function LaundryPage() {
                               {group.selesaiCount}/{group.totalKamar} Selesai
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <td className="px-4 py-3 text-right whitespace-nowrap w-28 min-w-[104px]">
                             <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"
@@ -1632,7 +1634,7 @@ export default function LaundryPage() {
                                   setSelectedDate(group.tanggal);
                                   setActiveTab('harian');
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold siap-text-accent hover:bg-slate-50"
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold siap-text-accent hover:bg-slate-50 whitespace-nowrap"
                               >
                                 Buka
                               </button>

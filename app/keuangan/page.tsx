@@ -100,6 +100,12 @@ interface SantriItem {
   kabupaten?: string;
   ktl_nominal?: number;
   ktl_catatan?: string;
+  tgl_masuk?: string | null;
+  paket_pendaftaran?: string | null;
+  nominal_pendaftaran?: number | null;
+  total_biaya_pendaftaran?: number | null;
+  dp_terbayar?: number | null;
+  catatan_keringanan?: string | null;
 }
 
 interface MasterPembayaranItem {
@@ -415,6 +421,30 @@ function getSantriKategori(santri: SantriItem): 'reguler' | 'vip' | 'ndalem' {
   return 'reguler';
 }
 
+/**
+ * Menentukan periode mulai wajib Syahriyah (YYYY-MM) berdasarkan tgl_masuk santri:
+ * - Tanggal 1 s/d 25 -> tagihan dimulai pada bulan masuk tersebut.
+ * - Tanggal 26 s/d 31 -> bulan masuk bebas tagihan, kewajiban mulai bulan berikutnya.
+ */
+function getSyahriyahStartPeriode(tglMasuk?: string | null): string | null {
+  if (!tglMasuk) return null;
+  const clean = String(tglMasuk).trim().slice(0, 10);
+  const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  let yr = parseInt(match[1], 10);
+  let mo = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (!yr || mo < 1 || mo > 12 || day < 1 || day > 31) return null;
+  if (day >= 26) {
+    mo += 1;
+    if (mo > 12) {
+      mo = 1;
+      yr += 1;
+    }
+  }
+  return `${yr}-${String(mo).padStart(2, '0')}`;
+}
+
 function getActiveWaContact(santri: SantriItem): { label: string; number: string } | null {
   const candidates = [
     { label: 'Ayah', raw: santri.no_wa_ayah },
@@ -528,6 +558,7 @@ export default function KeuanganPage() {
   const [bayarKtlChecked, setBayarKtlChecked] = useState<boolean>(false);
   const [bayarKtlNominal, setBayarKtlNominal] = useState<number>(0);
   const [bayarPsbChecked, setBayarPsbChecked] = useState<boolean>(false);
+  const [bayarPsbNominal, setBayarPsbNominal] = useState<number>(0);
   const [bayarPsbPaket, setBayarPsbPaket] = useState<'reguler' | 'vip'>('reguler');
   const [bayarPsbFreePangkal, setBayarPsbFreePangkal] = useState<boolean>(true);
   const [metodeBayar, setMetodeBayar] = useState<'tunai' | 'transfer'>('tunai');
@@ -1090,39 +1121,6 @@ export default function KeuanganPage() {
     );
   }, [activeSantri, pembayaranDetails, tahunAjaran]);
 
-  const santriSudahPsbSet = useMemo(() => {
-    const set = new Set<string>();
-    kasTransaksi.forEach((tx) => {
-      if (!tx.santri_id || tx.dompet !== 'pendaftaran' || tx.tipe !== 'masuk') return;
-      const kat = (tx.kategori || '').toLowerCase();
-      if (
-        (kat.includes('pendaftaran') || kat.includes('psb')) &&
-        !kat.includes('infaq madin')
-      ) {
-        set.add(tx.santri_id);
-      }
-    });
-    pembayaranDetails.forEach((det) => {
-      if (det.item_kode === 'psb_pendaftaran') {
-        set.add(det.santri_id);
-      }
-    });
-    return set;
-  }, [kasTransaksi, pembayaranDetails]);
-
-  const activeSantriHasPsb = activeSantri ? santriSudahPsbSet.has(activeSantri.id) : false;
-
-  const psbBulanPertamaPeriode = (tglBayarInput || todayStr).slice(0, 7);
-  const psbBulanPertamaSudahLunas = useMemo(() => {
-    if (!activeSantri) return false;
-    return (
-      selectedBulanPeriodes.includes(psbBulanPertamaPeriode) ||
-      activeSantriDetails.some(
-        (d) => d.item_kode === 'syahriyah' && d.periode_bulan === psbBulanPertamaPeriode
-      )
-    );
-  }, [activeSantri, activeSantriDetails, psbBulanPertamaPeriode, selectedBulanPeriodes]);
-
   const psbLoketPreview = useMemo(
     () =>
       hitungRincianPendaftaran({
@@ -1134,6 +1132,69 @@ export default function KeuanganPage() {
     [bayarPsbPaket, bayarPsbFreePangkal, santriList.length, skemaPendaftaran]
   );
 
+  // Sinkronisasi Biaya Pendaftaran Santri Baru (PSB) per santri (terpisah dari Syahriyah Bulan Pertama)
+  const activePsbBilling = useMemo(() => {
+    if (!activeSantri) {
+      return {
+        hasStoredFee: false,
+        paket: bayarPsbPaket,
+        totalBiaya: 0,
+        sudahDibayar: 0,
+        sisaTagihan: 0,
+        isLunas: false,
+      };
+    }
+
+    const storedTotal = Math.max(
+      Number(activeSantri.total_biaya_pendaftaran || 0),
+      Number(activeSantri.nominal_pendaftaran || 0)
+    );
+    const hasStoredFee = storedTotal > 0;
+    const effectivePaket: 'reguler' | 'vip' =
+      activeSantri.paket_pendaftaran === 'vip'
+        ? 'vip'
+        : activeSantri.paket_pendaftaran === 'reguler'
+        ? 'reguler'
+        : bayarPsbPaket;
+
+    const totalBiaya = hasStoredFee ? storedTotal : psbLoketPreview.nominalDompetPendaftaran;
+
+    const countedKuitansi = new Set<string>();
+    let cicilanDetailSum = 0;
+    pembayaranDetails.forEach((det) => {
+      if (det.santri_id === activeSantri.id && det.item_kode === 'psb_pendaftaran') {
+        cicilanDetailSum += Number(det.nominal || 0);
+        if (det.no_kuitansi) countedKuitansi.add(det.no_kuitansi);
+      }
+    });
+
+    let kasPsbOutsideDetail = 0;
+    kasTransaksi.forEach((tx) => {
+      if (tx.santri_id !== activeSantri.id || tx.dompet !== 'pendaftaran' || tx.tipe !== 'masuk') return;
+      const kat = (tx.kategori || '').toLowerCase();
+      if ((kat.includes('pendaftaran') || kat.includes('psb')) && !kat.includes('infaq madin')) {
+        if (!tx.no_kuitansi || !countedKuitansi.has(tx.no_kuitansi)) {
+          kasPsbOutsideDetail += Number(tx.nominal || 0);
+        }
+      }
+    });
+
+    const dpFromSantri = Number(activeSantri.dp_terbayar || 0);
+    const dpOrExternalPaid = Math.max(dpFromSantri, kasPsbOutsideDetail);
+    const sudahDibayar = dpOrExternalPaid + cicilanDetailSum;
+    const sisaTagihan = Math.max(0, totalBiaya - sudahDibayar);
+    const isLunas = totalBiaya > 0 && sisaTagihan === 0;
+
+    return {
+      hasStoredFee,
+      paket: effectivePaket,
+      totalBiaya,
+      sudahDibayar,
+      sisaTagihan,
+      isLunas,
+    };
+  }, [activeSantri, bayarPsbPaket, psbLoketPreview.nominalDompetPendaftaran, pembayaranDetails, kasTransaksi]);
+
   // Reset centangan saat ganti santri atau tahun ajaran
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1142,7 +1203,16 @@ export default function KeuanganPage() {
       setBayarKtlChecked(false);
       setBayarKtlNominal(Number(activeSantri?.ktl_nominal || 0));
       setBayarPsbChecked(false);
-      setBayarPsbPaket(activeSantri && isSantriVip(activeSantri) ? 'vip' : 'reguler');
+      setBayarPsbNominal(0);
+      setBayarPsbPaket(
+        activeSantri?.paket_pendaftaran === 'vip'
+          ? 'vip'
+          : activeSantri?.paket_pendaftaran === 'reguler'
+          ? 'reguler'
+          : activeSantri && isSantriVip(activeSantri)
+          ? 'vip'
+          : 'reguler'
+      );
       setBayarPsbFreePangkal(
         Boolean(skemaPendaftaran.promo_aktif) &&
           santriList.length < Number(skemaPendaftaran.kuota_gratis_uang_pangkal || 100)
@@ -1181,24 +1251,16 @@ export default function KeuanganPage() {
       nominal: number;
     }> = [];
 
-    if (bayarPsbChecked && !activeSantriHasPsb) {
+    if (bayarPsbChecked && activePsbBilling.sisaTagihan > 0 && Number(bayarPsbNominal) > 0) {
+      const payNom = Math.min(activePsbBilling.sisaTagihan, Number(bayarPsbNominal));
+      const isPelunasanNow = payNom >= activePsbBilling.sisaTagihan;
       items.push({
         item_kode: 'psb_pendaftaran',
         periode_bulan: 'PSB',
-        label_item: `Biaya Pendaftaran ${bayarPsbPaket === 'vip' ? 'Kamar VIP (Dipan, Formulir, Kotak Almari' : 'Reguler (Formulir, Kotak Almari'}${psbLoketPreview.isFreeUangPangkal ? ', Free Uang Pangkal)' : ', Uang Pangkal)'}`,
+        label_item: `${isPelunasanNow ? 'Pelunasan' : 'Cicilan'} Biaya Pendaftaran PSB (${activePsbBilling.paket.toUpperCase()})`,
         dompet: 'pendaftaran',
-        nominal: psbLoketPreview.nominalDompetPendaftaran,
+        nominal: payNom,
       });
-
-      if (!psbBulanPertamaSudahLunas && psbLoketPreview.nominalSyahriyahBulanPertama > 0) {
-        items.push({
-          item_kode: 'syahriyah',
-          periode_bulan: psbBulanPertamaPeriode,
-          label_item: `Syahriyah Bulan Pertama (${psbBulanPertamaPeriode})`,
-          dompet: 'operasional',
-          nominal: psbLoketPreview.nominalSyahriyahBulanPertama,
-        });
-      }
     }
 
     if (bayarKtlChecked && Number(bayarKtlNominal) > 0) {
@@ -1241,12 +1303,9 @@ export default function KeuanganPage() {
     return { items, total };
   }, [
     activeSantri,
-    activeSantriHasPsb,
+    activePsbBilling,
     bayarPsbChecked,
-    bayarPsbPaket,
-    psbLoketPreview,
-    psbBulanPertamaSudahLunas,
-    psbBulanPertamaPeriode,
+    bayarPsbNominal,
     bayarKtlChecked,
     bayarKtlNominal,
     periodeListTA,
@@ -1304,7 +1363,7 @@ export default function KeuanganPage() {
     }
     if (!activeSantri) return;
     if (loketCartSummary.items.length === 0) {
-      showToast('warning', 'Belum Ada Item Dipilih', 'Silakan centang minimal 1 bulan Syahriyah, Iuran Tahunan, atau KTL terlebih dahulu.');
+      showToast('warning', 'Belum Ada Item Dipilih', 'Silakan centang minimal 1 item Syahriyah, Iuran Tahunan, Cicilan Pendaftaran, atau KTL terlebih dahulu.');
       return;
     }
 
@@ -1315,8 +1374,10 @@ export default function KeuanganPage() {
       const effectiveTglBayar = tglBayarInput || todayStr || getDynamicTodayIsoWib();
       const effectiveTa = tahunAjaran || getDynamicTahunAjaranAktif();
 
-      // Cek ulang apakah ada bulan/item tahunan yang sudah lunas sebelumnya
-      const nonKtlItems = loketCartSummary.items.filter((i) => i.item_kode !== 'ktl_tahun_lalu');
+      // Cek ulang apakah ada bulan/item tahunan yang sudah lunas sebelumnya (kecuali KTL & Cicilan PSB)
+      const nonKtlItems = loketCartSummary.items.filter(
+        (i) => i.item_kode !== 'ktl_tahun_lalu' && i.item_kode !== 'psb_pendaftaran'
+      );
       if (nonKtlItems.length > 0) {
         const { data: existingCheck } = await supabase
           .from('pembayaran_santri_detail')
@@ -1348,7 +1409,12 @@ export default function KeuanganPage() {
         santri_id: activeSantri.id,
         tahun_ajaran: effectiveTa,
         item_kode: item.item_kode,
-        periode_bulan: item.item_kode === 'ktl_tahun_lalu' ? `KTL-${Date.now()}-${idx}` : item.periode_bulan,
+        periode_bulan:
+          item.item_kode === 'ktl_tahun_lalu'
+            ? `KTL-${Date.now()}-${idx}`
+            : item.item_kode === 'psb_pendaftaran'
+            ? `PSB-${Date.now()}-${idx}`
+            : item.periode_bulan,
         label_item: item.label_item,
         dompet: item.dompet,
         nominal: item.nominal,
@@ -1363,41 +1429,65 @@ export default function KeuanganPage() {
 
       if (detailError) throw detailError;
 
-      // 2. Kelompokkan per dompet untuk masuk ke keuangan_transaksi (Buku Kas)
-      const groupedByDompet: Record<DompetType, { nominal: number; labels: string[] }> = {
+      // 2. Kelompokkan per dompet/pos untuk otomatis tercatat masuk ke Buku Kas / Mutasi Kas
+      const kasRows: Array<Record<string, unknown>> = [];
+
+      const psbItems = loketCartSummary.items.filter((i) => i.item_kode === 'psb_pendaftaran');
+      if (psbItems.length > 0) {
+        const psbPayNom = psbItems.reduce((acc, i) => acc + i.nominal, 0);
+        const psbLabels = psbItems.map((i) => i.label_item).join(', ');
+        const isLunasNow = psbPayNom >= activePsbBilling.sisaTagihan;
+        kasRows.push({
+          santri_id: activeSantri.id,
+          dompet: 'pendaftaran',
+          tipe: 'masuk' as const,
+          kategori: isLunasNow ? 'Pelunasan Pendaftaran PSB' : 'Cicilan Pendaftaran PSB',
+          nominal: psbPayNom,
+          bulan_tagihan: psbLabels,
+          keterangan: `Pembayaran ${activeSantri.nama_lengkap} (${activeSantri.kamar}) - ${psbLabels}`,
+          metode_pembayaran: metodeBayar,
+          petugas_id: petugasId,
+          tgl_transaksi: effectiveTglBayar,
+          no_kuitansi: generatedNoKuitansi,
+        });
+      }
+
+      const nonPsbGrouped: Record<DompetType, { nominal: number; labels: string[] }> = {
         pendaftaran: { nominal: 0, labels: [] },
         operasional: { nominal: 0, labels: [] },
         kas_pondok: { nominal: 0, labels: [] },
         mda: { nominal: 0, labels: [] },
       };
 
-      loketCartSummary.items.forEach((item) => {
-        groupedByDompet[item.dompet].nominal += item.nominal;
-        groupedByDompet[item.dompet].labels.push(item.label_item);
-      });
+      loketCartSummary.items
+        .filter((i) => i.item_kode !== 'psb_pendaftaran')
+        .forEach((item) => {
+          nonPsbGrouped[item.dompet].nominal += item.nominal;
+          nonPsbGrouped[item.dompet].labels.push(item.label_item);
+        });
 
-      const kasRows = (Object.keys(groupedByDompet) as DompetType[])
-        .filter((d) => groupedByDompet[d].nominal > 0)
-        .map((d) => ({
-          santri_id: activeSantri.id,
-          dompet: d,
-          tipe: 'masuk' as const,
-          kategori:
-            d === 'pendaftaran'
-              ? bayarPsbChecked && !activeSantriHasPsb
-                ? `Pendaftaran ${bayarPsbPaket.toUpperCase()} (PSB)`
-                : 'Infaq Madin'
-              : d === 'mda'
-              ? 'Iuran Ujian / Raport MDA'
-              : 'Syahriyah & Iuran Santri',
-          nominal: groupedByDompet[d].nominal,
-          bulan_tagihan: groupedByDompet[d].labels.join(', '),
-          keterangan: `Pembayaran ${activeSantri.nama_lengkap} (${activeSantri.kamar}) - ${groupedByDompet[d].labels.join(', ')}`,
-          metode_pembayaran: metodeBayar,
-          petugas_id: petugasId,
-          tgl_transaksi: tglBayarInput,
-          no_kuitansi: generatedNoKuitansi,
-        }));
+      (Object.keys(nonPsbGrouped) as DompetType[])
+        .filter((d) => nonPsbGrouped[d].nominal > 0)
+        .forEach((d) => {
+          kasRows.push({
+            santri_id: activeSantri.id,
+            dompet: d,
+            tipe: 'masuk' as const,
+            kategori:
+              d === 'pendaftaran'
+                ? 'Infaq Madin'
+                : d === 'mda'
+                ? 'Iuran Ujian / Raport MDA'
+                : 'Syahriyah & Iuran Santri',
+            nominal: nonPsbGrouped[d].nominal,
+            bulan_tagihan: nonPsbGrouped[d].labels.join(', '),
+            keterangan: `Pembayaran ${activeSantri.nama_lengkap} (${activeSantri.kamar}) - ${nonPsbGrouped[d].labels.join(', ')}`,
+            metode_pembayaran: metodeBayar,
+            petugas_id: petugasId,
+            tgl_transaksi: effectiveTglBayar,
+            no_kuitansi: generatedNoKuitansi,
+          });
+        });
 
       const { error: kasError } = await insertKeuanganTransaksiResilient(
         kasRows,
@@ -1413,15 +1503,26 @@ export default function KeuanganPage() {
         throw kasError;
       }
 
-      // 3. Jika membayar PSB, sinkronkan paket & nominal pendaftaran pada profil santri
-      if (bayarPsbChecked && !activeSantriHasPsb) {
-        await supabase
+      // 3. Jika membayar cicilan/pelunasan PSB untuk santri yang belum punya nominal_pendaftaran tersimpan, simpan paket & total biayanya
+      if (bayarPsbChecked && !activePsbBilling.hasStoredFee && activePsbBilling.totalBiaya > 0) {
+        const updatePayload: Record<string, unknown> = {
+          paket_pendaftaran: bayarPsbPaket,
+          nominal_pendaftaran: activePsbBilling.totalBiaya,
+          total_biaya_pendaftaran: activePsbBilling.totalBiaya,
+        };
+        const { error: updErr } = await supabase
           .from('santri')
-          .update({
-            paket_pendaftaran: bayarPsbPaket,
-            nominal_pendaftaran: psbLoketPreview.totalBayar,
-          })
+          .update(updatePayload)
           .eq('id', activeSantri.id);
+        if (updErr && /total_biaya_pendaftaran/i.test(updErr.message || '')) {
+          await supabase
+            .from('santri')
+            .update({
+              paket_pendaftaran: bayarPsbPaket,
+              nominal_pendaftaran: activePsbBilling.totalBiaya,
+            })
+            .eq('id', activeSantri.id);
+        }
       }
 
       // 4. Jika membayar KTL, kurangi sisa ktl_nominal pada tabel santri
@@ -1437,8 +1538,8 @@ export default function KeuanganPage() {
       }
 
       // Sinkronkan filter bulan Buku Kas ke bulan transaksi baru agar langsung terlihat
-      if (tglBayarInput && tglBayarInput.length >= 7) {
-        setKasBulanFilter(tglBayarInput.slice(0, 7));
+      if (effectiveTglBayar && effectiveTglBayar.length >= 7) {
+        setKasBulanFilter(effectiveTglBayar.slice(0, 7));
       }
 
       const newReceiptGroup: KuitansiGroup = {
@@ -1449,8 +1550,8 @@ export default function KeuanganPage() {
         santri_kamar: activeSantri.kamar,
         santri_wali: getWaliDisplayName(activeSantri),
         santri_wa: getActiveWaContact(activeSantri)?.number || '',
-        tahun_ajaran: tahunAjaran,
-        tgl_bayar: tglBayarInput,
+        tahun_ajaran: effectiveTa,
+        tgl_bayar: effectiveTglBayar,
         metode_pembayaran: metodeBayar,
         petugas_nama: petugasNama,
         total_nominal: loketCartSummary.total,
@@ -1462,6 +1563,7 @@ export default function KeuanganPage() {
       setSelectedTahunanKodes([]);
       setBayarKtlChecked(false);
       setBayarPsbChecked(false);
+      setBayarPsbNominal(0);
       setLoketBuktiFile(null);
       setLoketBuktiPreview('');
       setSelectedKuitansi(newReceiptGroup);
@@ -1471,7 +1573,7 @@ export default function KeuanganPage() {
         'success',
         'Pembayaran Berhasil & Kuitansi Terbit',
         metodeBayar === 'transfer'
-          ? `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk laporan Pemasukan Transfer (saldo kas tunai tidak berubah).`
+          ? `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} tercatat ke Buku Kas (Transfer) & laporan Pemasukan Transfer.`
           : `No. Kuitansi ${generatedNoKuitansi} sebesar ${formatRupiah(loketCartSummary.total)} masuk ke Dompet Tunai & Buku Kas.`
       );
     } catch (err: unknown) {
@@ -1891,9 +1993,13 @@ export default function KeuanganPage() {
       .map((santri) => {
         const paidSet = paidBySantri.get(santri.id) || new Set<string>();
 
-        // 1. Tunggakan Syahriyah s/d cutoffPeriode
+        // 1. Tunggakan Syahriyah s/d cutoffPeriode, memperhatikan aturan tgl_masuk (tgl 1-25 mulai bulan masuk, tgl 26-31 mulai bulan berikutnya)
+        const syahriyahStartPeriode = getSyahriyahStartPeriode(santri.tgl_masuk);
         const tunggakanBulan: Array<{ periode: string; label: string; nominal: number }> = [];
         periodeListTA.forEach((p) => {
+          if (syahriyahStartPeriode && p.periode < syahriyahStartPeriode) {
+            return;
+          }
           if (p.periode <= cutoffPeriode && !paidSet.has(`syahriyah__${p.periode}`)) {
             tunggakanBulan.push({
               periode: p.periode,
@@ -2394,9 +2500,11 @@ export default function KeuanganPage() {
 
       const migrasiRows: Array<Record<string, unknown>> = [];
 
-      // 2. Masukkan Syahriyah s/d migrasiCutOffBulan
+      // 2. Masukkan Syahriyah s/d migrasiCutOffBulan (tetap hormati tgl_masuk santri)
       if (migrasiCutOffBulan !== 'BELUM_ADA') {
+        const migrasiStart = getSyahriyahStartPeriode(activeMigrasiSantri.tgl_masuk);
         periodeListTA.forEach((p) => {
+          if (migrasiStart && p.periode < migrasiStart) return;
           if (p.periode <= migrasiCutOffBulan && !realSet.has(`syahriyah__${p.periode}`)) {
             migrasiRows.push({
               santri_id: activeMigrasiSantri.id,
@@ -2539,7 +2647,9 @@ export default function KeuanganPage() {
         const insertBatch: Array<Record<string, unknown>> = [];
 
         if (cutoff && /^\d{4}-\d{2}$/.test(cutoff)) {
+          const excelStart = getSyahriyahStartPeriode(santri.tgl_masuk);
           periodeListTA.forEach((p) => {
+            if (excelStart && p.periode < excelStart) return;
             if (p.periode <= cutoff && !realSet.has(`syahriyah__${p.periode}`)) {
               insertBatch.push({
                 santri_id: santri.id,
@@ -3525,6 +3635,7 @@ export default function KeuanganPage() {
                         <p className="text-[11px] text-slate-500 mt-1 truncate">
                           NIS: <strong>{activeSantri.nis}</strong> &bull; Wali: <strong>{getWaliDisplayName(activeSantri)}</strong>
                           {getActiveWaContact(activeSantri) && ` (${getActiveWaContact(activeSantri)?.number})`}
+                          {activeSantri.tgl_masuk && ` • Masuk: ${formatTanggalIndo(activeSantri.tgl_masuk)}`}
                         </p>
                       </div>
 
@@ -3619,109 +3730,213 @@ export default function KeuanganPage() {
                         </div>
                       )}
 
-                      {/* LOKET BIAYA PENDAFTARAN SANTRI BARU (PSB VIP / REGULER + KUOTA FREE UANG PANGKAL) */}
+                      {/* LOKET BIAYA PENDAFTARAN SANTRI BARU (PSB — CICILAN / PELUNASAN TERPISAH DARI SYAHRIYAH) */}
                       <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2.5 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            {!activeSantriHasPsb ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!activePsbBilling.isLunas ? (
                               <label className="inline-flex items-center gap-2 cursor-pointer font-extrabold text-slate-900">
                                 <input
                                   type="checkbox"
                                   checked={bayarPsbChecked}
-                                  onChange={(e) => setBayarPsbChecked(e.target.checked)}
-                                  className="w-4 h-4 accent-emerald-700 rounded"
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setBayarPsbChecked(checked);
+                                    setBayarPsbNominal(checked ? activePsbBilling.sisaTagihan : 0);
+                                  }}
+                                  className="w-4 h-4 rounded"
+                                  style={{ accentColor: 'var(--theme-primary, var(--siap-primary, #047857))' }}
                                 />
                                 Biaya Pendaftaran Santri Baru (PSB)
                               </label>
                             ) : (
                               <span className="font-extrabold text-emerald-800 inline-flex items-center gap-1.5">
                                 <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                                Pendaftaran PSB Sudah Lunas (Masuk Dompet Pendaftaran)
+                                Biaya Pendaftaran PSB Lunas
                               </span>
                             )}
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                                activePsbBilling.isLunas
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                  : activePsbBilling.sudahDibayar > 0
+                                  ? 'bg-amber-100 text-amber-900 border-amber-200'
+                                  : 'bg-slate-200 text-slate-700 border-slate-300'
+                              }`}
+                            >
+                              {activePsbBilling.isLunas
+                                ? 'Lunas'
+                                : activePsbBilling.sudahDibayar > 0
+                                ? 'Cicilan Berjalan'
+                                : 'Belum Lunas'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-bold uppercase text-slate-700">
+                              Paket {activePsbBilling.paket}
+                            </span>
                           </div>
                           <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
-                            Kuota Free Uang Pangkal: {santriList.length}/{skemaPendaftaran.kuota_gratis_uang_pangkal} Pendaftar
+                            Masuk ke <strong>Dompet Pendaftaran</strong>
                           </span>
                         </div>
 
-                        {!activeSantriHasPsb && bayarPsbChecked && (
+                        {/* Ringkasan Total Biaya Paket, Total Sudah Dibayar (DP/Cicilan), dan Sisa Tagihan */}
+                        <div className="grid grid-cols-3 gap-2 bg-white border border-slate-200 rounded-xl p-2.5 text-[11px] tabular-nums">
+                          <div>
+                            <span className="text-slate-500 block">Total Biaya Paket</span>
+                            <strong className="font-mono text-slate-900">
+                              {formatRupiah(activePsbBilling.totalBiaya)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Sudah Dibayar (DP/Cicilan)</span>
+                            <strong className="font-mono text-emerald-800">
+                              {formatRupiah(activePsbBilling.sudahDibayar)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block">Sisa Tagihan</span>
+                            <strong
+                              className={`font-mono ${
+                                activePsbBilling.sisaTagihan > 0 ? 'text-amber-800' : 'text-emerald-700'
+                              }`}
+                            >
+                              {formatRupiah(activePsbBilling.sisaTagihan)}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {activeSantri.catatan_keringanan && (
+                          <p className="text-[11px] text-slate-600">
+                            Keringanan PSB: <strong>{activeSantri.catatan_keringanan}</strong>
+                          </p>
+                        )}
+
+                        {!activePsbBilling.isLunas && bayarPsbChecked && (
                           <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2.5">
+                            {!activePsbBilling.hasStoredFee && (
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                                <div className="inline-flex rounded-lg bg-slate-100 p-1 gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setBayarPsbPaket('reguler');
+                                      const nextPreview = hitungRincianPendaftaran({
+                                        paket: 'reguler',
+                                        jumlahPendaftarSaatIni: santriList.length,
+                                        skema: skemaPendaftaran,
+                                        forceFreeUangPangkal: bayarPsbFreePangkal,
+                                      });
+                                      setBayarPsbNominal(
+                                        Math.max(0, nextPreview.nominalDompetPendaftaran - activePsbBilling.sudahDibayar)
+                                      );
+                                    }}
+                                    className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                                      bayarPsbPaket === 'reguler'
+                                        ? 'text-white'
+                                        : 'text-slate-700 hover:bg-white'
+                                    }`}
+                                    style={
+                                      bayarPsbPaket === 'reguler'
+                                        ? { backgroundColor: 'var(--theme-primary, var(--siap-primary, #047857))' }
+                                        : undefined
+                                    }
+                                  >
+                                    Reguler
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setBayarPsbPaket('vip');
+                                      const nextPreview = hitungRincianPendaftaran({
+                                        paket: 'vip',
+                                        jumlahPendaftarSaatIni: santriList.length,
+                                        skema: skemaPendaftaran,
+                                        forceFreeUangPangkal: bayarPsbFreePangkal,
+                                      });
+                                      setBayarPsbNominal(
+                                        Math.max(0, nextPreview.nominalDompetPendaftaran - activePsbBilling.sudahDibayar)
+                                      );
+                                    }}
+                                    className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                                      bayarPsbPaket === 'vip'
+                                        ? 'text-white'
+                                        : 'text-slate-700 hover:bg-white'
+                                    }`}
+                                    style={
+                                      bayarPsbPaket === 'vip'
+                                        ? { backgroundColor: 'var(--theme-primary, var(--siap-primary, #047857))' }
+                                        : undefined
+                                    }
+                                  >
+                                    Kamar VIP
+                                  </button>
+                                </div>
+
+                                <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={bayarPsbFreePangkal}
+                                    onChange={(e) => {
+                                      const nextFree = e.target.checked;
+                                      setBayarPsbFreePangkal(nextFree);
+                                      const nextPreview = hitungRincianPendaftaran({
+                                        paket: bayarPsbPaket,
+                                        jumlahPendaftarSaatIni: santriList.length,
+                                        skema: skemaPendaftaran,
+                                        forceFreeUangPangkal: nextFree,
+                                      });
+                                      setBayarPsbNominal(
+                                        Math.max(0, nextPreview.nominalDompetPendaftaran - activePsbBilling.sudahDibayar)
+                                      );
+                                    }}
+                                    className="w-3.5 h-3.5 rounded"
+                                    style={{ accentColor: 'var(--theme-primary, var(--siap-primary, #047857))' }}
+                                  />
+                                  Terapkan Free Uang Pangkal (Rp {skemaPendaftaran.uang_pangkal.toLocaleString('id-ID')})
+                                </label>
+                              </div>
+                            )}
+
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="inline-flex rounded-lg bg-slate-100 p-1 gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setBayarPsbPaket('reguler')}
-                                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
-                                    bayarPsbPaket === 'reguler'
-                                      ? 'bg-emerald-700 text-white'
-                                      : 'text-slate-700 hover:bg-white'
-                                  }`}
-                                >
-                                  Reguler
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setBayarPsbPaket('vip')}
-                                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
-                                    bayarPsbPaket === 'vip'
-                                      ? 'bg-emerald-700 text-white'
-                                      : 'text-slate-700 hover:bg-white'
-                                  }`}
-                                >
-                                  Kamar VIP
-                                </button>
+                              <div>
+                                <p className="font-bold text-slate-800 text-xs">
+                                  Nominal Bayar / Cicilan Pendaftaran (Rp)
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  Terpisah dari Syahriyah Bulan Pertama. Sisa setelah bayar:{' '}
+                                  <strong className="font-mono text-slate-800">
+                                    {formatRupiah(
+                                      Math.max(0, activePsbBilling.sisaTagihan - Number(bayarPsbNominal || 0))
+                                    )}
+                                  </strong>
+                                </p>
                               </div>
 
-                              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                              <div className="flex items-center gap-1.5">
                                 <input
-                                  type="checkbox"
-                                  checked={bayarPsbFreePangkal}
-                                  onChange={(e) => setBayarPsbFreePangkal(e.target.checked)}
-                                  className="w-3.5 h-3.5 accent-emerald-700 rounded"
+                                  type="number"
+                                  min={1000}
+                                  max={activePsbBilling.sisaTagihan}
+                                  step={10000}
+                                  value={bayarPsbNominal === 0 ? '' : bayarPsbNominal}
+                                  onChange={(e) => {
+                                    const raw = e.target.value === '' ? 0 : Number(e.target.value);
+                                    setBayarPsbNominal(
+                                      Math.min(activePsbBilling.sisaTagihan, Math.max(0, raw))
+                                    );
+                                  }}
+                                  className="w-36 px-2.5 py-1.5 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-lg text-right"
                                 />
-                                Terapkan Free Uang Pangkal (Rp {skemaPendaftaran.uang_pangkal.toLocaleString('id-ID')})
-                              </label>
-                            </div>
-
-                            <div className="divide-y divide-slate-100 text-[11px]">
-                              {psbLoketPreview.items.map((item) => {
-                                const skippedSyahriyah =
-                                  item.targetDompet === 'operasional' && psbBulanPertamaSudahLunas;
-                                return (
-                                  <div key={item.label} className="py-1 flex items-center justify-between gap-2">
-                                    <span className={skippedSyahriyah ? 'text-slate-400 line-through' : 'text-slate-700'}>
-                                      {item.label}
-                                      <span className="text-[10px] text-slate-400 ml-1">
-                                        ({item.targetDompet === 'operasional' ? 'Dompet Operasional' : 'Dompet Pendaftaran'})
-                                      </span>
-                                    </span>
-                                    <span className="font-mono font-bold tabular-nums shrink-0">
-                                      {skippedSyahriyah ? (
-                                        <span className="text-slate-400">Sudah dipilih/Lunas</span>
-                                      ) : item.isFreePromo ? (
-                                        <span className="text-emerald-700">GRATIS</span>
-                                      ) : (
-                                        formatRupiah(item.nominalBayar)
-                                      )}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-
-                            <div className="pt-1.5 border-t border-slate-100 flex flex-wrap justify-between gap-2 text-[11px] tabular-nums">
-                              <span>
-                                Dompet Pendaftaran: <strong>{formatRupiah(psbLoketPreview.nominalDompetPendaftaran)}</strong>
-                              </span>
-                              <span>
-                                Dompet Operasional (Syahriyah Bln 1):{' '}
-                                <strong>
-                                  {psbBulanPertamaSudahLunas
-                                    ? 'Rp 0 (Lunas/Terpilih)'
-                                    : formatRupiah(psbLoketPreview.nominalSyahriyahBulanPertama)}
-                                </strong>
-                              </span>
+                                {bayarPsbNominal < activePsbBilling.sisaTagihan && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBayarPsbNominal(activePsbBilling.sisaTagihan)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold cursor-pointer whitespace-nowrap"
+                                  >
+                                    Lunasi Sisa
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
@@ -3739,74 +3954,100 @@ export default function KeuanganPage() {
                         </div>
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-2">
-                          {periodeListTA.map((p) => {
-                            const paidRec = activeSantriDetails.find(
-                              (d) => d.item_kode === 'syahriyah' && d.periode_bulan === p.periode
-                            );
-                            const isChecked = selectedBulanPeriodes.includes(p.periode);
-                            const tarifBulanIni = getSyahriyahNominalForPeriode(activeSantri, p.periode);
+                          {(() => {
+                            const activeSyahriyahStart = getSyahriyahStartPeriode(activeSantri.tgl_masuk);
+                            return periodeListTA.map((p) => {
+                              const paidRec = activeSantriDetails.find(
+                                (d) => d.item_kode === 'syahriyah' && d.periode_bulan === p.periode
+                              );
+                              const isExemptByEntryDate =
+                                !paidRec && Boolean(activeSyahriyahStart && p.periode < activeSyahriyahStart);
+                              const isChecked = selectedBulanPeriodes.includes(p.periode);
+                              const tarifBulanIni = getSyahriyahNominalForPeriode(activeSantri, p.periode);
 
-                            if (paidRec) {
+                              if (paidRec) {
+                                return (
+                                  <div
+                                    key={p.periode}
+                                    className={`p-2 rounded-xl border text-left ${
+                                      paidRec.is_migrasi
+                                        ? 'bg-slate-100 border-slate-300 text-slate-600'
+                                        : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-bold">{p.labelShort}</span>
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    </div>
+                                    <p className="text-[10px] font-bold mt-1">
+                                      {paidRec.is_migrasi ? 'LUNAS (MIGRASI)' : 'LUNAS'}
+                                    </p>
+                                    <p className="text-[9.5px] opacity-75 truncate">
+                                      {paidRec.no_kuitansi || formatRupiah(paidRec.nominal)}
+                                    </p>
+                                  </div>
+                                );
+                              }
+
+                              if (isExemptByEntryDate) {
+                                const entryYm = String(activeSantri.tgl_masuk || '').slice(0, 7);
+                                const isBulanMasukTgl26Plus = entryYm === p.periode;
+                                return (
+                                  <div
+                                    key={p.periode}
+                                    className="p-2 rounded-xl border border-slate-200 bg-slate-100/80 text-slate-500 text-left opacity-80"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-bold">{p.labelShort}</span>
+                                    </div>
+                                    <p className="text-[10px] font-bold mt-1 text-slate-600">
+                                      BEBAS TAGIHAN
+                                    </p>
+                                    <p className="text-[9.5px] truncate">
+                                      {isBulanMasukTgl26Plus ? 'Masuk Tgl 26–31' : 'Sebelum Masuk'}
+                                    </p>
+                                  </div>
+                                );
+                              }
+
                               return (
-                                <div
+                                <button
                                   key={p.periode}
-                                  className={`p-2 rounded-xl border text-left ${
-                                    paidRec.is_migrasi
-                                      ? 'bg-slate-100 border-slate-300 text-slate-600'
-                                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                  type="button"
+                                  onClick={() => toggleBulanCheckbox(p.periode)}
+                                  className={`p-2 rounded-xl border text-left transition-all ${
+                                    isChecked
+                                      ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs ring-2 ring-emerald-300'
+                                      : 'bg-white hover:bg-emerald-50/60 border-slate-200 text-slate-800'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold">{p.labelShort}</span>
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span className="text-xs font-extrabold">{p.labelShort}</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {}}
+                                      className="w-3.5 h-3.5 accent-emerald-600 rounded pointer-events-none"
+                                    />
                                   </div>
-                                  <p className="text-[10px] font-bold mt-1">
-                                    {paidRec.is_migrasi ? 'LUNAS (MIGRASI)' : 'LUNAS'}
+                                  <p
+                                    className={`text-[11px] font-bold mt-1 ${
+                                      isChecked ? 'text-emerald-100' : 'text-emerald-800'
+                                    }`}
+                                  >
+                                    {formatRupiah(tarifBulanIni)}
                                   </p>
-                                  <p className="text-[9.5px] opacity-75 truncate">
-                                    {paidRec.no_kuitansi || formatRupiah(paidRec.nominal)}
+                                  <p
+                                    className={`text-[9.5px] ${
+                                      isChecked ? 'text-emerald-200' : 'text-slate-400'
+                                    }`}
+                                  >
+                                    Belum Bayar
                                   </p>
-                                </div>
+                                </button>
                               );
-                            }
-
-                            return (
-                              <button
-                                key={p.periode}
-                                type="button"
-                                onClick={() => toggleBulanCheckbox(p.periode)}
-                                className={`p-2 rounded-xl border text-left transition-all ${
-                                  isChecked
-                                    ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs ring-2 ring-emerald-300'
-                                    : 'bg-white hover:bg-emerald-50/60 border-slate-200 text-slate-800'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs font-extrabold">{p.labelShort}</span>
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => {}}
-                                    className="w-3.5 h-3.5 accent-emerald-600 rounded pointer-events-none"
-                                  />
-                                </div>
-                                <p
-                                  className={`text-[11px] font-bold mt-1 ${
-                                    isChecked ? 'text-emerald-100' : 'text-emerald-800'
-                                  }`}
-                                >
-                                  {formatRupiah(tarifBulanIni)}
-                                </p>
-                                <p
-                                  className={`text-[9.5px] ${
-                                    isChecked ? 'text-emerald-200' : 'text-slate-400'
-                                  }`}
-                                >
-                                  Belum Bayar
-                                </p>
-                              </button>
-                            );
-                          })}
+                            });
+                          })()}
                         </div>
                       </div>
 
@@ -3967,20 +4208,32 @@ export default function KeuanganPage() {
                       </div>
                     )}
 
-                    {/* FOOTER BAR GRADASI HIJAU EMERALD PEKAT (RINGKAS DI HP, LENGKAP DI DESKTOP) */}
-                    <div className="shrink-0 px-3 sm:px-4 py-2 lg:py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white border-t border-emerald-700 flex items-center justify-between gap-2">
+                    {/* FOOTER BAR CHECKOUT MENGIKUTI TEMA AKTIF (--theme-primary) */}
+                    <div
+                      style={{
+                        background:
+                          'linear-gradient(135deg, color-mix(in srgb, var(--theme-primary, var(--siap-primary, #047857)) 80%, #0f172a), var(--theme-primary, var(--siap-primary, #047857)))',
+                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                      }}
+                      className="shrink-0 px-3 sm:px-4 py-2 lg:py-4 text-white border-t flex items-center justify-between gap-2"
+                    >
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="hidden md:inline text-[11px] font-bold uppercase tracking-wider text-emerald-200">
+                        <span className="hidden md:inline text-[11px] font-bold uppercase tracking-wider text-white/80">
                           Metode Bayar:
                         </span>
-                        <div className="inline-flex rounded-xl bg-black/30 p-0.5 sm:p-1 border border-emerald-700/70">
+                        <div className="inline-flex rounded-xl bg-black/25 p-0.5 sm:p-1 border border-white/20">
                           <button
                             type="button"
                             onClick={() => setMetodeBayar('tunai')}
+                            style={
+                              metodeBayar === 'tunai'
+                                ? { color: 'var(--theme-primary, var(--siap-primary, #047857))' }
+                                : undefined
+                            }
                             className={`px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                               metodeBayar === 'tunai'
-                                ? 'bg-emerald-500 text-emerald-950 shadow-xs'
-                                : 'text-emerald-100 hover:text-white'
+                                ? 'bg-white shadow-xs'
+                                : 'text-white/85 hover:text-white'
                             }`}
                           >
                             <span className="sm:hidden">Tunai</span>
@@ -3989,10 +4242,15 @@ export default function KeuanganPage() {
                           <button
                             type="button"
                             onClick={() => setMetodeBayar('transfer')}
+                            style={
+                              metodeBayar === 'transfer'
+                                ? { color: 'var(--theme-primary, var(--siap-primary, #047857))' }
+                                : undefined
+                            }
                             className={`px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                               metodeBayar === 'transfer'
-                                ? 'bg-sky-400 text-slate-950 shadow-xs'
-                                : 'text-emerald-100 hover:text-white'
+                                ? 'bg-white shadow-xs'
+                                : 'text-white/85 hover:text-white'
                             }`}
                           >
                             <span className="sm:hidden">Tf</span>
@@ -4003,7 +4261,7 @@ export default function KeuanganPage() {
 
                       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                         <div className="text-right min-w-0">
-                          <span className="text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider text-emerald-300 block leading-tight">
+                          <span className="text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider text-white/80 block leading-tight">
                             Total ({loketCartSummary.items.length})
                           </span>
                           <span className="text-sm sm:text-lg font-extrabold text-white tracking-tight tabular-nums whitespace-nowrap font-mono">
@@ -4016,7 +4274,12 @@ export default function KeuanganPage() {
                             type="button"
                             disabled={savingPayment || loketCartSummary.items.length === 0}
                             onClick={handleSimpanPembayaran}
-                            className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:bg-slate-600 disabled:text-slate-300 text-emerald-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
+                            style={
+                              savingPayment || loketCartSummary.items.length === 0
+                                ? undefined
+                                : { color: 'var(--theme-primary, var(--siap-primary, #047857))' }
+                            }
+                            className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-white hover:bg-white/90 disabled:bg-white/20 disabled:text-white/50 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
                           >
                             <ReceiptText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                             <span>
@@ -4133,8 +4396,8 @@ export default function KeuanganPage() {
                   </div>
                 ) : (
                   <>
-                    {/* BARIS TOMBOL AKSI: PRINT 21x10 | COPY TEKS | UNDUH PNG | HAPUS TRANSAKSI */}
-                    <div className="shrink-0 px-4 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                    {/* BARIS TOMBOL AKSI: PRINT 21x10 | UNDUH PNG | COPY TEKS | HAPUS TRANSAKSI */}
+                    <div className="shrink-0 px-4 py-3 bg-white border-b border-slate-200 flex flex-col gap-3">
                       <div>
                         <span className="text-xs font-extrabold text-slate-900">
                           Pratinjau Kuitansi Ukuran 21 × 10 cm
@@ -4144,43 +4407,65 @@ export default function KeuanganPage() {
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="grid grid-cols-2 gap-2 w-full">
                         <button
                           type="button"
                           onClick={() => triggerPrint('kuitansi')}
-                          className="px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          className="w-full min-h-[40px] h-full px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center gap-1.5 text-center leading-tight shadow-xs cursor-pointer"
                         >
-                          <Printer className="w-3.5 h-3.5" />
-                          Print Kuitansi (21×10 cm)
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleCopyTeksKuitansi(activeKuitansi)}
-                          className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
-                        >
-                          {copiedKuitansiNo === activeKuitansi.no_kuitansi ? (
-                            <>
-                              <Check className="w-3.5 h-3.5" />
-                              Tersalin
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" />
-                              Copy Teks
-                            </>
-                          )}
+                          <Printer className="w-3.5 h-3.5 shrink-0" />
+                          <span>Print Kuitansi (21×10 cm)</span>
                         </button>
 
                         <button
                           type="button"
                           disabled={downloadingPng}
                           onClick={() => handleDownloadKuitansiPng(activeKuitansi)}
-                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          className="w-full min-h-[40px] h-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white text-xs font-bold flex items-center justify-center gap-1.5 text-center leading-tight shadow-xs cursor-pointer"
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          {downloadingPng ? 'Memproses...' : 'Unduh PNG'}
+                          <Download className="w-3.5 h-3.5 shrink-0" />
+                          <span>{downloadingPng ? 'Memproses...' : 'Unduh PNG'}</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTeksKuitansi(activeKuitansi)}
+                          className="w-full min-h-[40px] h-full px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 text-center leading-tight shadow-xs cursor-pointer"
+                        >
+                          {copiedKuitansiNo === activeKuitansi.no_kuitansi ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 shrink-0" />
+                              <span>Tersalin</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 shrink-0" />
+                              <span>Copy Teks</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* TOMBOL HAPUS TRANSAKSI (HANYA PIMPINAN INTI / BENDAHARA, BENDAHARA MENDAPAT NOTIF PERINGATAN) */}
+                        {canEditKeuangan ? (
+                          <button
+                            type="button"
+                            onClick={() => handleClickHapusKuitansi(activeKuitansi)}
+                            title={
+                              isPimpinanInti || userRole === 'super_admin'
+                                ? 'Hapus Transaksi Pembayaran (Pimpinan Inti)'
+                                : 'Khusus Pimpinan Inti'
+                            }
+                            className="w-full min-h-[40px] h-full px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center justify-center gap-1.5 text-center leading-tight cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>Hapus Transaksi</span>
+                          </button>
+                        ) : (
+                          <div className="w-full min-h-[40px] h-full px-3 py-2 rounded-xl bg-slate-100 text-slate-400 border border-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 text-center leading-tight select-none">
+                            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>Hapus Transaksi</span>
+                          </div>
+                        )}
 
                         {(() => {
                           const linkedTx = kasTransaksi.find(
@@ -4205,10 +4490,10 @@ export default function KeuanganPage() {
                                     noKuitansi: activeKuitansi.no_kuitansi,
                                   })
                                 }
-                                className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                                className="col-span-2 w-full min-h-[40px] px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                               >
-                                <Eye className="w-3.5 h-3.5" />
-                                Lihat Bukti TF
+                                <Eye className="w-3.5 h-3.5 shrink-0" />
+                                <span>Lihat Bukti TF</span>
                               </button>
                             );
                           }
@@ -4225,34 +4510,19 @@ export default function KeuanganPage() {
                                   });
                                   quickAttachInputRef.current?.click();
                                 }}
-                                className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                                className="col-span-2 w-full min-h-[40px] px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                               >
-                                <ImagePlus className="w-3.5 h-3.5" />
-                                {uploadingLampiranId === activeKuitansi.no_kuitansi
-                                  ? 'Mengunggah...'
-                                  : '+ Bukti TF'}
+                                <ImagePlus className="w-3.5 h-3.5 shrink-0" />
+                                <span>
+                                  {uploadingLampiranId === activeKuitansi.no_kuitansi
+                                    ? 'Mengunggah...'
+                                    : '+ Bukti TF'}
+                                </span>
                               </button>
                             );
                           }
                           return null;
                         })()}
-
-                        {/* TOMBOL HAPUS TRANSAKSI (HANYA PIMPINAN INTI / BENDAHARA, BENDAHARA MENDAPAT NOTIF PERINGATAN) */}
-                        {canEditKeuangan && (
-                          <button
-                            type="button"
-                            onClick={() => handleClickHapusKuitansi(activeKuitansi)}
-                            title={
-                              isPimpinanInti || userRole === 'super_admin'
-                                ? 'Hapus Transaksi Pembayaran (Pimpinan Inti)'
-                                : 'Khusus Pimpinan Inti'
-                            }
-                            className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Hapus Transaksi
-                          </button>
-                        )}
                       </div>
                     </div>
 

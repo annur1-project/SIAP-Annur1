@@ -14,8 +14,8 @@ import {
   DEFAULT_SKEMA_PENDAFTARAN,
   generateNextNisForYear,
   getDynamicTodayIsoWib,
-  getTahunAjaranForDate,
   hitungRincianPendaftaran,
+  isMissingColumnError,
   mergeAturanOperasional,
   readExtendedLocal,
   type SkemaPendaftaranConfig,
@@ -30,7 +30,8 @@ const ALLOWED_DB_COLUMNS = [
   'status_ibu', 'nama_ibu', 'nik_ibu', 'pendidikan_ibu', 'pekerjaan_ibu', 'penghasilan_ibu', 'no_wa_ibu',
   'nama_wali', 'nik_wali', 'pendidikan_wali', 'pekerjaan_wali', 'no_wa_wali',
   'alamat_jalan', 'rt', 'rw', 'desa', 'kecamatan', 'kabupaten', 'provinsi', 'kode_pos',
-  'status', 'foto_url', 'unit_asrama', 'paket_pendaftaran', 'nominal_pendaftaran', 'catatan_keringanan'
+  'status', 'foto_url', 'unit_asrama', 'paket_pendaftaran', 'nominal_pendaftaran',
+  'total_biaya_pendaftaran', 'dp_terbayar', 'catatan_keringanan'
 ];
 
 type SantriFieldValue = string | number | boolean | null | undefined;
@@ -82,6 +83,8 @@ interface SantriRow {
   unit_asrama?: string;
   paket_pendaftaran?: string;
   nominal_pendaftaran?: number;
+  total_biaya_pendaftaran?: number;
+  dp_terbayar?: number;
   catatan_keringanan?: string;
   [key: string]: SantriFieldValue;
 }
@@ -100,6 +103,10 @@ interface PengaturanSantriState {
   no_telepon: string;
   email_resmi?: string;
   logo_url?: string;
+  kop_surat_url?: string;
+  kop_url?: string;
+  nama_yayasan?: string;
+  kota?: string;
   stempel_url?: string;
   nama_pengasuh: string;
   ttd_pengasuh_url?: string;
@@ -177,6 +184,10 @@ export default function DataSantriPage() {
     no_telepon: '085604551562',
     email_resmi: 'annur1bululawang@gmail.com',
     logo_url: '',
+    kop_surat_url: '',
+    kop_url: '',
+    nama_yayasan: '',
+    kota: 'Bululawang',
     stempel_url: '',
     nama_pengasuh: 'Dr. KH. A. Fahrur Rozi',
     ttd_pengasuh_url: '',
@@ -385,7 +396,7 @@ export default function DataSantriPage() {
       paket_pendaftaran: paket,
       kamar: nextKamar,
       tarif_syahriyah: nextSyahriyah,
-      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.totalBayar,
+      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.nominalDompetPendaftaran,
     }));
   };
 
@@ -404,7 +415,7 @@ export default function DataSantriPage() {
       kamar: kamarValue,
       paket_pendaftaran: nextPaket,
       tarif_syahriyah: nextTarif,
-      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.totalBayar,
+      nominal_pendaftaran: isCustomNominal ? prev.nominal_pendaftaran : nextRincian.nominalDompetPendaftaran,
     }));
   };
 
@@ -455,7 +466,7 @@ export default function DataSantriPage() {
     setWilayahResults([]);
   };
 
-  // Simpan Pendaftaran Santri Baru
+  // Simpan Pendaftaran Santri Baru (Tagihan Penuh Pendaftaran Tercatat, Belum Lunas / Belum Masuk Kas)
   const handleSaveSantri = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEditSantri) return;
@@ -473,10 +484,16 @@ export default function DataSantriPage() {
       skema: skemaPendaftaran,
       customNominal: isCustomNominal ? Number(formData.nominal_pendaftaran || 0) : null,
     });
+    const tagihanPendaftaranPenuh = isCustomNominal
+      ? Math.max(0, Number(formData.nominal_pendaftaran || 0))
+      : rincianFinal.nominalDompetPendaftaran;
 
     const payload = sanitizePayload({
       ...formData,
-      nominal_pendaftaran: rincianFinal.totalBayar,
+      paket_pendaftaran: rincianFinal.paket,
+      nominal_pendaftaran: tagihanPendaftaranPenuh,
+      total_biaya_pendaftaran: tagihanPendaftaranPenuh,
+      dp_terbayar: 0,
       tgl_masuk: tglMasukFinal,
       nis: assignedNis,
       no_wa_ayah: formData.no_wa_wali,
@@ -484,74 +501,20 @@ export default function DataSantriPage() {
       unit_asrama: 'Induk Putra'
     });
 
-    const { data: newSantri, error } = await supabase.from('santri').insert([payload]).select().single();
+    let insertRes = await supabase.from('santri').insert([payload]).select().single();
+    if (insertRes.error && isMissingColumnError(insertRes.error)) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.total_biaya_pendaftaran;
+      delete fallbackPayload.dp_terbayar;
+      insertRes = await supabase.from('santri').insert([fallbackPayload]).select().single();
+    }
 
-    if (error) {
+    if (insertRes.error || !insertRes.data) {
       setSaving(false);
-      showToast('error', 'Gagal Mendaftarkan Santri', error.message);
+      showToast('error', 'Gagal Mendaftarkan Santri', insertRes.error?.message || 'Gagal menyimpan data santri.');
       return;
     }
-
-    const noKuitansiPsb = `KWT-PSB-${tglMasukFinal.replace(/-/g, '').slice(2)}-${assignedNis.slice(-4)}`;
-    const periodeBulanPertama = tglMasukFinal.slice(0, 7);
-    const tahunAjaranMasuk = getTahunAjaranForDate(tglMasukFinal);
-
-    const kasPayloads: Array<Record<string, unknown>> = [];
-    if (rincianFinal.nominalDompetPendaftaran > 0) {
-      kasPayloads.push({
-        santri_id: newSantri.id,
-        dompet: 'pendaftaran',
-        tipe: 'masuk',
-        kategori: `Pendaftaran ${rincianFinal.paket.toUpperCase()}`,
-        nominal: rincianFinal.nominalDompetPendaftaran,
-        keterangan:
-          formData.catatan_keringanan ||
-          `Pendaftaran Santri Baru ${rincianFinal.paket.toUpperCase()} (${formData.nama_lengkap})${
-            rincianFinal.isFreeUangPangkal ? ' - Free Uang Pangkal' : ''
-          }`,
-        metode_pembayaran: 'tunai',
-        tgl_transaksi: tglMasukFinal,
-        no_kuitansi: noKuitansiPsb,
-      });
-    }
-
-    if (rincianFinal.nominalSyahriyahBulanPertama > 0) {
-      kasPayloads.push({
-        santri_id: newSantri.id,
-        dompet: 'operasional',
-        tipe: 'masuk',
-        kategori: 'Syahriyah & Iuran Santri',
-        nominal: rincianFinal.nominalSyahriyahBulanPertama,
-        bulan_tagihan: `Syahriyah Bulan Pertama (${periodeBulanPertama})`,
-        keterangan: `Syahriyah Bulan Pertama PSB - ${formData.nama_lengkap} (${formData.kamar})`,
-        metode_pembayaran: 'tunai',
-        tgl_transaksi: tglMasukFinal,
-        no_kuitansi: noKuitansiPsb,
-      });
-    }
-
-    if (kasPayloads.length > 0) {
-      await supabase.from('keuangan_transaksi').insert(kasPayloads);
-    }
-
-    if (rincianFinal.nominalSyahriyahBulanPertama > 0) {
-      await supabase.from('pembayaran_santri_detail').insert([
-        {
-          santri_id: newSantri.id,
-          tahun_ajaran: tahunAjaranMasuk,
-          item_kode: 'syahriyah',
-          periode_bulan: periodeBulanPertama,
-          label_item: `Syahriyah Bulan Pertama (${periodeBulanPertama})`,
-          dompet: 'operasional',
-          nominal: rincianFinal.nominalSyahriyahBulanPertama,
-          is_migrasi: false,
-          no_kuitansi: noKuitansiPsb,
-          metode_pembayaran: 'tunai',
-          tgl_bayar: tglMasukFinal,
-          petugas_nama: 'Pendaftaran PSB',
-        },
-      ]);
-    }
+    const newSantri = insertRes.data;
 
     const nextDefaultReguler = hitungRincianPendaftaran({
       paket: 'reguler',
@@ -565,7 +528,7 @@ export default function DataSantriPage() {
       tgl_masuk: todayStr,
       nama_lengkap: '',
       paket_pendaftaran: 'reguler',
-      nominal_pendaftaran: nextDefaultReguler.totalBayar,
+      nominal_pendaftaran: nextDefaultReguler.nominalDompetPendaftaran,
       catatan_keringanan: '',
       kamar: 'A1',
       tarif_syahriyah: skemaPendaftaran.syahriyah_reguler,
@@ -582,7 +545,7 @@ export default function DataSantriPage() {
     showToast(
       'success',
       'Santri Berhasil Didaftarkan!',
-      `${newSantri.nama_lengkap} (NIS ${assignedNis}) tercatat · No. Kuitansi ${noKuitansiPsb}.`
+      `${newSantri.nama_lengkap} (NIS ${assignedNis}) aktif. Tagihan pendaftaran Rp ${tagihanPendaftaranPenuh.toLocaleString('id-ID')} siap dibayar/dicicil di menu Keuangan.`
     );
     fetchSantri();
   };
@@ -1023,39 +986,53 @@ export default function DataSantriPage() {
                 key={santriItem.id || santriItem.nis}
                 className="buku-induk-sheet font-sans text-[10px] leading-snug border-[3px] border-double border-emerald-900 px-4 py-3 rounded-xs"
               >
-                {/* BAGIAN ATAS: KOP SURAT + IDENTITAS INDUK & PAS FOTO 3x4 */}
+                {/* BAGIAN ATAS: KOP SURAT DINAMIS + IDENTITAS INDUK & PAS FOTO 3x4 */}
                 <div>
-                  <div className="flex items-center justify-between pb-2 border-b-[3px] border-emerald-800">
-                    <div className="w-15 h-15 flex items-center justify-center shrink-0">
-                      {pengaturan.logo_url ? (
-                        <img src={pengaturan.logo_url} alt="Logo Pondok" className="w-15 h-15 object-contain" />
-                      ) : (
-                        <div className="w-14 h-14 rounded-full bg-emerald-900 text-amber-300 border-2 border-amber-500 flex flex-col items-center justify-center font-extrabold">
-                          <span className="text-[11px] leading-none">AN-1</span>
-                          <span className="text-[7px] tracking-widest mt-0.5">MALANG</span>
-                        </div>
-                      )}
+                  {pengaturan.kop_surat_url || pengaturan.kop_url ? (
+                    <div className="pb-2 border-b-[3px] border-emerald-800">
+                      <img
+                        src={pengaturan.kop_surat_url || pengaturan.kop_url}
+                        alt={`Kop Surat ${pengaturan.nama_pesantren}`}
+                        referrerPolicy="no-referrer"
+                        className="w-full max-h-24 object-contain mx-auto"
+                      />
                     </div>
+                  ) : (
+                    <div className="flex items-center justify-between pb-2 border-b-[3px] border-emerald-800">
+                      <div className="w-15 h-15 flex items-center justify-center shrink-0">
+                        {pengaturan.logo_url ? (
+                          <img src={pengaturan.logo_url} alt="Logo Pondok" referrerPolicy="no-referrer" className="w-15 h-15 object-contain" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-emerald-900 text-amber-300 border-2 border-amber-500 flex flex-col items-center justify-center font-extrabold">
+                            <span className="text-[11px] leading-none">AN-1</span>
+                            <span className="text-[7px] tracking-widest mt-0.5">MALANG</span>
+                          </div>
+                        )}
+                      </div>
 
-                    <div className="text-center flex-1 px-3">
-                      <p className="text-[9px] font-bold tracking-[0.2em] text-emerald-800 uppercase">
-                        YAYASAN PENDIDIKAN PONDOK PESANTREN AN-NUR
-                      </p>
-                      <h1 className="text-[15px] font-extrabold text-emerald-950 uppercase tracking-wide mt-0.5">
-                        {pengaturan.nama_pesantren}
-                      </h1>
-                      <p className="text-[9.5px] text-slate-700 mt-0.5">{pengaturan.alamat_lengkap}</p>
-                      <p className="text-[8.5px] text-emerald-900 font-medium">
-                        Telp/WA: {pengaturan.no_telepon} • Email: {pengaturan.email_resmi || 'annur1bululawang@gmail.com'}
-                      </p>
-                    </div>
+                      <div className="text-center flex-1 px-3">
+                        {pengaturan.nama_yayasan && (
+                          <p className="text-[9px] font-bold tracking-[0.2em] text-emerald-800 uppercase">
+                            {pengaturan.nama_yayasan}
+                          </p>
+                        )}
+                        <h1 className="text-[15px] font-extrabold text-emerald-950 uppercase tracking-wide mt-0.5">
+                          {pengaturan.nama_pesantren}
+                        </h1>
+                        <p className="text-[9.5px] text-slate-700 mt-0.5">{pengaturan.alamat_lengkap}</p>
+                        <p className="text-[8.5px] text-emerald-900 font-medium">
+                          Telp/WA: {pengaturan.no_telepon}
+                          {pengaturan.email_resmi ? ` • Email: ${pengaturan.email_resmi}` : ''}
+                        </p>
+                      </div>
 
-                    <div className="w-20 shrink-0 text-right">
-                      <span className="inline-block px-2 py-1 bg-emerald-50 border border-emerald-700 text-emerald-900 font-bold text-[8px] rounded leading-tight">
-                        ARSIP INDUK<br />EMIS KEMENAG
-                      </span>
+                      <div className="w-20 shrink-0 text-right">
+                        <span className="inline-block px-2 py-1 bg-emerald-50 border border-emerald-700 text-emerald-900 font-bold text-[8px] rounded leading-tight">
+                          ARSIP INDUK<br />EMIS KEMENAG
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* GARIS AKSEN EMAS */}
                   <div className="h-[2px] bg-amber-600 mt-0.5 mb-2" />
@@ -1258,7 +1235,7 @@ export default function DataSantriPage() {
                     </div>
 
                     <div className="flex flex-col items-center relative">
-                      <p className="text-slate-600">Bululawang, {formatTanggalIndo(todayStr)}</p>
+                      <p className="text-slate-600">{pengaturan.kota || 'Bululawang'}, {formatTanggalIndo(todayStr)}</p>
                       <p className="font-bold text-emerald-950">Kepala Pondok</p>
                       <div className="h-14 relative flex items-center justify-center my-0.5">
                         {pengaturan.stempel_url && (
@@ -1273,7 +1250,7 @@ export default function DataSantriPage() {
                   </div>
 
                   <div className="mt-2 pt-1 border-t border-emerald-800/30 flex justify-between text-[8px] text-slate-500">
-                    <span>Dokumen Sah Buku Induk Santri • e-annursatu • Ponpes An-Nur 1 Bululawang</span>
+                    <span>Dokumen Sah Buku Induk Santri • {pengaturan.nama_pesantren}</span>
                     <span className="font-mono">NIS: {santriItem.nis}</span>
                   </div>
                 </div>
@@ -1407,8 +1384,8 @@ export default function DataSantriPage() {
         </div>
 
         {/* BARIS PROGRESS BAR KELENGKAPAN DATA EMIS */}
-        <div className="pt-3.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex-1 space-y-1.5">
+        <div className="pt-3.5 border-t border-slate-100 space-y-2.5">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-slate-600 flex items-center gap-1.5">
                 Kelengkapan Berkas EMIS
@@ -1430,7 +1407,7 @@ export default function DataSantriPage() {
             </div>
           </div>
 
-          <div className="shrink-0 flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 w-full">
             {menungguPenempatanCount > 0 && (
               <button
                 type="button"
@@ -1439,7 +1416,7 @@ export default function DataSantriPage() {
                     filterKamar === 'Menunggu Penempatan' ? 'Semua' : 'Menunggu Penempatan'
                   )
                 }
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border cursor-pointer ${
+                className={`w-full sm:flex-1 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all border cursor-pointer text-center ${
                   filterKamar === 'Menunggu Penempatan'
                     ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
                     : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
@@ -1454,20 +1431,22 @@ export default function DataSantriPage() {
               <button
                 type="button"
                 onClick={() => setFilterKelengkapan(filterKelengkapan === 'Belum' ? 'Semua' : 'Belum')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
+                className={`w-full sm:flex-1 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all border text-center ${
                   filterKelengkapan === 'Belum'
                     ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
                     : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
                 }`}
               >
-                <AlertCircle className="w-3.5 h-3.5" />
-                {filterKelengkapan === 'Belum'
-                  ? `Menampilkan ${belumLengkapCount} Belum Lengkap (Reset)`
-                  : `${belumLengkapCount} Santri Belum Lengkap →`}
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {filterKelengkapan === 'Belum'
+                    ? `Menampilkan ${belumLengkapCount} Belum Lengkap (Reset)`
+                    : `${belumLengkapCount} Santri Belum Lengkap →`}
+                </span>
               </button>
             ) : totalSantri > 0 ? (
-              <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="w-full sm:flex-1 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 Semua Data Lengkap
               </span>
             ) : null}
@@ -1477,30 +1456,32 @@ export default function DataSantriPage() {
 
       {/* ACTION BAR SELEKSI MASSAL (CETAK BUKU INDUK MASSAL & MUTASI) */}
       {selectedIds.length > 0 && (
-        <div className="bg-emerald-900 text-white p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-lg print:hidden">
-          <span className="font-semibold">{selectedIds.length} Santri Terpilih</span>
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="bg-emerald-900 text-white p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg print:hidden">
+          <span className="font-bold text-center sm:text-left">
+            {selectedIds.length} Santri Terpilih
+          </span>
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               onClick={handleBulkPrintBukuInduk}
-              className="px-3.5 py-2 bg-white text-emerald-950 hover:bg-emerald-50 font-bold rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
+              className="col-span-2 sm:col-span-1 px-3.5 py-2.5 sm:py-2 bg-white text-emerald-950 hover:bg-emerald-50 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-xs"
             >
-              <Printer className="w-3.5 h-3.5 text-emerald-700" />
+              <Printer className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
               Cetak Buku Induk ({selectedIds.length} Lembar)
             </button>
 
             {canEditSantri && (
               <button
                 onClick={handleBulkMutasiAlBurhany}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 font-bold rounded-lg flex items-center gap-1.5 transition-colors"
+                className="px-3.5 py-2.5 sm:py-2 bg-amber-600 hover:bg-amber-500 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
               >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                Mutasi ke An-Nur Al-Burhany
+                <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Mutasi Al-Burhany</span>
               </button>
             )}
 
             <button
               onClick={() => setSelectedIds([])}
-              className="px-3 py-2 bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors"
+              className={`${canEditSantri ? '' : 'col-span-2'} sm:col-span-1 px-3.5 py-2.5 sm:py-2 bg-emerald-800 hover:bg-emerald-700 font-semibold rounded-xl flex items-center justify-center transition-colors`}
             >
               Batal
             </button>
@@ -1831,11 +1812,11 @@ export default function DataSantriPage() {
             <form onSubmit={handleSaveSantri} className="p-6 space-y-4 text-xs overflow-y-auto">
               <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200 space-y-3">
                 <div className="flex flex-wrap justify-between items-center gap-2">
-                  <span className="font-bold text-emerald-900">1. Skema Biaya Pendaftaran (PSB)</span>
+                  <span className="font-bold text-emerald-900">1. Skema Tagihan Pendaftaran (PSB)</span>
                   <span className="text-[11px] font-bold text-emerald-800 tabular-nums">
                     {rincianPsbAktif.isFreeUangPangkal
-                      ? `Promo Free Uang Pangkal (${santriList.length}/${rincianPsbAktif.kuotaPromoTotal} pendaftar)`
-                      : `Tarif Normal (Kuota ${rincianPsbAktif.kuotaPromoTotal} penuh)`}
+                      ? `Promo Free Uang Pangkal · Sisa Kuota ${Math.max(0, rincianPsbAktif.kuotaPromoTotal - santriList.length)}/${rincianPsbAktif.kuotaPromoTotal}`
+                      : `Tarif Normal (Kuota Promo ${rincianPsbAktif.kuotaPromoTotal} penuh)`}
                   </span>
                 </div>
 
@@ -1853,11 +1834,11 @@ export default function DataSantriPage() {
                     <div className="min-w-0">
                       <span className="font-bold text-slate-800 block">Paket Reguler</span>
                       <span className="text-xs text-emerald-700 font-bold tabular-nums block">
-                        Rp {rincianReguler.totalBayar.toLocaleString('id-ID')}
+                        Rp {rincianReguler.nominalDompetPendaftaran.toLocaleString('id-ID')}
                       </span>
                       {rincianReguler.isFreeUangPangkal && (
                         <span className="text-[10px] text-slate-500 tabular-nums block">
-                          Normal Rp {rincianReguler.totalNormal.toLocaleString('id-ID')} (Free Uang Pangkal)
+                          Normal Rp {(rincianReguler.totalNormal - rincianReguler.nominalSyahriyahBulanPertama).toLocaleString('id-ID')} (Free Uang Pangkal)
                         </span>
                       )}
                     </div>
@@ -1876,34 +1857,33 @@ export default function DataSantriPage() {
                     <div className="min-w-0">
                       <span className="font-bold text-slate-800 block">Paket Kamar VIP (+Dipan)</span>
                       <span className="text-xs text-emerald-700 font-bold tabular-nums block">
-                        Rp {rincianVip.totalBayar.toLocaleString('id-ID')}
+                        Rp {rincianVip.nominalDompetPendaftaran.toLocaleString('id-ID')}
                       </span>
                       {rincianVip.isFreeUangPangkal && (
                         <span className="text-[10px] text-slate-500 tabular-nums block">
-                          Normal Rp {rincianVip.totalNormal.toLocaleString('id-ID')} (Free Uang Pangkal)
+                          Normal Rp {(rincianVip.totalNormal - rincianVip.nominalSyahriyahBulanPertama).toLocaleString('id-ID')} (Free Uang Pangkal)
                         </span>
                       )}
                     </div>
                   </label>
                 </div>
 
-                {/* Rincian Otomatis Sesuai Skema + Pembagian Dompet Keuangan */}
+                {/* Rincian Tagihan Biaya Pendaftaran (Siap Dibayar/Dicicil di Menu Keuangan) */}
                 {!isCustomNominal && (
                   <div className="bg-white rounded-xl border border-emerald-200/80 p-3 space-y-2 text-[11px]">
                     <div className="font-bold text-slate-700 flex items-center justify-between">
-                      <span>Rincian Komponen ({formData.paket_pendaftaran === 'vip' ? 'Kamar VIP' : 'Reguler'})</span>
+                      <span>Rincian Tagihan Paket ({formData.paket_pendaftaran === 'vip' ? 'Kamar VIP' : 'Reguler'})</span>
                       <span className="text-emerald-800 font-mono tabular-nums">
-                        Total: Rp {rincianPsbAktif.totalBayar.toLocaleString('id-ID')}
+                        Tagihan Penuh: Rp {rincianPsbAktif.nominalDompetPendaftaran.toLocaleString('id-ID')}
                       </span>
                     </div>
                     <div className="divide-y divide-slate-100">
-                      {rincianPsbAktif.items.map((item) => (
+                      {rincianPsbAktif.items
+                        .filter((item) => item.targetDompet !== 'operasional')
+                        .map((item) => (
                         <div key={item.label} className="py-1 flex items-center justify-between gap-2">
                           <span className="text-slate-600">
                             {item.label}
-                            <span className="text-[10px] text-slate-400 ml-1.5">
-                              ({item.targetDompet === 'operasional' ? 'Dompet Operasional' : 'Dompet Pendaftaran'})
-                            </span>
                           </span>
                           <span className="font-mono font-semibold text-slate-900 tabular-nums shrink-0">
                             {item.isFreePromo ? (
@@ -1920,13 +1900,13 @@ export default function DataSantriPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="pt-1.5 border-t border-slate-100 flex flex-wrap justify-between gap-2 text-[10px] text-slate-500 tabular-nums">
-                      <span>
-                        Masuk Dompet Pendaftaran: <strong className="text-slate-800">Rp {rincianPsbAktif.nominalDompetPendaftaran.toLocaleString('id-ID')}</strong>
-                      </span>
-                      <span>
-                        Masuk Dompet Operasional (Syahriyah Bln 1): <strong className="text-emerald-800">Rp {rincianPsbAktif.nominalSyahriyahBulanPertama.toLocaleString('id-ID')}</strong>
-                      </span>
+                    <div className="pt-1.5 border-t border-slate-100 space-y-0.5 text-[10px] text-amber-800 bg-amber-50/70 p-2 rounded-lg border border-amber-200/70">
+                      <p className="font-semibold">
+                        Status Awal: Belum Lunas (Tagihan Rp {rincianPsbAktif.nominalDompetPendaftaran.toLocaleString('id-ID')})
+                      </p>
+                      <p className="text-slate-600">
+                        Pembayaran/cicilan pendaftaran &amp; Syahriyah bulanan (Rp {rincianPsbAktif.nominalSyahriyahBulanPertama.toLocaleString('id-ID')}/bln) dilakukan terpisah di menu Keuangan.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -2098,39 +2078,47 @@ export default function DataSantriPage() {
               </button>
             </div>
 
-            <div className="flex border-b border-slate-200 bg-slate-50 px-6 pt-2 gap-2 text-xs font-bold overflow-x-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 border-b border-slate-200 bg-slate-50 px-4 sm:px-6 py-2.5 text-[11px] sm:text-xs font-bold shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveEditTab('pribadi')}
-                className={`px-4 py-2.5 rounded-t-xl border-b-2 transition-colors whitespace-nowrap ${
-                  activeEditTab === 'pribadi' ? 'bg-white border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-700'
+                className={`px-2.5 py-2 rounded-xl border transition-colors text-center leading-tight ${
+                  activeEditTab === 'pribadi'
+                    ? 'bg-white border-emerald-700 text-emerald-800 shadow-2xs'
+                    : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
                 }`}
               >
-                1. Data Pribadi &amp; Pondok
+                1. Pribadi &amp; Pondok
               </button>
               <button
                 type="button"
                 onClick={() => setActiveEditTab('ortu')}
-                className={`px-4 py-2.5 rounded-t-xl border-b-2 transition-colors whitespace-nowrap ${
-                  activeEditTab === 'ortu' ? 'bg-white border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-700'
+                className={`px-2.5 py-2 rounded-xl border transition-colors text-center leading-tight ${
+                  activeEditTab === 'ortu'
+                    ? 'bg-white border-emerald-700 text-emerald-800 shadow-2xs'
+                    : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
                 }`}
               >
-                2. Data Ayah &amp; Ibu
+                2. Ayah &amp; Ibu
               </button>
               <button
                 type="button"
                 onClick={() => setActiveEditTab('wali')}
-                className={`px-4 py-2.5 rounded-t-xl border-b-2 transition-colors whitespace-nowrap ${
-                  activeEditTab === 'wali' ? 'bg-white border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-700'
+                className={`px-2.5 py-2 rounded-xl border transition-colors text-center leading-tight ${
+                  activeEditTab === 'wali'
+                    ? 'bg-white border-emerald-700 text-emerald-800 shadow-2xs'
+                    : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
                 }`}
               >
-                3. Data Wali (Kondisional)
+                3. Data Wali
               </button>
               <button
                 type="button"
                 onClick={() => setActiveEditTab('alamat')}
-                className={`px-4 py-2.5 rounded-t-xl border-b-2 transition-colors whitespace-nowrap ${
-                  activeEditTab === 'alamat' ? 'bg-white border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-700'
+                className={`px-2.5 py-2 rounded-xl border transition-colors text-center leading-tight ${
+                  activeEditTab === 'alamat'
+                    ? 'bg-white border-emerald-700 text-emerald-800 shadow-2xs'
+                    : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
                 }`}
               >
                 4. Alamat Domisili

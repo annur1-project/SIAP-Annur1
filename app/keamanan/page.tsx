@@ -63,6 +63,10 @@ interface PengaturanRow {
   no_telepon: string;
   email_resmi?: string;
   logo_url?: string;
+  kop_surat_url?: string;
+  kop_url?: string;
+  nama_yayasan?: string;
+  kota?: string;
   stempel_url?: string;
   nama_pengasuh?: string;
   ttd_pengasuh_url?: string;
@@ -486,6 +490,12 @@ export default function KeamananPage() {
     nama_pesantren: 'Pondok Pesantren An-Nur 1 Bululawang',
     alamat_lengkap: 'Jl. Diponegoro IV / 2-6 Bululawang, Kab. Malang, Jawa Timur',
     no_telepon: '085604551562',
+    email_resmi: '',
+    logo_url: '',
+    kop_surat_url: '',
+    kop_url: '',
+    nama_yayasan: '',
+    kota: 'Bululawang',
   });
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -1805,30 +1815,44 @@ export default function KeamananPage() {
           id="print-surat-keamanan"
           className="hidden bg-white text-slate-900 text-xs leading-relaxed"
         >
-          <div className="border-2 border-slate-800 p-6 space-y-5">
-            {/* KOP SURAT PESANTREN */}
-            <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3">
-              {pengaturan.logo_url && (
+          <div className="border-2 border-slate-800 p-6 space-y-5 break-inside-avoid">
+            {/* KOP SURAT RESMI DINAMIS */}
+            {pengaturan.kop_surat_url || pengaturan.kop_url ? (
+              <div className="border-b-4 border-double border-slate-800 pb-2.5">
                 <img
-                  src={pengaturan.logo_url}
-                  alt="Logo Pondok"
+                  src={pengaturan.kop_surat_url || pengaturan.kop_url}
+                  alt={`Kop Surat ${pengaturan.nama_pesantren}`}
                   referrerPolicy="no-referrer"
-                  className="w-16 h-16 object-contain shrink-0"
+                  className="w-full max-h-28 object-contain mx-auto"
                 />
-              )}
-              <div className="flex-1 text-center">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
-                  DEWAN KEAMANAN &amp; KETERTIBAN PONDOK (SIE KEAMANAN)
-                </p>
-                <h1 className="text-lg font-extrabold uppercase text-slate-900">
-                  {pengaturan.nama_pesantren}
-                </h1>
-                <p className="text-[11px] text-slate-600">{pengaturan.alamat_lengkap}</p>
-                <p className="text-[11px] text-slate-600">
-                  Telp/WA Kantor Keamanan: {pengaturan.no_telepon}
-                </p>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3">
+                {pengaturan.logo_url && (
+                  <img
+                    src={pengaturan.logo_url}
+                    alt="Logo Pondok"
+                    referrerPolicy="no-referrer"
+                    className="w-16 h-16 object-contain shrink-0"
+                  />
+                )}
+                <div className="flex-1 text-center">
+                  {pengaturan.nama_yayasan && (
+                    <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
+                      {pengaturan.nama_yayasan}
+                    </p>
+                  )}
+                  <h1 className="text-lg font-extrabold uppercase text-slate-900">
+                    {pengaturan.nama_pesantren}
+                  </h1>
+                  <p className="text-[11px] text-slate-600">{pengaturan.alamat_lengkap}</p>
+                  <p className="text-[11px] text-slate-600">
+                    Telp/WA: {pengaturan.no_telepon}
+                    {pengaturan.email_resmi ? ` · Email: ${pengaturan.email_resmi}` : ''}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {printDoc.type === 'surat_peringatan' && (
               <>
@@ -1984,7 +2008,7 @@ export default function KeamananPage() {
                   </div>
 
                   <div>
-                    <p>Bululawang, {formatTanggalIndo(todayStr)}</p>
+                    <p>{pengaturan.kota || 'Bululawang'}, {formatTanggalIndo(todayStr)}</p>
                     <p className="font-bold">Sie Keamanan Pondok</p>
                     <div className="h-16" />
                     <p className="font-bold underline">Pengurus Keamanan</p>
@@ -2067,7 +2091,7 @@ export default function KeamananPage() {
                     </p>
                   </div>
                   <div className="relative">
-                    <p>Bululawang, {formatTanggalIndo(printDoc.item.tanggal)}</p>
+                    <p>{pengaturan.kota || 'Bululawang'}, {formatTanggalIndo(printDoc.item.tanggal)}</p>
                     <p className="font-bold">Petugas Sie Keamanan,</p>
                     <div className="h-16 flex items-center justify-center relative">
                       {pengaturan.stempel_url && (

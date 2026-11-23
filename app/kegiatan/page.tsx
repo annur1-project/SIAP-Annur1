@@ -33,8 +33,11 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { useAuth, TransparencyBanner } from '@/lib/auth';
-import KegiatanAgendaModal from '@/components/KegiatanAgendaModal';
+import KegiatanAgendaModal, {
+  type PengurusAutocompleteOption,
+} from '@/components/KegiatanAgendaModal';
 import KegiatanFormatModal from '@/components/KegiatanFormatModal';
 import {
   type KategoriKegiatan,
@@ -128,6 +131,8 @@ export default function KegiatanPage() {
   const [formats, setFormats] = useState<KegiatanFormatTemplate[]>([]);
   const [agendas, setAgendas] = useState<KegiatanAgendaItem[]>([]);
   const [personelOptions, setPersonelOptions] = useState<PersonelOption[]>([]);
+  const [pengurusOptions, setPengurusOptions] = useState<PengurusAutocompleteOption[]>([]);
+  const [openRundownPjId, setOpenRundownPjId] = useState<string | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -183,12 +188,62 @@ export default function KegiatanPage() {
   );
 
   const loadAllData = useCallback(async () => {
-    const [fmtList, agdList, persList] = await Promise.all([
+    const [fmtList, agdList, persList, vPengurusRes] = await Promise.all([
       fetchKegiatanFormats(),
       fetchKegiatanAgenda(),
       fetchPersonelOptions(),
+      supabase
+        .from('v_pengurus_lengkap')
+        .select('id, nama_lengkap, no_wa, status, jabatan_list'),
     ]);
-    return { fmtList, agdList, persList };
+
+    let loadedPengurus: PengurusAutocompleteOption[] = [];
+    if (!vPengurusRes.error && Array.isArray(vPengurusRes.data) && vPengurusRes.data.length > 0) {
+      loadedPengurus = (
+        vPengurusRes.data as Array<{
+          id: string;
+          nama_lengkap: string;
+          no_wa?: string | null;
+          status?: string | null;
+          jabatan_list?: Array<{ divisi?: string; nama_jabatan?: string; is_utama?: boolean }>;
+        }>
+      )
+        .filter((p) => !p.status || p.status.trim().toLowerCase() === 'aktif')
+        .map((p) => {
+          const j = p.jabatan_list?.find((x) => x.is_utama) || p.jabatan_list?.[0];
+          return {
+            id: String(p.id),
+            nama_lengkap: p.nama_lengkap,
+            jabatan: [j?.nama_jabatan, j?.divisi].filter(Boolean).join(' · '),
+            no_wa: p.no_wa || '',
+          };
+        })
+        .sort((a, b) => a.nama_lengkap.localeCompare(b.nama_lengkap, 'id'));
+    } else {
+      const pgFallback = await supabase
+        .from('pengurus')
+        .select('id, nama_lengkap, no_wa, status')
+        .order('nama_lengkap', { ascending: true });
+      if (!pgFallback.error && Array.isArray(pgFallback.data)) {
+        loadedPengurus = (
+          pgFallback.data as Array<{
+            id: string;
+            nama_lengkap: string;
+            no_wa?: string | null;
+            status?: string | null;
+          }>
+        )
+          .filter((p) => !p.status || p.status.trim().toLowerCase() === 'aktif')
+          .map((p) => ({
+            id: String(p.id),
+            nama_lengkap: p.nama_lengkap,
+            jabatan: 'Pengurus Pondok',
+            no_wa: p.no_wa || '',
+          }));
+      }
+    }
+
+    return { fmtList, agdList, persList, pengurusList: loadedPengurus };
   }, []);
 
   useEffect(() => {
@@ -203,6 +258,7 @@ export default function KegiatanPage() {
         setFormats(data.fmtList);
         setAgendas(data.agdList);
         setPersonelOptions(data.persList);
+        setPengurusOptions(data.pengurusList);
         if (data.agdList.length > 0) {
           const sortedInitial = [...data.agdList].sort((a, b) =>
             (a.tanggal || '').localeCompare(b.tanggal || '')
@@ -228,6 +284,7 @@ export default function KegiatanPage() {
       setFormats(data.fmtList);
       setAgendas(data.agdList);
       setPersonelOptions(data.persList);
+      setPengurusOptions(data.pengurusList);
       pushToast('info', 'Data Diperbarui', 'Daftar jadwal dan format kegiatan berhasil dimuat ulang.');
     } catch {
       pushToast('error', 'Gagal Memuat', 'Terjadi kendala saat memperbarui data kegiatan.');
@@ -998,13 +1055,13 @@ export default function KegiatanPage() {
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="grid grid-cols-2 w-full md:w-auto gap-2 shrink-0">
                 <select
                   value={kategoriFilter}
                   onChange={(e) =>
                     setKategoriFilter(e.target.value as 'semua' | KategoriKegiatan)
                   }
-                  className="min-h-[40px] px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 font-medium"
+                  className="w-full min-h-[40px] px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 font-medium"
                 >
                   <option value="semua">Semua Kategori</option>
                   <option value="rutin">Rutin Mingguan</option>
@@ -1016,7 +1073,7 @@ export default function KegiatanPage() {
                   onChange={(e) =>
                     setStatusFilter(e.target.value as 'semua' | StatusKegiatan)
                   }
-                  className="min-h-[40px] px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 font-medium"
+                  className="w-full min-h-[40px] px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 font-medium"
                 >
                   <option value="semua">Semua Status</option>
                   <option value="terjadwal">Terjadwal</option>
@@ -1276,7 +1333,7 @@ export default function KegiatanPage() {
                           </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                        <div className="flex flex-col gap-3">
                           <div>
                             <h2 className="text-lg font-bold text-slate-900">
                               {selectedAgenda.judul}
@@ -1299,21 +1356,25 @@ export default function KegiatanPage() {
                             )}
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <div
+                            className={`grid ${
+                              canEdit ? 'grid-cols-3' : 'grid-cols-2'
+                            } w-full gap-1.5 sm:gap-2`}
+                          >
                             <button
                               type="button"
                               onClick={() => handleCopyWa(selectedAgenda)}
-                              className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                              className="w-full min-h-[38px] px-2 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center justify-center gap-1 whitespace-nowrap"
                             >
-                              <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent" />
+                              <ClipboardCopy className="w-3.5 h-3.5 siap-text-accent shrink-0" />
                               Salin WA
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePrintJadwal(selectedAgenda)}
-                              className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                              className="w-full min-h-[38px] px-2 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center justify-center gap-1 whitespace-nowrap"
                             >
-                              <Printer className="w-3.5 h-3.5 text-slate-600" />
+                              <Printer className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                               Cetak Jadwal
                             </button>
                             {canEdit && (
@@ -1322,9 +1383,9 @@ export default function KegiatanPage() {
                                 onClick={() =>
                                   setAgendaModal({ open: true, editing: selectedAgenda })
                                 }
-                                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap"
+                                className="w-full min-h-[38px] px-2 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-50 inline-flex items-center justify-center gap-1 whitespace-nowrap"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
+                                <Edit3 className="w-3.5 h-3.5 shrink-0" />
                                 Edit Info
                               </button>
                             )}
@@ -1332,57 +1393,62 @@ export default function KegiatanPage() {
                         </div>
 
                         {/* SUB-TABS DETAIL */}
-                        <div className="flex flex-wrap items-center gap-1 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => setDetailTab('pengisi')}
-                            className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                              detailTab === 'pengisi'
-                                ? 'siap-btn-primary'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            }`}
-                          >
-                            <UserCheck className="w-3.5 h-3.5" />
-                            Rincian Pengisi ({draftPengisi.length})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailTab('rundown')}
-                            className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                              detailTab === 'rundown'
-                                ? 'siap-btn-primary'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            }`}
-                          >
-                            <ListChecks className="w-3.5 h-3.5" />
-                            Rundown ({draftRundown.length})
-                          </button>
+                        <div className="space-y-1.5 pt-2">
+                          <div className="grid grid-cols-3 w-full gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setDetailTab('pengisi')}
+                              className={`w-full min-h-[38px] px-1.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+                                detailTab === 'pengisi'
+                                  ? 'siap-btn-primary'
+                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                              }`}
+                            >
+                              <UserCheck className="w-3.5 h-3.5 hidden sm:inline shrink-0" />
+                              <span className="truncate">Rincian Pengisi ({draftPengisi.length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDetailTab('rundown')}
+                              className={`w-full min-h-[38px] px-1.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+                                detailTab === 'rundown'
+                                  ? 'siap-btn-primary'
+                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                              }`}
+                            >
+                              <ListChecks className="w-3.5 h-3.5 hidden sm:inline shrink-0" />
+                              <span className="truncate">Rundown ({draftRundown.length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDetailTab('dokumentasi')}
+                              className={`w-full min-h-[38px] px-1.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+                                detailTab === 'dokumentasi'
+                                  ? 'siap-btn-primary'
+                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                              }`}
+                            >
+                              <Camera className="w-3.5 h-3.5 hidden sm:inline shrink-0" />
+                              <span className="truncate">
+                                Dokumentasi ({(selectedAgenda.dokumentasi_urls || []).length})
+                              </span>
+                            </button>
+                          </div>
+
                           {selectedAgenda.kategori === 'event_besar' && (
                             <button
                               type="button"
                               onClick={() => setDetailTab('panitia')}
-                              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                              className={`w-full min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
                                 detailTab === 'panitia'
                                   ? 'siap-btn-primary'
                                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                               }`}
                             >
-                              <Users className="w-3.5 h-3.5" />
-                              Susunan Panitia ({draftPanitia.length})
+                              <Users className="w-3.5 h-3.5 shrink-0" />
+                              Susunan Panitia Event Besar ({draftPanitia.length})
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => setDetailTab('dokumentasi')}
-                            className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                              detailTab === 'dokumentasi'
-                                ? 'siap-btn-primary'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            }`}
-                          >
-                            <Camera className="w-3.5 h-3.5" />
-                            Dokumentasi ({(selectedAgenda.dokumentasi_urls || []).length})
-                          </button>
                         </div>
                       </div>
 
@@ -1679,17 +1745,65 @@ export default function KegiatanPage() {
                                   </div>
 
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                    <input
-                                      type="text"
-                                      readOnly={!canEdit}
-                                      list="kegiatan-personel-detail"
-                                      value={row.pj}
-                                      onChange={(e) =>
-                                        handleUpdateRundown(row.id, { pj: e.target.value })
-                                      }
-                                      placeholder="Penanggung jawab sesi"
-                                      className="min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
-                                    />
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        readOnly={!canEdit}
+                                        value={row.pj}
+                                        onFocus={() => canEdit && setOpenRundownPjId(row.id)}
+                                        onBlur={() =>
+                                          setTimeout(() => {
+                                            setOpenRundownPjId((curr) =>
+                                              curr === row.id ? null : curr
+                                            );
+                                          }, 150)
+                                        }
+                                        onChange={(e) => {
+                                          handleUpdateRundown(row.id, { pj: e.target.value });
+                                          if (canEdit) setOpenRundownPjId(row.id);
+                                        }}
+                                        placeholder="Cari PJ pengurus..."
+                                        autoComplete="off"
+                                        className="w-full min-h-[34px] px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white read-only:bg-slate-50"
+                                      />
+                                      {canEdit && openRundownPjId === row.id && (
+                                        <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-lg max-h-44 overflow-y-auto divide-y divide-slate-100">
+                                          {pengurusOptions
+                                            .filter((p) => {
+                                              const q = (row.pj || '').trim().toLowerCase();
+                                              if (!q) return true;
+                                              return (
+                                                p.nama_lengkap.toLowerCase().includes(q) ||
+                                                (p.jabatan || '').toLowerCase().includes(q)
+                                              );
+                                            })
+                                            .slice(0, 25)
+                                            .map((p) => (
+                                              <button
+                                                key={p.id}
+                                                type="button"
+                                                onMouseDown={(e) => {
+                                                  e.preventDefault();
+                                                  handleUpdateRundown(row.id, {
+                                                    pj: p.nama_lengkap,
+                                                  });
+                                                  setOpenRundownPjId(null);
+                                                }}
+                                                className="w-full px-2.5 py-1.5 text-left hover:bg-slate-50 text-xs"
+                                              >
+                                                <p className="font-semibold text-slate-800 truncate">
+                                                  {p.nama_lengkap}
+                                                </p>
+                                                {p.jabatan && (
+                                                  <p className="text-[10px] text-slate-500 truncate">
+                                                    {p.jabatan}
+                                                  </p>
+                                                )}
+                                              </button>
+                                            ))}
+                                        </div>
+                                      )}
+                                    </div>
                                     <input
                                       type="text"
                                       readOnly={!canEdit}
@@ -2288,6 +2402,7 @@ export default function KegiatanPage() {
           formats={formats}
           existingAgendas={agendas}
           personelOptions={personelOptions}
+          pengurusOptions={pengurusOptions}
           onClose={() => setAgendaModal({ open: false, editing: null })}
           onSave={async (payload) => {
             const actualEdit = Boolean(agendaModal.editing);

@@ -35,7 +35,38 @@ export default function ServiceWorkerRegister() {
       }
     };
 
+    const handleChunkOrSyntaxError = (event: Event) => {
+      const target = event.target;
+      const isNextScriptFailure =
+        target instanceof HTMLScriptElement &&
+        typeof target.src === 'string' &&
+        target.src.includes('/_next/static/');
+
+      const errMsg = event instanceof ErrorEvent ? String(event.message || '') : '';
+      const isHtmlAsScriptSyntaxError =
+        errMsg.includes("Unexpected token '<'") || errMsg.includes('ChunkLoadError');
+
+      if (!isNextScriptFailure && !isHtmlAsScriptSyntaxError) return;
+
+      try {
+        const lastReloadRaw = sessionStorage.getItem('siap_chunk_reload_at');
+        const lastReload = lastReloadRaw ? Number(lastReloadRaw) : 0;
+        const now = Date.now();
+        if (!Number.isFinite(lastReload) || now - lastReload > 15000) {
+          sessionStorage.setItem('siap_chunk_reload_at', String(now));
+          window.location.reload();
+        }
+      } catch {
+        // Ignore storage errors in restricted contexts
+      }
+    };
+
+    window.addEventListener('error', handleChunkOrSyntaxError, true);
     void syncServiceWorker();
+
+    return () => {
+      window.removeEventListener('error', handleChunkOrSyntaxError, true);
+    };
   }, []);
 
   return null;
