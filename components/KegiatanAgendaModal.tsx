@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Calendar, Layers, Users, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Calendar, Check, ChevronDown, Layers, Search, Users, X } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import {
   type KategoriKegiatan,
   type KegiatanAgendaItem,
@@ -15,12 +16,20 @@ import {
   instantiatePengisiFromTemplate,
 } from '@/lib/kegiatan';
 
+export interface PengurusAutocompleteOption {
+  id: string;
+  nama_lengkap: string;
+  jabatan?: string;
+  no_wa?: string;
+}
+
 interface KegiatanAgendaModalProps {
   initialData: KegiatanAgendaItem | null;
   todayStr: string;
   formats: KegiatanFormatTemplate[];
   existingAgendas: KegiatanAgendaItem[];
   personelOptions: PersonelOption[];
+  pengurusOptions?: PengurusAutocompleteOption[];
   onClose: () => void;
   onSave: (agenda: KegiatanAgendaItem, isEdit: boolean) => Promise<void>;
 }
@@ -31,6 +40,7 @@ export default function KegiatanAgendaModal({
   formats,
   existingAgendas,
   personelOptions,
+  pengurusOptions,
   onClose,
   onSave,
 }: KegiatanAgendaModalProps) {
@@ -60,12 +70,112 @@ export default function KegiatanAgendaModal({
   const [penanggungJawab, setPenanggungJawab] = useState(
     initialData?.penanggung_jawab || ''
   );
+  const [pjDropdownOpen, setPjDropdownOpen] = useState(false);
+  const [fetchedPengurus, setFetchedPengurus] = useState<PengurusAutocompleteOption[]>([]);
+  const pjContainerRef = useRef<HTMLDivElement>(null);
+
   const [status, setStatus] = useState<StatusKegiatan>(
     initialData?.status || 'terjadwal'
   );
   const [catatan, setCatatan] = useState(initialData?.catatan || '');
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pengurusOptions && pengurusOptions.length > 0) return;
+    let active = true;
+    Promise.resolve().then(async () => {
+      try {
+        const res = await supabase
+          .from('v_pengurus_lengkap')
+          .select('id, nama_lengkap, no_wa, status, jabatan_list');
+        if (!res.error && Array.isArray(res.data) && res.data.length > 0) {
+          if (!active) return;
+          const rows = (res.data as Array<{
+            id: string;
+            nama_lengkap: string;
+            no_wa?: string | null;
+            status?: string | null;
+            jabatan_list?: Array<{ divisi?: string; nama_jabatan?: string; is_utama?: boolean }>;
+          }>)
+            .filter((p) => !p.status || p.status.trim().toLowerCase() === 'aktif')
+            .map((p) => {
+              const j = p.jabatan_list?.find((x) => x.is_utama) || p.jabatan_list?.[0];
+              return {
+                id: String(p.id),
+                nama_lengkap: p.nama_lengkap,
+                jabatan: [j?.nama_jabatan, j?.divisi].filter(Boolean).join(' · '),
+                no_wa: p.no_wa || '',
+              };
+            })
+            .sort((a, b) => a.nama_lengkap.localeCompare(b.nama_lengkap, 'id'));
+          setFetchedPengurus(rows);
+          return;
+        }
+        const pgRes = await supabase
+          .from('pengurus')
+          .select('id, nama_lengkap, no_wa, status')
+          .order('nama_lengkap', { ascending: true });
+        if (!pgRes.error && Array.isArray(pgRes.data) && active) {
+          const rows = (pgRes.data as Array<{
+            id: string;
+            nama_lengkap: string;
+            no_wa?: string | null;
+            status?: string | null;
+          }>)
+            .filter((p) => !p.status || p.status.trim().toLowerCase() === 'aktif')
+            .map((p) => ({
+              id: String(p.id),
+              nama_lengkap: p.nama_lengkap,
+              jabatan: 'Pengurus Pondok',
+              no_wa: p.no_wa || '',
+            }));
+          setFetchedPengurus(rows);
+        }
+      } catch {
+        // fallback handled via personelOptions below
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [pengurusOptions]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        pjContainerRef.current &&
+        !pjContainerRef.current.contains(event.target as Node)
+      ) {
+        setPjDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const effectivePengurusList = useMemo<PengurusAutocompleteOption[]>(() => {
+    if (pengurusOptions && pengurusOptions.length > 0) return pengurusOptions;
+    if (fetchedPengurus.length > 0) return fetchedPengurus;
+    return personelOptions
+      .filter((p) => p.sumber.toLowerCase().includes('pengurus'))
+      .map((p) => ({
+        id: p.id,
+        nama_lengkap: p.nama,
+        jabatan: p.info || p.sumber,
+        no_wa: p.no_wa,
+      }));
+  }, [pengurusOptions, fetchedPengurus, personelOptions]);
+
+  const filteredPengurusPj = useMemo(() => {
+    const q = penanggungJawab.trim().toLowerCase();
+    if (!q) return effectivePengurusList;
+    return effectivePengurusList.filter(
+      (p) =>
+        p.nama_lengkap.toLowerCase().includes(q) ||
+        (p.jabatan || '').toLowerCase().includes(q)
+    );
+  }, [effectivePengurusList, penanggungJawab]);
 
   const activeFormat = useMemo(
     () => formats.find((f) => f.id === selectedFormatId) || null,
@@ -353,25 +463,90 @@ export default function KegiatanAgendaModal({
               </datalist>
             </div>
 
-            <div>
+            <div ref={pjContainerRef} className="relative">
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Penanggung Jawab (PJ)
               </label>
-              <input
-                type="text"
-                list="kegiatan-personel-modal-list"
-                value={penanggungJawab}
-                onChange={(e) => setPenanggungJawab(e.target.value)}
-                placeholder="Nama pengurus / koordinator"
-                className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              <datalist id="kegiatan-personel-modal-list">
-                {personelOptions.map((p) => (
-                  <option key={p.id} value={p.nama}>
-                    {p.sumber} · {p.info}
-                  </option>
-                ))}
-              </datalist>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={penanggungJawab}
+                  onFocus={() => setPjDropdownOpen(true)}
+                  onChange={(e) => {
+                    setPenanggungJawab(e.target.value);
+                    setPjDropdownOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setPjDropdownOpen(false);
+                  }}
+                  placeholder="Ketik / cari nama pengurus..."
+                  autoComplete="off"
+                  className="w-full min-h-[40px] pl-9 pr-14 py-2 text-xs sm:text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                  {penanggungJawab && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPenanggungJawab('');
+                        setPjDropdownOpen(true);
+                      }}
+                      aria-label="Hapus PJ"
+                      className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPjDropdownOpen((prev) => !prev)}
+                    aria-label="Buka daftar pengurus"
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {pjDropdownOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+                  {filteredPengurusPj.length === 0 ? (
+                    <div className="px-3 py-2.5 text-xs text-slate-500">
+                      {effectivePengurusList.length === 0
+                        ? 'Daftar pengurus kosong. Ketik nama secara manual.'
+                        : `Tidak ada pengurus cocok dengan "${penanggungJawab}".`}
+                    </div>
+                  ) : (
+                    filteredPengurusPj.slice(0, 40).map((p) => {
+                      const selected =
+                        penanggungJawab.trim().toLowerCase() === p.nama_lengkap.toLowerCase();
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setPenanggungJawab(p.nama_lengkap);
+                            setPjDropdownOpen(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 text-xs transition-colors ${
+                            selected ? 'bg-emerald-50 text-emerald-900' : 'hover:bg-slate-50 text-slate-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate">{p.nama_lengkap}</p>
+                            {p.jabatan && (
+                              <p className="text-[11px] text-slate-500 truncate">{p.jabatan}</p>
+                            )}
+                          </div>
+                          {selected && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

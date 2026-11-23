@@ -69,6 +69,17 @@ interface ExtraRawData {
   koperasiTransaksiRows: Array<Record<string, unknown>>;
   koperasiProdukRows: Array<Record<string, unknown>>;
   psbRows: Array<Record<string, unknown>>;
+  kegiatanRows: Array<Record<string, unknown>>;
+}
+
+interface KegiatanLampiranItem {
+  id: string;
+  judul: string;
+  tanggal: string;
+  jamMulai: string;
+  lokasi: string;
+  notulensi: string;
+  urls: string[];
 }
 
 interface RawJabatanPersonalia {
@@ -384,6 +395,7 @@ export default function PusatLaporanPage() {
   const [selectedDivisions, setSelectedDivisions] = useState<ExtendedDivisionKey[]>(ALL_DIV_KEYS);
   const [showCoverAndApproval, setShowCoverAndApproval] = useState<boolean>(true);
   const [showNotaLampiran, setShowNotaLampiran] = useState<boolean>(true);
+  const [useDigitalSignature, setUseDigitalSignature] = useState<boolean>(true);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState<boolean>(false);
 
   const [rawData, setRawData] = useState<AllLaporanRawData | null>(null);
@@ -392,6 +404,7 @@ export default function PusatLaporanPage() {
     koperasiTransaksiRows: [],
     koperasiProdukRows: [],
     psbRows: [],
+    kegiatanRows: [],
   });
   const [pengurusRows, setPengurusRows] = useState<RawPengurusPersonalia[]>([]);
   const [kamarOrder, setKamarOrder] = useState<string[]>(DEFAULT_KAMAR_ORDER);
@@ -413,6 +426,7 @@ export default function PusatLaporanPage() {
 
   const docWrapperRef = useRef<HTMLDivElement>(null);
   const personaliaSourceRef = useRef<HTMLDivElement>(null);
+  const kegiatanFotoSourceRef = useRef<HTMLDivElement>(null);
   const extraSourceRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
@@ -438,6 +452,7 @@ export default function PusatLaporanPage() {
         amanRows,
         jabatanRows,
         santriKamarRows,
+        kegiatanAgendaRows,
       ] = await Promise.all([
         fetchAllLaporanRawData({ canViewBisyaroh }),
         fetchSafeTable('kebersihan_log'),
@@ -458,6 +473,7 @@ export default function PusatLaporanPage() {
         fetchSafeTable('v_pengurus_aman'),
         fetchSafeTable('pengurus_jabatan'),
         fetchSafeTable('santri'),
+        fetchSafeTable('kegiatan_agenda'),
       ]);
       setRawData(data);
       setExtraRaw({
@@ -476,6 +492,10 @@ export default function PusatLaporanPage() {
         psbRows: mergeUniqueRows(
           [psb1, psb2, psb3],
           ['psb', 'pendaftaran']
+        ),
+        kegiatanRows: mergeUniqueRows(
+          [kegiatanAgendaRows],
+          ['kegiatan_agenda', 'siap_kegiatan']
         ),
       });
 
@@ -744,6 +764,35 @@ export default function PusatLaporanPage() {
     };
   }, [activeRange, extraRaw]);
 
+  const kegiatanLampiranFoto = useMemo<KegiatanLampiranItem[]>(() => {
+    const { start, end } = activeRange;
+    const out: KegiatanLampiranItem[] = [];
+    for (const row of extraRaw.kegiatanRows) {
+      const judul = String(row.judul || '').trim();
+      if (!judul) continue;
+      const rawUrls = row.dokumentasi_urls;
+      if (!Array.isArray(rawUrls)) continue;
+      const urls = rawUrls
+        .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        .map((u) => u.trim());
+      if (urls.length === 0) continue;
+
+      const iso = extractRowDateIso(row);
+      if (iso && (iso < start || iso > end)) continue;
+
+      out.push({
+        id: String(row.id || `${judul}-${iso}-${out.length}`),
+        judul,
+        tanggal: iso,
+        jamMulai: String(row.jam_mulai || ''),
+        lokasi: String(row.lokasi || ''),
+        notulensi: String(row.notulensi || '').trim(),
+        urls,
+      });
+    }
+    return out.sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+  }, [activeRange, extraRaw.kegiatanRows]);
+
   const baseSelectedDivisions = useMemo(
     () =>
       selectedDivisions.filter((k): k is LaporanDivisionKey =>
@@ -858,16 +907,28 @@ export default function PusatLaporanPage() {
   useLayoutEffect(() => {
     const docRoot = docWrapperRef.current;
     const personaliaSource = personaliaSourceRef.current;
+    const kegiatanFotoSource = kegiatanFotoSourceRef.current;
     const extraSource = extraSourceRef.current;
 
     const cleanupDomPatches = () => {
       if (docRoot) {
         docRoot
-          .querySelectorAll('[data-siap-personalia-clone="true"], [data-siap-extra-clone="true"]')
+          .querySelectorAll(
+            '[data-siap-personalia-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"]'
+          )
           .forEach((node) => node.remove());
         docRoot
           .querySelectorAll('[data-siap-hidden-personalia="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-personalia'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-kamar="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-kamar'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-signature="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-signature'));
+        docRoot
+          .querySelectorAll('[data-siap-page-start="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-page-start'));
       }
     };
 
@@ -908,105 +969,266 @@ export default function PusatLaporanPage() {
     const approvalEl =
       outermostApprovalCandidates[outermostApprovalCandidates.length - 1] || null;
 
-    // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku Bagian I & Bagian II
+    // Atur visibilitas TTD & Stempel Digital pada Lembar Pengesahan
+    if (approvalEl) {
+      approvalEl.setAttribute('data-siap-page-start', 'true');
+      if (!useDigitalSignature) {
+        approvalEl.querySelectorAll('img').forEach((imgEl) => {
+          imgEl.setAttribute('data-siap-hidden-signature', 'true');
+        });
+      }
+    }
+
+    // Identifikasi setiap blok Bab Romawi I..X untuk page-break & injeksi spesifik per bab
+    const singleDivSections = allSectionDivs.filter((el) => {
+      if (el === searchContainer) return false;
+      if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+      if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
+      const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (txt.length === 0 || txt.length > 150000) return false;
+      if (/Ringkasan\s+Eksekutif/i.test(txt)) return false;
+      const romans = txt.match(/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/gi) || [];
+      const uniqueRomans = new Set(romans.map((r) => r.toUpperCase().replace(/\s+/g, ' ')));
+      if (uniqueRomans.size === 1) return true;
+      if (el.tagName === 'SECTION') {
+        const firstHeading = el.querySelector('h2, h3');
+        const hTxt = (firstHeading?.textContent || '').trim();
+        if (/^(?:Divisi\s+|Bab\s+)?(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/i.test(hTxt)) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    const outermostDivSections = singleDivSections.filter(
+      (cand) => !singleDivSections.some((other) => other !== cand && other.contains(cand))
+    );
+
+    // Setiap Bab Romawi (I s/d X) selalu dimulai di halaman baru
+    outermostDivSections.forEach((divEl, idx) => {
+      const hasPrevContent =
+        idx > 0 || showCoverAndApproval || scope === 'gabungan' || Boolean(divEl.previousElementSibling);
+      if (hasPrevContent) {
+        divEl.setAttribute('data-siap-page-start', 'true');
+      }
+    });
+
+    // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku & hapus struktur lama ganda
     const administrasiVisible =
       !isExtraKey(scope) &&
       (scope === 'gabungan'
         ? baseSelectedDivisions.includes('administrasi')
         : scope === 'administrasi');
 
-    if (administrasiVisible && personaliaSource) {
-      const div1Candidates = allSectionDivs.filter((el) => {
-        if (el === searchContainer) return false;
-        if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
+    const div1ScopeEl =
+      outermostDivSections.find((el) => {
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (
-          /\bDivisi\s+I\b/i.test(txt) &&
-          !/\bDivisi\s+II\b/i.test(txt) &&
-          /Administrasi|Santri/i.test(txt) &&
-          txt.length < 25000
-        );
-      });
-      const adminScopeEl =
-        div1Candidates[div1Candidates.length - 1] || searchContainer;
+        return /\bDivisi\s+I\b/i.test(txt) && /Administrasi|Santri/i.test(txt);
+      }) || null;
 
-      const adminEls = Array.from(adminScopeEl.querySelectorAll('*')) as HTMLElement[];
-      const headingMatches = adminEls.filter((el) => {
-        if (el.closest('[data-siap-personalia-clone="true"]')) return false;
-        if (approvalEl && (el === approvalEl || approvalEl.contains(el))) return false;
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (
-          txt.length > 0 &&
-          txt.length < 140 &&
-          /struktur\s+(personalia|kepengurusan|pengurus)|personalia\s+pengurus|susunan\s+(pengurus|personalia|kepengurusan)|daftar\s+(pengurus|personalia)/i.test(
-            txt
-          )
-        );
-      });
-      const headingEl = headingMatches[headingMatches.length - 1] || null;
+    if (administrasiVisible) {
+      const adminScopeEl = div1ScopeEl || searchContainer;
 
-      if (headingEl && headingEl.parentElement) {
-        const cloneWrap = document.createElement('div');
-        cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
-        cloneWrap.innerHTML = personaliaSource.innerHTML;
+      if (personaliaSource) {
+        const adminEls = Array.from(adminScopeEl.querySelectorAll('*')) as HTMLElement[];
+        const headingMatches = adminEls.filter((el) => {
+          if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+          if (approvalEl && (el === approvalEl || approvalEl.contains(el))) return false;
+          const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return (
+            txt.length > 0 &&
+            txt.length < 140 &&
+            /struktur\s+(personalia|kepengurusan|pengurus)|personalia\s+pengurus|susunan\s+(pengurus|personalia|kepengurusan)|daftar\s+(pengurus|personalia)/i.test(
+              txt
+            )
+          );
+        });
+        const headingEl = headingMatches[0] || null;
 
-        const parent = headingEl.parentElement;
-        const parentText = (parent.textContent || '').replace(/\s+/g, ' ');
-        const isDedicatedWrapper =
-          parent !== adminScopeEl &&
-          parent !== searchContainer &&
-          parentText.length < 12000 &&
-          !/Santri\s+Aktif|\bDivisi\s+I\b|Ringkasan\s+Eksekutif/i.test(parentText);
+        let cloneWrap: HTMLElement | null = null;
+        if (headingEl && headingEl.parentElement) {
+          cloneWrap = document.createElement('div');
+          cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+          cloneWrap.innerHTML = personaliaSource.innerHTML;
 
-        if (isDedicatedWrapper && parent.parentElement) {
-          parent.setAttribute('data-siap-hidden-personalia', 'true');
-          parent.parentElement.insertBefore(cloneWrap, parent);
+          const parent = headingEl.parentElement;
+          const parentText = (parent.textContent || '').replace(/\s+/g, ' ');
+          const isDedicatedWrapper =
+            parent !== adminScopeEl &&
+            parent !== searchContainer &&
+            parentText.length < 25000 &&
+            !/Santri\s+Aktif|\bDivisi\s+I\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar/i.test(parentText);
+
+          if (isDedicatedWrapper && parent.parentElement) {
+            parent.setAttribute('data-siap-hidden-personalia', 'true');
+            parent.parentElement.insertBefore(cloneWrap, parent);
+          } else {
+            headingEl.setAttribute('data-siap-hidden-personalia', 'true');
+            parent.insertBefore(cloneWrap, headingEl);
+          }
         } else {
-          headingEl.setAttribute('data-siap-hidden-personalia', 'true');
-          parent.insertBefore(cloneWrap, headingEl);
-          let sibling = headingEl.nextElementSibling as HTMLElement | null;
-          while (sibling) {
-            const sibTxt = (sibling.textContent || '').trim();
-            if (/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/i.test(sibTxt)) break;
-            if (/Lembar\s+Pengesahan|Mengetahui,\s*Pengasuh/i.test(sibTxt)) break;
-            sibling.setAttribute('data-siap-hidden-personalia', 'true');
-            sibling = sibling.nextElementSibling as HTMLElement | null;
+          const fallbackCandidates = adminEls.filter((el) => {
+            if (el === adminScopeEl || el === searchContainer) return false;
+            if (approvalEl && (el === approvalEl || el.contains(approvalEl) || approvalEl.contains(el))) {
+              return false;
+            }
+            const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (txt.length === 0 || txt.length > 25000) return false;
+            if (/Santri\s+Aktif|Ringkasan\s+Eksekutif|Lembar\s+Pengesahan|Daftar\s+Kamar|\bDivisi\s+(I|II|III)\b/i.test(txt)) {
+              return false;
+            }
+            return (
+              (txt.includes('Pengasuh Pondok') ||
+                txt.includes('Dewan Pengasuh') ||
+                txt.includes('Direktur Pendidikan') ||
+                txt.includes('DEWAN HARIAN') ||
+                txt.includes('Dewan Harian')) &&
+              txt.includes('Kepala Pondok')
+            );
+          });
+          const outermostFallback = fallbackCandidates.find(
+            (cand) => !fallbackCandidates.some((other) => other !== cand && other.contains(cand))
+          );
+          if (outermostFallback && outermostFallback.parentElement) {
+            cloneWrap = document.createElement('div');
+            cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+            cloneWrap.innerHTML = personaliaSource.innerHTML;
+            outermostFallback.setAttribute('data-siap-hidden-personalia', 'true');
+            outermostFallback.parentElement.insertBefore(cloneWrap, outermostFallback);
           }
         }
-      } else {
-        // Fallback jika tidak memakai heading eksplisit: cari sub-blok daftar pengurus di dalam Divisi Administrasi
-        const fallbackCandidates = adminEls.filter((el) => {
+
+        // Sapu bersih blok struktur lama ganda (I. DEWAN HARIAN & II. PLENO yang mencampur Pengasuh/Dewan Pengasuh/Direktur Pendidikan)
+        const postScanEls = Array.from(adminScopeEl.querySelectorAll('div, section, table')) as HTMLElement[];
+        const duplicateOldBlocks = postScanEls.filter((el) => {
           if (el === adminScopeEl || el === searchContainer) return false;
+          if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+          if (cloneWrap && (el === cloneWrap || el.contains(cloneWrap))) return false;
+          if (el.closest('[data-siap-hidden-personalia="true"]')) return false;
           if (approvalEl && (el === approvalEl || el.contains(approvalEl) || approvalEl.contains(el))) {
             return false;
           }
           const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-          if (txt.length === 0 || txt.length > 12000) return false;
-          if (/Santri\s+Aktif|Ringkasan\s+Eksekutif|Lembar\s+Pengesahan|\bDivisi\s+(I|II|III)\b/i.test(txt)) {
+          if (txt.length === 0 || txt.length > 25000) return false;
+          if (
+            /\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar|Santri\s+Aktif|Santri\s+Ndalem|Mutasi\s+Santri/i.test(
+              txt
+            )
+          ) {
             return false;
           }
           return (
-            (txt.includes('Pengasuh Pondok') ||
-              txt.includes('Dewan Pengasuh') ||
-              txt.includes('Direktur Pendidikan') ||
-              txt.includes('Dewan Harian')) &&
-            txt.includes('Kepala Pondok')
+            /\bI\.\s*DEWAN\s*HARIAN\b/i.test(txt) ||
+            /\bII\.\s*PLENO\b/i.test(txt) ||
+            /Dewan\s+Pengasuh\s*\(Dzurriyah\)|Direktur\s+Pendidikan|Pengasuh\s+Pondok/i.test(txt) ||
+            (/Kepala\s+Pondok/i.test(txt) && /Sekretaris/i.test(txt) && /Bendahara/i.test(txt))
           );
         });
-        const outermostFallback = fallbackCandidates.find(
-          (cand) => !fallbackCandidates.some((other) => other !== cand && other.contains(cand))
+        for (const oldBlk of duplicateOldBlocks) {
+          oldBlk.setAttribute('data-siap-hidden-personalia', 'true');
+        }
+      }
+
+      // 1b. Susun tabel daftar kamar di Bab I menjadi 2 kolom berdampingan agar muat utuh dalam 1 halaman
+      const kamarTables = Array.from(adminScopeEl.querySelectorAll('table')).filter((tbl) => {
+        if (tbl.closest('[data-siap-personalia-clone="true"]')) return false;
+        if (tbl.closest('[data-siap-hidden-personalia="true"]')) return false;
+        if (tbl.closest('[data-siap-kamar-grid="true"]')) return false;
+        const headTxt = (tbl.querySelector('thead')?.textContent || '').toLowerCase();
+        const bodyRows = Array.from(tbl.querySelectorAll('tbody tr'));
+        if (bodyRows.length < 4) return false;
+        const bodyTxt = (tbl.querySelector('tbody')?.textContent || '').toLowerCase();
+        return (
+          headTxt.includes('kamar') &&
+          !headTxt.includes('jabatan') &&
+          !headTxt.includes('musyrif') &&
+          (bodyTxt.includes('a1') || bodyTxt.includes('tahfidz') || bodyRows.length >= 6)
         );
-        if (outermostFallback && outermostFallback.parentElement) {
-          const cloneWrap = document.createElement('div');
-          cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
-          cloneWrap.innerHTML = personaliaSource.innerHTML;
-          outermostFallback.setAttribute('data-siap-hidden-personalia', 'true');
-          outermostFallback.parentElement.insertBefore(cloneWrap, outermostFallback);
+      });
+
+      const targetKamarTable = kamarTables[0] || null;
+      if (targetKamarTable) {
+        const bodyRows = Array.from(targetKamarTable.querySelectorAll<HTMLTableRowElement>('tbody tr'));
+        if (bodyRows.length >= 4) {
+          const mid = Math.ceil(bodyRows.length / 2);
+          const leftRows = bodyRows.slice(0, mid);
+          const rightRows = bodyRows.slice(mid);
+          const origThead = targetKamarTable.querySelector('thead');
+
+          const buildHalfTable = (rows: HTMLTableRowElement[]) => {
+            const tbl = document.createElement('table');
+            tbl.className = targetKamarTable.className || 'w-full text-xs border-collapse';
+            if (origThead) {
+              tbl.appendChild(origThead.cloneNode(true));
+            }
+            const tbody = document.createElement('tbody');
+            rows.forEach((r) => tbody.appendChild(r.cloneNode(true)));
+            tbl.appendChild(tbody);
+            return tbl;
+          };
+
+          const kamarGrid = document.createElement('div');
+          kamarGrid.setAttribute('data-siap-kamar-grid', 'true');
+          kamarGrid.className = 'grid grid-cols-1 sm:grid-cols-2 print:grid-cols-2 gap-3 my-2';
+          const leftWrap = document.createElement('div');
+          leftWrap.className = 'min-w-0 overflow-hidden';
+          leftWrap.appendChild(buildHalfTable(leftRows));
+          const rightWrap = document.createElement('div');
+          rightWrap.className = 'min-w-0 overflow-hidden';
+          rightWrap.appendChild(buildHalfTable(rightRows));
+          kamarGrid.appendChild(leftWrap);
+          kamarGrid.appendChild(rightWrap);
+
+          const parentWrap = targetKamarTable.parentElement;
+          const isSingleTableScrollWrap =
+            parentWrap &&
+            parentWrap !== adminScopeEl &&
+            parentWrap.children.length === 1 &&
+            /overflow/i.test(parentWrap.className || '');
+
+          if (isSingleTableScrollWrap && parentWrap.parentElement) {
+            parentWrap.setAttribute('data-siap-hidden-kamar', 'true');
+            parentWrap.parentElement.insertBefore(kamarGrid, parentWrap);
+          } else if (parentWrap) {
+            targetKamarTable.setAttribute('data-siap-hidden-kamar', 'true');
+            parentWrap.insertBefore(kamarGrid, targetKamarTable);
+          }
         }
       }
     }
 
-    // 2. Tempel blok Divisi XI, XII, XIII ke dalam kontainer kertas laporan utama
+    // 2. Tempel Foto Dokumentasi Kegiatan pada Bab III. Kegiatan Pondok di bawah daftar pengisi acara
+    const div3El =
+      outermostDivSections.find((el) => {
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return (/\bDivisi\s+III\b/i.test(txt) || /^\s*III\./i.test(txt)) && /Kegiatan/i.test(txt);
+      }) || null;
+
+    if (div3El && kegiatanFotoSource && kegiatanLampiranFoto.length > 0) {
+      const fotoClone = document.createElement('div');
+      fotoClone.setAttribute('data-siap-kegiatan-foto-clone', 'true');
+      fotoClone.className = 'mt-5 pt-4 border-t border-slate-200 space-y-3';
+      fotoClone.innerHTML = kegiatanFotoSource.innerHTML;
+
+      const pengisiCandidates = Array.from(div3El.querySelectorAll('table, div, section')).filter(
+        (el) => {
+          if (el === div3El) return false;
+          const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return /Pengisi\s+Acara|Rincian\s+Pengisi|Daftar\s+Pengisi/i.test(txt) && txt.length < 15000;
+        }
+      );
+      const outermostPengisi = pengisiCandidates.filter(
+        (cand) => !pengisiCandidates.some((other) => other !== cand && other.contains(cand))
+      );
+      const lastPengisiBlock = outermostPengisi[outermostPengisi.length - 1] || null;
+      if (lastPengisiBlock) {
+        lastPengisiBlock.insertAdjacentElement('afterend', fotoClone);
+      } else {
+        div3El.appendChild(fotoClone);
+      }
+    }
+
+    // 3. Tempel blok Divisi XI, XII, XIII ke dalam kontainer kertas laporan utama
     //    TEPAT SETELAH blok Divisi terakhir (mis. DIVISI X · SIE LAUNDRY) & SEBELUM Lembar Pengesahan
     const shouldInjectExtrasInsidePaper =
       scope === 'gabungan' &&
@@ -1015,26 +1237,12 @@ export default function PusatLaporanPage() {
       Boolean(extraSource);
 
     if (shouldInjectExtrasInsidePaper && extraSource) {
-      const singleDivSections = allSectionDivs.filter((el) => {
-        if (el === searchContainer) return false;
-        if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (txt.length === 0 || txt.length > 35000) return false;
-        if (/Ringkasan\s+Eksekutif/i.test(txt)) return false;
-        const romans = txt.match(/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/gi) || [];
-        const uniqueRomans = new Set(romans.map((r) => r.toUpperCase().replace(/\s+/g, ' ')));
-        return uniqueRomans.size === 1;
-      });
-
-      const outermostDivSections = singleDivSections.filter(
-        (cand) => !singleDivSections.some((other) => other !== cand && other.contains(cand))
-      );
       const lastBaseDivEl =
         outermostDivSections[outermostDivSections.length - 1] || null;
 
       const extraWrap = document.createElement('div');
       extraWrap.setAttribute('data-siap-extra-clone', 'true');
-      extraWrap.className = 'mt-6 space-y-6 print:mt-5 print:space-y-5';
+      extraWrap.className = 'mt-6 space-y-6 print:mt-0 print:space-y-0';
       extraWrap.innerHTML = extraSource.innerHTML;
 
       if (
@@ -1062,9 +1270,11 @@ export default function PusatLaporanPage() {
     extraSelectedDivisions,
     showCoverAndApproval,
     showNotaLampiran,
+    useDigitalSignature,
     mobilePreviewOpen,
     strukturPersonalia,
     extraReports,
+    kegiatanLampiranFoto,
   ]);
 
   const handleRefresh = () => {
@@ -1139,11 +1349,24 @@ export default function PusatLaporanPage() {
     exportLaporanToExcel(bundle, baseScope, baseDivs);
   };
 
-  const renderExtraDivisionSections = () => (
-    <>
-      {(scope === 'kebersihan' ||
-        (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'))) && (
-        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+  const renderExtraDivisionSections = () => {
+    const hasBeforeXi =
+      showCoverAndApproval || (scope === 'gabungan' && baseSelectedDivisions.length > 0);
+    const hasBeforeXii =
+      hasBeforeXi || (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'));
+    const hasBeforeXiii =
+      hasBeforeXii || (scope === 'gabungan' && extraSelectedDivisions.includes('koperasi'));
+
+    return (
+      <>
+        {(scope === 'kebersihan' ||
+          (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'))) && (
+          <section
+            data-siap-page-start={hasBeforeXi ? 'true' : undefined}
+            className={`bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+              hasBeforeXi ? 'print:break-before-page' : ''
+            }`}
+          >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
@@ -1227,7 +1450,12 @@ export default function PusatLaporanPage() {
 
       {(scope === 'koperasi' ||
         (scope === 'gabungan' && extraSelectedDivisions.includes('koperasi'))) && (
-        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+        <section
+          data-siap-page-start={hasBeforeXii ? 'true' : undefined}
+          className={`bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+            hasBeforeXii ? 'print:break-before-page' : ''
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
@@ -1316,7 +1544,12 @@ export default function PusatLaporanPage() {
 
       {(scope === 'psb' ||
         (scope === 'gabungan' && extraSelectedDivisions.includes('psb'))) && (
-        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 break-inside-avoid">
+        <section
+          data-siap-page-start={hasBeforeXiii ? 'true' : undefined}
+          className={`bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+            hasBeforeXiii ? 'print:break-before-page' : ''
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
@@ -1405,13 +1638,19 @@ export default function PusatLaporanPage() {
       )}
     </>
   );
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5 print:max-w-none print:space-y-0">
       {/* Aturan Cetak A4 untuk PDF Bersih */}
       <style jsx global>{`
-        [data-siap-hidden-personalia="true"] {
+        [data-siap-hidden-personalia="true"],
+        [data-siap-hidden-kamar="true"] {
           display: none !important;
+        }
+        [data-siap-hidden-signature="true"] {
+          visibility: hidden !important;
+          opacity: 0 !important;
         }
         @media print {
           @page {
@@ -1422,6 +1661,13 @@ export default function PusatLaporanPage() {
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          #pusat-laporan-dokumen {
+            overflow: visible !important;
+          }
+          [data-siap-page-start="true"] {
+            break-before: page !important;
+            page-break-before: always !important;
           }
           thead {
             display: table-header-group;
@@ -1504,22 +1750,22 @@ export default function PusatLaporanPage() {
               <span>1. Pilih Periode Laporan</span>
             </div>
 
-            <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg">
+            <div className="grid grid-cols-3 gap-1.5 w-full p-1 bg-slate-100 rounded-lg">
               <button
                 type="button"
                 onClick={() => setMode('mingguan')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`w-full px-2 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap text-center cursor-pointer ${
                   mode === 'mingguan'
                     ? 'bg-white text-emerald-800 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Mingguan (Rapat Jum&apos;at)
+                Mingguan
               </button>
               <button
                 type="button"
                 onClick={() => setMode('bulanan')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`w-full px-2 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap text-center cursor-pointer ${
                   mode === 'bulanan'
                     ? 'bg-white text-emerald-800 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1530,13 +1776,13 @@ export default function PusatLaporanPage() {
               <button
                 type="button"
                 onClick={() => setMode('rentang')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`w-full px-2 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap text-center cursor-pointer ${
                   mode === 'rentang'
                     ? 'bg-white text-emerald-800 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Rentang Tanggal
+                Rentang Tgl
               </button>
             </div>
 
@@ -1593,8 +1839,11 @@ export default function PusatLaporanPage() {
             )}
 
             {mode === 'bulanan' && (
-              <div className="flex items-center gap-2">
-                <label htmlFor="laporan-month-input" className="text-xs text-slate-600">
+              <div className="flex items-center gap-2 w-full">
+                <label
+                  htmlFor="laporan-month-input"
+                  className="text-xs text-slate-600 whitespace-nowrap shrink-0"
+                >
                   Pilih Bulan:
                 </label>
                 <input
@@ -1602,7 +1851,7 @@ export default function PusatLaporanPage() {
                   type="month"
                   value={monthStr}
                   onChange={(e) => setMonthStr(e.target.value)}
-                  className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg bg-white text-slate-900"
+                  className="w-full min-w-[185px] min-h-[38px] px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg bg-white text-slate-900 tabular-nums"
                 />
               </div>
             )}
@@ -1650,59 +1899,76 @@ export default function PusatLaporanPage() {
                 <span>2. Pilih Cakupan Laporan</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 w-full">
-                <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer bg-slate-50 sm:bg-transparent border border-slate-200 sm:border-0 rounded-lg px-2.5 py-1.5 sm:p-0 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={showCoverAndApproval}
-                    onChange={(e) => setShowCoverAndApproval(e.target.checked)}
-                    className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
-                  />
-                  <span className="truncate">Sampul &amp; Pengesahan</span>
-                </label>
+              <div className="space-y-2 w-full">
+                <div className="grid grid-cols-2 gap-2 w-full">
+                  <label className="w-full inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={showCoverAndApproval}
+                      onChange={(e) => setShowCoverAndApproval(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
+                    />
+                    <span className="truncate">Sampul &amp; Pengesahan</span>
+                  </label>
 
-                <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer bg-slate-50 sm:bg-transparent border border-slate-200 sm:border-0 rounded-lg px-2.5 py-1.5 sm:p-0 min-w-0">
+                  <label className="w-full inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={showNotaLampiran}
+                      onChange={(e) => setShowNotaLampiran(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
+                    />
+                    <span className="truncate">
+                      Lampiran Nota
+                      {bundle ? ` (${bundle.keuangan.lampiranNotaList.length})` : ''}
+                    </span>
+                  </label>
+                </div>
+
+                <label className="w-full inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 min-w-0">
                   <input
                     type="checkbox"
-                    checked={showNotaLampiran}
-                    onChange={(e) => setShowNotaLampiran(e.target.checked)}
+                    checked={useDigitalSignature}
+                    onChange={(e) => setUseDigitalSignature(e.target.checked)}
                     className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-600 shrink-0"
                   />
-                  <span className="truncate">
-                    Lampiran Nota
-                    {bundle ? ` (${bundle.keuangan.lampiranNotaList.length})` : ''}
-                  </span>
+                  <span>Pakai TTD &amp; Stempel Digital</span>
                 </label>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 w-full gap-1.5 sm:flex sm:flex-wrap">
-              <button
-                type="button"
-                onClick={() => setScope('gabungan')}
-                className={`col-span-2 sm:col-span-1 w-full sm:w-auto px-3 py-2 sm:py-1.5 text-xs font-bold rounded-lg border transition-colors text-center cursor-pointer ${
-                  scope === 'gabungan'
-                    ? 'bg-emerald-700 border-emerald-700 text-white'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                Laporan Gabungan (Semua Divisi)
-              </button>
-
-              {ALL_DIVISIONS.map((div) => (
+            <div className="border-t border-slate-200 pt-3 space-y-2">
+              <span className="block text-[11px] font-semibold text-slate-600">
+                Pilih Jenis Laporan:
+              </span>
+              <div className="grid grid-cols-2 w-full gap-1.5 sm:flex sm:flex-wrap">
                 <button
-                  key={div.key}
                   type="button"
-                  onClick={() => setScope(div.key)}
-                  className={`w-full sm:w-auto px-3 py-2 sm:py-1.5 text-xs font-medium rounded-lg border transition-colors text-left sm:text-center truncate cursor-pointer ${
-                    scope === div.key
-                      ? 'bg-emerald-700 border-emerald-700 text-white font-bold'
+                  onClick={() => setScope('gabungan')}
+                  className={`col-span-2 sm:col-span-1 w-full sm:w-auto px-3 py-2 sm:py-1.5 text-xs font-bold rounded-lg border transition-colors text-center cursor-pointer ${
+                    scope === 'gabungan'
+                      ? 'bg-emerald-700 border-emerald-700 text-white'
                       : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
-                  {div.shortLabel}
+                  Laporan Gabungan (Semua Divisi)
                 </button>
-              ))}
+
+                {ALL_DIVISIONS.map((div) => (
+                  <button
+                    key={div.key}
+                    type="button"
+                    onClick={() => setScope(div.key)}
+                    className={`w-full sm:w-auto px-3 py-2 sm:py-1.5 text-xs font-medium rounded-lg border transition-colors text-left sm:text-center truncate cursor-pointer ${
+                      scope === div.key
+                        ? 'bg-emerald-700 border-emerald-700 text-white font-bold'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {div.shortLabel}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {scope === 'gabungan' && (
@@ -1907,48 +2173,156 @@ export default function PusatLaporanPage() {
                 <h5 className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
                   Bagian II · Pleno / Divisi
                 </h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {strukturPersonalia.plenoSections.map((sec) => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 print:grid-cols-2 gap-3">
+                  {strukturPersonalia.plenoSections.map((sec) => {
+                    const isMusyrif = sec.letter === 'K';
+                    const mid = Math.ceil(sec.members.length / 2);
+                    const halves = isMusyrif
+                      ? [sec.members.slice(0, mid), sec.members.slice(mid)]
+                      : [sec.members];
+
+                    return (
+                      <div
+                        key={sec.letter}
+                        className={`border border-slate-200 rounded-lg overflow-hidden break-inside-avoid ${
+                          isMusyrif ? 'sm:col-span-2 print:col-span-2' : ''
+                        }`}
+                      >
+                        <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-extrabold text-slate-900">
+                            {sec.letter}. {sec.label}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-600 tabular-nums">
+                            {sec.members.length} Org
+                          </span>
+                        </div>
+                        {sec.members.length === 0 ? (
+                          <p className="px-3 py-2 text-[11px] italic text-slate-400">
+                            Belum ada personel ditugaskan
+                          </p>
+                        ) : isMusyrif ? (
+                          <div className="grid grid-cols-2 gap-4 p-2.5">
+                            {halves.map((half, colIdx) => {
+                              const offset = colIdx === 0 ? 0 : mid;
+                              return (
+                                <div key={`K-col-${colIdx}`} className="border border-slate-200 rounded overflow-hidden">
+                                  <table className="w-full text-[11px] border-collapse">
+                                    <tbody>
+                                      {half.length === 0 ? (
+                                        <tr>
+                                          <td className="px-2.5 py-1.5 italic text-slate-400">-</td>
+                                        </tr>
+                                      ) : (
+                                        half.map((m, idx) => (
+                                          <tr
+                                            key={`K-${offset + idx}`}
+                                            className="border-t first:border-t-0 border-slate-100"
+                                          >
+                                            <td className="px-2 py-1.5 w-6 text-slate-500 font-mono tabular-nums align-top">
+                                              {offset + idx + 1}.
+                                            </td>
+                                            <td className="px-1.5 py-1.5 font-semibold text-slate-900 align-top">
+                                              {m.nama}
+                                            </td>
+                                            <td className="px-2 py-1.5 text-right text-slate-600 whitespace-nowrap align-top">
+                                              {m.peran}
+                                            </td>
+                                          </tr>
+                                        ))
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <table className="w-full text-[11px] border-collapse">
+                            <tbody>
+                              {sec.members.map((m, idx) => (
+                                <tr key={`${sec.letter}-${idx}`} className="border-t first:border-t-0 border-slate-100">
+                                  <td className="px-2.5 py-1.5 w-6 text-slate-500 font-mono tabular-nums align-top">
+                                    {idx + 1}.
+                                  </td>
+                                  <td className="px-2 py-1.5 font-semibold text-slate-900 align-top">
+                                    {m.nama}
+                                  </td>
+                                  <td className="px-2.5 py-1.5 text-right text-slate-600 whitespace-nowrap align-top">
+                                    {m.peran}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sumber tersembunyi Lampiran Dokumentasi Foto Kegiatan untuk disuntikkan ke Bab III. Kegiatan Pondok */}
+          <div ref={kegiatanFotoSourceRef} className="hidden" aria-hidden="true">
+            {kegiatanLampiranFoto.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
+                    Lampiran Dokumentasi Foto Kegiatan
+                  </h4>
+                  <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
+                    {kegiatanLampiranFoto.length} Agenda Terdokumentasi
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {kegiatanLampiranFoto.map((ag) => (
                     <div
-                      key={sec.letter}
-                      className="border border-slate-200 rounded-lg overflow-hidden break-inside-avoid"
+                      key={ag.id}
+                      className="border border-slate-200 rounded-lg p-3 space-y-2 break-inside-avoid"
                     >
-                      <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-extrabold text-slate-900">
-                          {sec.letter}. {sec.label}
-                        </span>
-                        <span className="text-[10px] font-semibold text-slate-600 tabular-nums">
-                          {sec.members.length} Org
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">{ag.judul}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {ag.tanggal ? formatTanggalSuratIndo(ag.tanggal) : '-'}
+                            {ag.jamMulai ? ` · ${ag.jamMulai} WIB` : ''}
+                            {ag.lokasi ? ` · ${ag.lokasi}` : ''}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 tabular-nums">
+                          {ag.urls.length} Foto
                         </span>
                       </div>
-                      {sec.members.length === 0 ? (
-                        <p className="px-3 py-2 text-[11px] italic text-slate-400">
-                          Belum ada personel ditugaskan
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 print:grid-cols-3 gap-2.5">
+                        {ag.urls.map((url, idx) => (
+                          <div
+                            key={`${ag.id}-foto-${idx}`}
+                            className="rounded-lg border border-slate-200 overflow-hidden bg-slate-50 aspect-[4/3]"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={url}
+                              alt={`Dokumentasi ${ag.judul} ${idx + 1}`}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {ag.notulensi && (
+                        <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2">
+                          <strong>Notulensi:</strong> {ag.notulensi}
                         </p>
-                      ) : (
-                        <table className="w-full text-[11px] border-collapse">
-                          <tbody>
-                            {sec.members.map((m, idx) => (
-                              <tr key={`${sec.letter}-${idx}`} className="border-t first:border-t-0 border-slate-100">
-                                <td className="px-2.5 py-1.5 w-6 text-slate-500 font-mono tabular-nums align-top">
-                                  {idx + 1}.
-                                </td>
-                                <td className="px-2 py-1.5 font-semibold text-slate-900 align-top">
-                                  {m.nama}
-                                </td>
-                                <td className="px-2.5 py-1.5 text-right text-slate-600 whitespace-nowrap align-top">
-                                  {m.peran}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
                       )}
                     </div>
                   ))}
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Sumber tersembunyi Divisi XI-XIII untuk disuntikkan ke dalam kontainer kertas laporan tepat setelah Divisi X & sebelum Lembar Pengesahan */}
@@ -1996,7 +2370,10 @@ export default function PusatLaporanPage() {
                 {renderExtraDivisionSections()}
 
                 {showCoverAndApproval && (
-                  <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid">
+                  <section
+                    data-siap-page-start="true"
+                    className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page"
+                  >
                     <div className="text-center border-b border-slate-200 pb-3 mb-6">
                       <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
                         Lembar Pengesahan
@@ -2006,11 +2383,12 @@ export default function PusatLaporanPage() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-6 text-center text-xs">
                       <div className="space-y-2">
                         <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
                         <div className="h-16 flex items-center justify-center">
-                          {pengaturanApproval.ttd_sekretaris_url && (
+                          {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_sekretaris_url}
                               alt="TTD Sekretaris"
@@ -2026,14 +2404,16 @@ export default function PusatLaporanPage() {
                       <div className="space-y-2">
                         <p className="font-semibold text-slate-700">Kepala Pondok</p>
                         <div className="h-16 flex items-center justify-center relative">
-                          {pengaturanApproval.stempel_url && (
+                          {useDigitalSignature && pengaturanApproval.stempel_url && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.stempel_url}
                               alt="Stempel Pondok"
                               className="max-h-14 object-contain opacity-80 absolute"
                             />
                           )}
-                          {pengaturanApproval.ttd_kepala_pondok_url && (
+                          {useDigitalSignature && pengaturanApproval.ttd_kepala_pondok_url && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_kepala_pondok_url}
                               alt="TTD Kepala Pondok"
@@ -2049,7 +2429,8 @@ export default function PusatLaporanPage() {
                       <div className="space-y-2">
                         <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
                         <div className="h-16 flex items-center justify-center">
-                          {pengaturanApproval.ttd_pengasuh_url && (
+                          {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_pengasuh_url}
                               alt="TTD Pengasuh"

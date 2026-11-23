@@ -9,7 +9,6 @@ import {
   Database,
   ExternalLink,
   Eye,
-  ImagePlus,
   MessageCircle,
   Printer,
   RefreshCw,
@@ -37,23 +36,25 @@ import {
   type SkemaPendaftaranConfig,
 } from '@/lib/pengaturan';
 import { formatRupiah } from '@/lib/laporan';
-import {
-  insertKeuanganTransaksiResilient,
-  uploadKeuanganLampiranImage,
-} from '@/lib/keuangan';
+import { insertKeuanganTransaksiResilient } from '@/lib/keuangan';
 import {
   calculatePsbBilling,
   countVerifiedPsbQuota,
   deletePsbRecord,
   fetchPsbRecords,
+  generateNextNoRegistrasi,
+  normalizeWaNumber,
+  PSB_JENJANG_OPTIONS,
   PSB_STATUS_META,
   PSB_TABLE_SQL,
   savePsbRecord,
-  splitPelunasanForWallets,
   toWaMeDigits,
+  type PsbPaket,
   type PsbPendaftaranRecord,
   type PsbStatus,
 } from '@/lib/psb';
+
+const MIN_PSB_DP = 300000;
 
 const REJECT_PRESET_REASONS = [
   'Bukti transfer tidak valid / palsu',
@@ -83,6 +84,7 @@ export default function PendaftaranInternalPage() {
     nama_pesantren: DEFAULT_PENGATURAN_FORM.nama_pesantren,
     alamat_lengkap: DEFAULT_PENGATURAN_FORM.alamat_lengkap,
     no_telepon: DEFAULT_PENGATURAN_FORM.no_telepon,
+    email: '',
     logo_url: '',
     stempel_url: '',
     nama_bendahara: DEFAULT_PENGATURAN_FORM.nama_bendahara,
@@ -101,27 +103,44 @@ export default function PendaftaranInternalPage() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Detail & Workflow Modal
+  // Detail & Workflow Modal (2 Tahap)
   const [selected, setSelected] = useState<PsbPendaftaranRecord | null>(null);
   const [editKeringanan, setEditKeringanan] = useState<number>(0);
   const [editCatatanKeringanan, setEditCatatanKeringanan] = useState('');
   const [editCatatanPengurus, setEditCatatanPengurus] = useState('');
-  const [dpVerifNominal, setDpVerifNominal] = useState<number>(0);
+  const [dpVerifNominal, setDpVerifNominal] = useState<number>(MIN_PSB_DP);
   const [dpVerifMetode, setDpVerifMetode] = useState<'transfer' | 'tunai'>('transfer');
-  const [pelunasanNominal, setPelunasanNominal] = useState<number>(0);
-  const [pelunasanMetode, setPelunasanMetode] = useState<'tunai' | 'transfer'>('tunai');
-  const [pelunasanBuktiFile, setPelunasanBuktiFile] = useState<File | null>(null);
-  const [pelunasanBuktiPreview, setPelunasanBuktiPreview] = useState<string>('');
   const [selectedKamar, setSelectedKamar] = useState<string>('Menunggu Penempatan');
   const [tglMasukAktual, setTglMasukAktual] = useState<string>('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkActivating, setBulkActivating] = useState(false);
 
+  // Input Pendaftar Offline Modal
+  const [offlineModalOpen, setOfflineModalOpen] = useState(false);
+  const [offlineSaving, setOfflineSaving] = useState(false);
+  const [offlineError, setOfflineError] = useState<string | null>(null);
+  const [offNamaLengkap, setOffNamaLengkap] = useState('');
+  const [offJk, setOffJk] = useState<'L' | 'P'>('L');
+  const [offJenjang, setOffJenjang] = useState<string>(PSB_JENJANG_OPTIONS[0]);
+  const [offTempatLahir, setOffTempatLahir] = useState('');
+  const [offTglLahir, setOffTglLahir] = useState('');
+  const [offNamaWali, setOffNamaWali] = useState('');
+  const [offNoWaWali, setOffNoWaWali] = useState('');
+  const [offAlamatJalan, setOffAlamatJalan] = useState('');
+  const [offDesa, setOffDesa] = useState('');
+  const [offKecamatan, setOffKecamatan] = useState('');
+  const [offKabupaten, setOffKabupaten] = useState('');
+  const [offPaket, setOffPaket] = useState<PsbPaket>('reguler');
+  const [offDpNominal, setOffDpNominal] = useState<number>(MIN_PSB_DP);
+  const [offKeringanan, setOffKeringanan] = useState<number>(0);
+  const [offCatatanKeringanan, setOffCatatanKeringanan] = useState('');
+  const [offCatatanPengurus, setOffCatatanPengurus] = useState('');
+  const [offLangsungVerifikasi, setOffLangsungVerifikasi] = useState(true);
+
   // Print Kuitansi Modal (21x10 cm)
   const [kuitansiPreview, setKuitansiPreview] = useState<{
     record: PsbPendaftaranRecord;
-    jenis: 'dp' | 'pelunasan';
     nomor: string;
     nominal: number;
     metode: string;
@@ -155,6 +174,7 @@ export default function PendaftaranInternalPage() {
       nama_pesantren: String(row.nama_pesantren || DEFAULT_PENGATURAN_FORM.nama_pesantren),
       alamat_lengkap: String(row.alamat_lengkap || DEFAULT_PENGATURAN_FORM.alamat_lengkap),
       no_telepon: String(row.no_telepon || DEFAULT_PENGATURAN_FORM.no_telepon),
+      email: String(row.email || ''),
       logo_url: String(row.logo_url || ''),
       stempel_url: String(row.stempel_url || ''),
       nama_bendahara: String(row.nama_bendahara || DEFAULT_PENGATURAN_FORM.nama_bendahara),
@@ -200,14 +220,8 @@ export default function PendaftaranInternalPage() {
     setEditKeringanan(Number(rec.nominal_keringanan || 0));
     setEditCatatanKeringanan(rec.catatan_keringanan || '');
     setEditCatatanPengurus(rec.catatan_pengurus || '');
-    setDpVerifNominal(Number(rec.dp_nominal || 500000));
+    setDpVerifNominal(Number(rec.dp_nominal || MIN_PSB_DP));
     setDpVerifMetode(rec.metode_dp === 'tunai' ? 'tunai' : 'transfer');
-    const totalPaid = Number(rec.dp_terbayar || 0) + Number(rec.pelunasan_terbayar || 0);
-    const sisa = Math.max(0, Number(rec.total_biaya_akhir || 0) - totalPaid);
-    setPelunasanNominal(sisa);
-    setPelunasanMetode('tunai');
-    setPelunasanBuktiFile(null);
-    setPelunasanBuktiPreview('');
 
     const defaultRoom = rec.kamar_rencana || 'Menunggu Penempatan';
     setSelectedKamar(defaultRoom);
@@ -215,6 +229,28 @@ export default function PendaftaranInternalPage() {
       rec.tahun_psb || skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
     );
     setTglMasukAktual(`${defaultTahunPsb}-07-01`);
+  };
+
+  const openOfflineModal = () => {
+    setOfflineError(null);
+    setOffNamaLengkap('');
+    setOffJk('L');
+    setOffJenjang(PSB_JENJANG_OPTIONS[0]);
+    setOffTempatLahir('');
+    setOffTglLahir('');
+    setOffNamaWali('');
+    setOffNoWaWali('');
+    setOffAlamatJalan('');
+    setOffDesa('');
+    setOffKecamatan('');
+    setOffKabupaten('');
+    setOffPaket('reguler');
+    setOffDpNominal(MIN_PSB_DP);
+    setOffKeringanan(0);
+    setOffCatatanKeringanan('');
+    setOffCatatanPengurus('');
+    setOffLangsungVerifikasi(true);
+    setOfflineModalOpen(true);
   };
 
   const filteredRecords = useMemo(() => {
@@ -269,9 +305,176 @@ export default function PendaftaranInternalPage() {
     showToast('success', `Tautan ${label} berhasil disalin!`);
   };
 
-  // TAHAP 2: Verifikasi DP, Kunci Kuota Promo, & Masuk Dompet Pendaftaran
+  const buildWaNotaDpUrl = (rec: PsbPendaftaranRecord) => {
+    const dpMasuk = Number(rec.dp_terbayar || rec.dp_nominal || 0);
+    const totalBiaya = Number(rec.total_biaya_akhir || 0);
+    const sisaKekurangan = Math.max(0, totalBiaya - dpMasuk);
+    const noKuitansi =
+      rec.no_kuitansi_dp ||
+      `KWT-PSBDP-${todayIso.replace(/-/g, '').slice(2)}-${rec.no_registrasi.slice(-3)}`;
+    const jalur = rec.metode_dp === 'tunai' ? 'Tunai (Daftar Offline)' : 'Transfer (Daftar Online)';
+    const msg =
+      `*NOTA KUITANSI DP PENDAFTARAN PSB*\n` +
+      `${pengaturan.nama_pesantren}\n` +
+      `--------------------------------\n` +
+      `No. Kuitansi : ${noKuitansi}\n` +
+      `No. Registrasi : ${rec.no_registrasi}\n` +
+      `Calon Santri : ${rec.nama_lengkap}\n` +
+      `Wali Santri : ${rec.nama_wali}\n` +
+      `Paket : ${rec.paket.toUpperCase()}\n` +
+      `Jalur Bayar : ${jalur}\n` +
+      `DP Diterima : ${formatRupiah(dpMasuk)}\n` +
+      `Total Biaya : ${formatRupiah(totalBiaya)}\n` +
+      `Sisa Kekurangan : ${sisaKekurangan > 0 ? `${formatRupiah(sisaKekurangan)} (dicicil/dilunasi di menu Keuangan)` : 'LUNAS'}\n` +
+      `--------------------------------\n` +
+      `Terima kasih. Mohon simpan pesan ini sebagai bukti pembayaran DP yang sah.`;
+    return `https://wa.me/${toWaMeDigits(rec.no_wa_wali)}?text=${encodeURIComponent(msg)}`;
+  };
+
+  // INPUT PENDAFTAR OFFLINE (Tunai di Kantor, minimal DP Rp 300.000)
+  const handleSubmitOffline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit) return;
+    setOfflineError(null);
+
+    if (!offNamaLengkap.trim()) {
+      setOfflineError('Nama lengkap calon santri wajib diisi.');
+      return;
+    }
+    if (!offNamaWali.trim()) {
+      setOfflineError('Nama orang tua / wali wajib diisi.');
+      return;
+    }
+    const cleanWa = normalizeWaNumber(offNoWaWali);
+    if (cleanWa.length < 9) {
+      setOfflineError('Nomor HP / WhatsApp wali harus valid (minimal 9 digit).');
+      return;
+    }
+    if (!offDesa.trim() || !offKecamatan.trim() || !offKabupaten.trim()) {
+      setOfflineError('Desa/Kelurahan, Kecamatan, dan Kabupaten/Kota wajib diisi.');
+      return;
+    }
+    const nominalDp = Number(offDpNominal || 0);
+    if (!Number.isFinite(nominalDp) || nominalDp < MIN_PSB_DP) {
+      setOfflineError('Nominal DP minimal Rp 300.000');
+      showToast('error', 'Nominal DP minimal Rp 300.000');
+      return;
+    }
+
+    setOfflineSaving(true);
+    const nowIso = new Date().toISOString();
+    const tahunPsbAktif = Number(
+      skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
+    );
+    const { records: latestRows } = await fetchPsbRecords();
+    const sourceRows = latestRows.length > 0 ? latestRows : records;
+    const noRegistrasi = generateNextNoRegistrasi(sourceRows, tahunPsbAktif);
+    const billing = calculatePsbBilling({
+      paket: offPaket,
+      jumlahPendaftarTerhitung: quotaUsed,
+      skema,
+      nominalKeringanan: offKeringanan,
+      dpTerbayar: offLangsungVerifikasi ? nominalDp : 0,
+      pelunasanTerbayar: 0,
+    });
+
+    const isActuallyLunas =
+      offLangsungVerifikasi && nominalDp >= billing.totalBiayaAkhir && billing.totalBiayaAkhir > 0;
+    const noKuitansiDp = offLangsungVerifikasi
+      ? `KWT-PSBDP-${todayIso.replace(/-/g, '').slice(2)}-${noRegistrasi.slice(-3)}`
+      : '';
+
+    const newRecord: PsbPendaftaranRecord = {
+      id:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `psb-off-${Date.now()}`,
+      no_registrasi: noRegistrasi,
+      tahun_psb: tahunPsbAktif,
+      status: offLangsungVerifikasi
+        ? isActuallyLunas
+          ? 'lunas_menunggu_kedatangan'
+          : 'dp_terverifikasi'
+        : 'menunggu_verifikasi',
+      paket: offPaket,
+      kamar_rencana: '',
+      rencana_tgl_masuk: todayIso,
+      nama_lengkap: offNamaLengkap.trim(),
+      jk: offJk,
+      tempat_lahir: offTempatLahir.trim(),
+      tgl_lahir: offTglLahir || '',
+      jenjang_pendidikan: offJenjang,
+      nama_ayah: offNamaWali.trim(),
+      nama_ibu: '',
+      nama_wali: offNamaWali.trim(),
+      no_wa_wali: cleanWa,
+      alamat_jalan: offAlamatJalan.trim(),
+      desa: offDesa.trim(),
+      kecamatan: offKecamatan.trim(),
+      kabupaten: offKabupaten.trim(),
+      provinsi: '',
+      kode_pos: '',
+      dapat_promo_pangkal: billing.rincian.isFreeUangPangkal,
+      total_biaya_awal: billing.totalBiayaAwal,
+      nominal_keringanan: billing.nominalKeringanan,
+      catatan_keringanan: offCatatanKeringanan.trim(),
+      total_biaya_akhir: billing.totalBiayaAkhir,
+      dp_nominal: nominalDp,
+      dp_terbayar: offLangsungVerifikasi ? nominalDp : 0,
+      pelunasan_terbayar: 0,
+      bukti_dp_url: '',
+      metode_dp: 'tunai',
+      tgl_verifikasi_dp: offLangsungVerifikasi ? nowIso : null,
+      verifikator_dp: offLangsungVerifikasi ? petugasNama : '',
+      tgl_lunas: isActuallyLunas ? nowIso : null,
+      santri_id: null,
+      nis_terbit: '',
+      no_kuitansi_dp: noKuitansiDp,
+      no_kuitansi_lunas: '',
+      catatan_wali: 'Pendaftaran Offline di Kantor Pondok',
+      catatan_pengurus: offCatatanPengurus.trim(),
+      setuju_ketentuan: true,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    if (offLangsungVerifikasi && nominalDp > 0) {
+      await insertKeuanganTransaksiResilient([
+        {
+          dompet: 'pendaftaran',
+          tipe: 'masuk',
+          kategori: `PSB Offline DP (${offPaket.toUpperCase()})`,
+          nominal: nominalDp,
+          keterangan: `DP PSB Offline ${noRegistrasi} - ${newRecord.nama_lengkap} (${newRecord.nama_wali})`,
+          metode_pembayaran: 'tunai',
+          tgl_transaksi: todayIso,
+          no_kuitansi: noKuitansiDp,
+        },
+      ]);
+    }
+
+    const { record } = await savePsbRecord(newRecord);
+    setRecords((prev) => [record, ...prev]);
+    setOfflineSaving(false);
+    setOfflineModalOpen(false);
+    openDetailModal(record);
+    showToast(
+      'success',
+      offLangsungVerifikasi
+        ? `Pendaftar Offline ${record.no_registrasi} tersimpan & DP Tunai masuk Dompet Pendaftaran!`
+        : `Pendaftar Offline ${record.no_registrasi} masuk antrean verifikasi DP Tunai.`
+    );
+  };
+
+  // TAHAP 1: Verifikasi DP, Kunci Kuota Promo, & Masuk Dompet Pendaftaran (Transfer Online / Tunai Offline)
   const handleVerifikasiDp = async () => {
     if (!canEdit || !selected) return;
+    const nominalVerif = Number(dpVerifNominal || 0);
+    if (!Number.isFinite(nominalVerif) || nominalVerif < MIN_PSB_DP) {
+      showToast('error', 'Nominal DP minimal Rp 300.000');
+      return;
+    }
+
     setSavingAction(true);
 
     const billing = calculatePsbBilling({
@@ -279,7 +482,7 @@ export default function PendaftaranInternalPage() {
       jumlahPendaftarTerhitung: quotaUsed,
       skema,
       nominalKeringanan: editKeringanan,
-      dpTerbayar: dpVerifNominal,
+      dpTerbayar: nominalVerif,
       pelunasanTerbayar: 0,
     });
 
@@ -287,61 +490,65 @@ export default function PendaftaranInternalPage() {
       selected.no_kuitansi_dp ||
       `KWT-PSBDP-${todayIso.replace(/-/g, '').slice(2)}-${selected.no_registrasi.slice(-3)}`;
 
-    const nextStatus: PsbStatus = billing.sudahLunas
+    const jalurMetode: 'transfer' | 'tunai' =
+      selected.metode_dp === 'tunai' ? 'tunai' : dpVerifMetode;
+    const isActuallyLunas =
+      nominalVerif >= billing.totalBiayaAkhir && billing.totalBiayaAkhir > 0;
+    const nextStatus: PsbStatus = isActuallyLunas
       ? 'lunas_menunggu_kedatangan'
       : 'dp_terverifikasi';
 
     const updated: PsbPendaftaranRecord = {
       ...selected,
       status: nextStatus,
-      metode_dp: dpVerifMetode,
+      metode_dp: jalurMetode,
       dapat_promo_pangkal: billing.rincian.isFreeUangPangkal,
       total_biaya_awal: billing.totalBiayaAwal,
       nominal_keringanan: billing.nominalKeringanan,
       catatan_keringanan: editCatatanKeringanan.trim(),
       total_biaya_akhir: billing.totalBiayaAkhir,
-      dp_terbayar: Number(dpVerifNominal || 0),
+      dp_terbayar: nominalVerif,
       tgl_verifikasi_dp: new Date().toISOString(),
       verifikator_dp: petugasNama,
-      tgl_lunas: billing.sudahLunas ? new Date().toISOString() : null,
+      tgl_lunas: isActuallyLunas ? new Date().toISOString() : null,
       no_kuitansi_dp: noKuitansiDp,
       catatan_pengurus: editCatatanPengurus.trim(),
       updated_at: new Date().toISOString(),
     };
 
-    // Catat ke Keuangan (Transfer -> Pemasukan Transfer, Tunai -> Dompet Pendaftaran) beserta lampiran bukti DP
-    if (Number(dpVerifNominal) > 0) {
-      await insertKeuanganTransaksiResilient(
-        [
-          {
-            dompet: 'pendaftaran',
-            tipe: 'masuk',
-            kategori: `PSB Online DP (${selected.paket.toUpperCase()})`,
-            nominal: Number(dpVerifNominal),
-            keterangan: `DP PSB ${selected.no_registrasi} - ${selected.nama_lengkap} (${selected.nama_wali})`,
-            metode_pembayaran: dpVerifMetode,
-            tgl_transaksi: todayIso,
-            no_kuitansi: noKuitansiDp,
-          },
-        ],
-        selected.bukti_dp_url || undefined
-      );
-    }
+    // Catat ke Dompet Pendaftaran (Transfer untuk daftar online, Tunai untuk daftar offline)
+    await insertKeuanganTransaksiResilient(
+      [
+        {
+          dompet: 'pendaftaran',
+          tipe: 'masuk',
+          kategori:
+            jalurMetode === 'tunai'
+              ? `PSB Offline DP (${selected.paket.toUpperCase()})`
+              : `PSB Online DP (${selected.paket.toUpperCase()})`,
+          nominal: nominalVerif,
+          keterangan: `DP PSB ${selected.no_registrasi} - ${selected.nama_lengkap} (${selected.nama_wali})`,
+          metode_pembayaran: jalurMetode,
+          tgl_transaksi: todayIso,
+          no_kuitansi: noKuitansiDp,
+        },
+      ],
+      selected.bukti_dp_url || undefined
+    );
 
     const { record } = await savePsbRecord(updated);
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
-    setPelunasanNominal(billing.sisaTagihan);
     setSavingAction(false);
     showToast(
       'success',
-      dpVerifMetode === 'transfer'
-        ? `DP ${record.no_registrasi} terverifikasi & masuk laporan Pemasukan Transfer!`
+      jalurMetode === 'transfer'
+        ? `DP ${record.no_registrasi} terverifikasi & masuk Dompet Pendaftaran (Transfer)!`
         : `DP ${record.no_registrasi} terverifikasi & masuk Dompet Pendaftaran (Tunai)!`
     );
   };
 
-  // Penyesuaian Keringanan Sebelum Pelunasan
+  // Penyesuaian Keringanan Sebelum Diresmikan Jadi Santri Aktif
   const handleSimpanKeringanan = async () => {
     if (!canEdit || !selected) return;
     setSavingAction(true);
@@ -355,6 +562,9 @@ export default function PendaftaranInternalPage() {
       pelunasanTerbayar: selected.pelunasan_terbayar,
     });
 
+    const totalPaid = Number(selected.dp_terbayar || 0) + Number(selected.pelunasan_terbayar || 0);
+    const isActuallyLunas = totalPaid >= billing.totalBiayaAkhir && billing.totalBiayaAkhir > 0;
+
     const updated: PsbPendaftaranRecord = {
       ...selected,
       nominal_keringanan: billing.nominalKeringanan,
@@ -362,8 +572,10 @@ export default function PendaftaranInternalPage() {
       total_biaya_akhir: billing.totalBiayaAkhir,
       catatan_pengurus: editCatatanPengurus.trim(),
       status:
-        billing.sudahLunas && selected.status === 'dp_terverifikasi'
+        isActuallyLunas && selected.status === 'dp_terverifikasi'
           ? 'lunas_menunggu_kedatangan'
+          : !isActuallyLunas && selected.status === 'lunas_menunggu_kedatangan'
+          ? 'dp_terverifikasi'
           : selected.status,
       updated_at: new Date().toISOString(),
     };
@@ -371,110 +583,11 @@ export default function PendaftaranInternalPage() {
     const { record } = await savePsbRecord(updated);
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
-    setPelunasanNominal(billing.sisaTagihan);
     setSavingAction(false);
     showToast('success', 'Nominal keringanan & catatan pengurus diperbarui.');
   };
 
-  // TAHAP 3: Catat Pelunasan Saat Sowan / Kedatangan
-  const handleCatatPelunasan = async () => {
-    if (!canEdit || !selected) return;
-    const bayar = Math.max(0, Number(pelunasanNominal || 0));
-    if (bayar <= 0) {
-      showToast('error', 'Nominal pelunasan harus lebih dari Rp0.');
-      return;
-    }
-    setSavingAction(true);
-
-    const newPelunasanTotal = Number(selected.pelunasan_terbayar || 0) + bayar;
-    const billing = calculatePsbBilling({
-      paket: selected.paket,
-      jumlahPendaftarTerhitung: quotaUsed,
-      skema,
-      forceFreeUangPangkal: selected.dapat_promo_pangkal,
-      nominalKeringanan: editKeringanan,
-      dpTerbayar: selected.dp_terbayar,
-      pelunasanTerbayar: newPelunasanTotal,
-    });
-
-    const noKuitansiLunas = `KWT-PSBLNS-${todayIso.replace(/-/g, '').slice(2)}-${selected.no_registrasi.slice(-3)}`;
-    const walletSplit = splitPelunasanForWallets({
-      paket: selected.paket,
-      totalSudahDibayarSebelumnya: Number(selected.dp_terbayar || 0) + Number(selected.pelunasan_terbayar || 0),
-      bayarSekarang: bayar,
-      skema,
-    });
-
-    const kasPayloads: Array<Record<string, unknown>> = [];
-    if (walletSplit.keDompetPendaftaran > 0) {
-      kasPayloads.push({
-        ...(selected.santri_id ? { santri_id: selected.santri_id } : {}),
-        dompet: 'pendaftaran',
-        tipe: 'masuk',
-        kategori: `Pelunasan PSB (${selected.paket.toUpperCase()})`,
-        nominal: walletSplit.keDompetPendaftaran,
-        keterangan: `Pelunasan PSB ${selected.no_registrasi} - ${selected.nama_lengkap}`,
-        metode_pembayaran: pelunasanMetode,
-        tgl_transaksi: todayIso,
-        no_kuitansi: noKuitansiLunas,
-      });
-    }
-    if (walletSplit.keDompetOperasionalSyahriyah > 0) {
-      const periodeBulanPertama = (tglMasukAktual || todayIso).slice(0, 7);
-      kasPayloads.push({
-        ...(selected.santri_id ? { santri_id: selected.santri_id } : {}),
-        dompet: 'operasional',
-        tipe: 'masuk',
-        kategori: 'Syahriyah & Iuran Santri',
-        nominal: walletSplit.keDompetOperasionalSyahriyah,
-        bulan_tagihan: `Syahriyah Bulan Pertama (${periodeBulanPertama})`,
-        keterangan: `Syahriyah Bulan Pertama PSB ${selected.no_registrasi} - ${selected.nama_lengkap}`,
-        metode_pembayaran: pelunasanMetode,
-        tgl_transaksi: todayIso,
-        no_kuitansi: noKuitansiLunas,
-      });
-    }
-    let uploadedBuktiPelunasan = '';
-    if (pelunasanMetode === 'transfer' && pelunasanBuktiFile) {
-      uploadedBuktiPelunasan = await uploadKeuanganLampiranImage(pelunasanBuktiFile, 'bukti_tf');
-    }
-
-    if (kasPayloads.length > 0) {
-      await insertKeuanganTransaksiResilient(
-        kasPayloads,
-        uploadedBuktiPelunasan || undefined
-      );
-    }
-
-    const updated: PsbPendaftaranRecord = {
-      ...selected,
-      pelunasan_terbayar: newPelunasanTotal,
-      nominal_keringanan: billing.nominalKeringanan,
-      catatan_keringanan: editCatatanKeringanan.trim(),
-      total_biaya_akhir: billing.totalBiayaAkhir,
-      status: billing.sudahLunas ? 'lunas_menunggu_kedatangan' : selected.status,
-      tgl_lunas: billing.sudahLunas ? new Date().toISOString() : selected.tgl_lunas,
-      no_kuitansi_lunas: noKuitansiLunas,
-      catatan_pengurus: editCatatanPengurus.trim(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const { record } = await savePsbRecord(updated);
-    setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
-    setSelected(record);
-    setPelunasanNominal(billing.sisaTagihan);
-    setPelunasanBuktiFile(null);
-    setPelunasanBuktiPreview('');
-    setSavingAction(false);
-    showToast(
-      'success',
-      pelunasanMetode === 'transfer'
-        ? 'Pelunasan transfer dicatat ke laporan Pemasukan Transfer!'
-        : 'Pembayaran pelunasan tunai berhasil dicatat ke Dompet Keuangan!'
-    );
-  };
-
-  // Helper aktivasi tunggal & massal ke tabel santri
+  // TAHAP 2: Aktivasi tunggal & massal ke tabel santri (menyimpan total_biaya_pendaftaran & dp_terbayar)
   const activateSinglePsbRecord = async (params: {
     rec: PsbPendaftaranRecord;
     kamar: string;
@@ -489,45 +602,61 @@ export default function PendaftaranInternalPage() {
       ? Number(skema.syahriyah_vip || 500000)
       : Number(skema.syahriyah_reguler || 450000);
 
-    const { data: newSantri, error: santriErr } = await supabase
+    const totalBiayaPendaftaran = Number(rec.total_biaya_akhir || 0);
+    const dpTerbayar = Number(rec.dp_terbayar || 0);
+
+    const santriPayload: Record<string, unknown> = {
+      nis: assignedNis,
+      tgl_masuk: tglMasuk,
+      nama_lengkap: rec.nama_lengkap,
+      kamar,
+      tarif_syahriyah: tarifSyahriyah,
+      paket_pendaftaran: rec.paket,
+      nominal_pendaftaran: totalBiayaPendaftaran,
+      total_biaya_pendaftaran: totalBiayaPendaftaran,
+      dp_terbayar: dpTerbayar,
+      catatan_keringanan: rec.catatan_keringanan || '',
+      status: 'aktif',
+      jk: rec.jk,
+      tempat_lahir: rec.tempat_lahir || null,
+      tgl_lahir: rec.tgl_lahir || null,
+      nama_ayah: rec.nama_ayah || rec.nama_wali,
+      nama_ibu: rec.nama_ibu || null,
+      no_wa_ayah: rec.no_wa_wali,
+      nama_wali: rec.nama_wali,
+      no_wa_wali: rec.no_wa_wali,
+      alamat_jalan: rec.alamat_jalan || null,
+      desa: rec.desa || null,
+      kecamatan: rec.kecamatan || null,
+      kabupaten: rec.kabupaten || null,
+      provinsi: rec.provinsi || null,
+      kode_pos: rec.kode_pos || null,
+      unit_asrama: 'Induk Putra',
+    };
+
+    let { data: newSantri, error: santriErr } = await supabase
       .from('santri')
-      .insert([
-        {
-          nis: assignedNis,
-          tgl_masuk: tglMasuk,
-          nama_lengkap: rec.nama_lengkap,
-          kamar,
-          tarif_syahriyah: tarifSyahriyah,
-          paket_pendaftaran: rec.paket,
-          nominal_pendaftaran: rec.total_biaya_akhir,
-          catatan_keringanan: rec.catatan_keringanan || '',
-          status: 'aktif',
-          jk: rec.jk,
-          tempat_lahir: rec.tempat_lahir || null,
-          tgl_lahir: rec.tgl_lahir || null,
-          nama_ayah: rec.nama_ayah || rec.nama_wali,
-          nama_ibu: rec.nama_ibu || null,
-          no_wa_ayah: rec.no_wa_wali,
-          nama_wali: rec.nama_wali,
-          no_wa_wali: rec.no_wa_wali,
-          alamat_jalan: rec.alamat_jalan || null,
-          desa: rec.desa || null,
-          kecamatan: rec.kecamatan || null,
-          kabupaten: rec.kabupaten || null,
-          provinsi: rec.provinsi || null,
-          kode_pos: rec.kode_pos || null,
-          unit_asrama: 'Induk Putra',
-        },
-      ])
+      .insert([santriPayload])
       .select()
       .single();
+
+    if (santriErr && /column|schema cache/i.test(santriErr.message || '')) {
+      const msg = santriErr.message || '';
+      const fallbackPayload = { ...santriPayload };
+      if (msg.includes('total_biaya_pendaftaran')) delete fallbackPayload.total_biaya_pendaftaran;
+      if (msg.includes('dp_terbayar')) delete fallbackPayload.dp_terbayar;
+      if (msg.includes('nominal_pendaftaran')) delete fallbackPayload.nominal_pendaftaran;
+      const retry = await supabase.from('santri').insert([fallbackPayload]).select().single();
+      newSantri = retry.data;
+      santriErr = retry.error;
+    }
 
     if (santriErr || !newSantri) {
       return { ok: false, errorMsg: santriErr?.message || 'Error DB saat menerbitkan santri.' };
     }
 
     const santriId = String((newSantri as { id: string }).id);
-    const kuitansiRef = rec.no_kuitansi_lunas || rec.no_kuitansi_dp || `KWT-PSB-${assignedNis}`;
+    const kuitansiRef = rec.no_kuitansi_dp || `KWT-PSB-${assignedNis}`;
 
     if (rec.no_kuitansi_dp) {
       await supabase
@@ -535,28 +664,27 @@ export default function PendaftaranInternalPage() {
         .update({ santri_id: santriId })
         .eq('no_kuitansi', rec.no_kuitansi_dp);
     }
-    if (rec.no_kuitansi_lunas) {
-      await supabase
-        .from('keuangan_transaksi')
-        .update({ santri_id: santriId })
-        .eq('no_kuitansi', rec.no_kuitansi_lunas);
-    }
 
-    // Catat rincian Syahriyah bulan pertama pada matriks hanya bila pembayaran total sudah menutup porsi Syahriyah Bulan 1
+    // Jangan dianggap otomatis lunas jika DP < total biaya; catat Syahriyah Bulan 1 hanya bila sudah lunas penuh
     const billing = calculatePsbBilling({
       paket: rec.paket,
       jumlahPendaftarTerhitung: quotaUsed,
       skema,
       forceFreeUangPangkal: rec.dapat_promo_pangkal,
       nominalKeringanan: rec.nominal_keringanan,
-      dpTerbayar: rec.dp_terbayar,
+      dpTerbayar,
       pelunasanTerbayar: rec.pelunasan_terbayar,
     });
-    const totalPaid = Number(rec.dp_terbayar || 0) + Number(rec.pelunasan_terbayar || 0);
+    const totalPaid = dpTerbayar + Number(rec.pelunasan_terbayar || 0);
+    const isActuallyLunas = totalPaid >= totalBiayaPendaftaran && totalBiayaPendaftaran > 0;
     const thresholdSyahriyahLunas =
       billing.rincian.nominalDompetPendaftaran + billing.rincian.nominalSyahriyahBulanPertama;
 
-    if (totalPaid >= thresholdSyahriyahLunas && billing.rincian.nominalSyahriyahBulanPertama > 0) {
+    if (
+      isActuallyLunas &&
+      totalPaid >= thresholdSyahriyahLunas &&
+      billing.rincian.nominalSyahriyahBulanPertama > 0
+    ) {
       const periodeBulan = tglMasuk.slice(0, 7);
       await supabase.from('pembayaran_santri_detail').insert([
         {
@@ -748,14 +876,24 @@ export default function PendaftaranInternalPage() {
             Penerimaan Santri Baru (PSB) · TA {skema.tahun_ajaran_psb || dynamicPsbInfo.tahunAjaranPsb || '...'}
           </span>
           <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">
-            Antrean Pendaftaran Online &amp; Verifikasi DP
+            Pendaftaran Santri Baru (PSB) &amp; Verifikasi DP
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Verifikasi bukti transfer DP (tolak bila bukti tidak valid), lalu centang massal pendaftar terverifikasi untuk aktif menjadi Santri.
+            Alur 2 Tahap: (1) Verifikasi DP Online/Offline ke Dompet Pendaftaran &amp; cetak/kirim Nota Kuitansi DP, lalu (2) Resmikan Jadi Santri Aktif. Pelunasan/cicilan dilakukan di menu Keuangan.
           </p>
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={openOfflineModal}
+              className="min-h-[38px] px-3.5 py-2 siap-btn-primary rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <UserPlus className="w-3.5 h-3.5 shrink-0" />
+              + Daftar Offline
+            </button>
+          )}
           <button
             type="button"
             onClick={() => copyPublicUrl('/daftar', 'Formulir /daftar')}
@@ -1148,7 +1286,7 @@ export default function PendaftaranInternalPage() {
         </>
       )}
 
-      {/* MODAL DETAIL & PROSES 4 TAHAP PSB */}
+      {/* MODAL DETAIL & PROSES 2 TAHAP PSB */}
       {selected && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
@@ -1183,11 +1321,17 @@ export default function PendaftaranInternalPage() {
                     {selected.jk === 'P' ? 'Putri' : 'Putra'}
                   </p>
                   <p>
+                    <span className="text-slate-500">Jalur Daftar:</span>{' '}
+                    <strong className="uppercase">
+                      {selected.metode_dp === 'tunai' ? 'Offline (Tunai)' : 'Online (Transfer)'}
+                    </strong>
+                  </p>
+                  <p>
                     <span className="text-slate-500">Alamat:</span>{' '}
                     {[
                       selected.alamat_jalan,
                       selected.desa,
-                      `Kec. ${selected.kecamatan}`,
+                      selected.kecamatan ? `Kec. ${selected.kecamatan}` : '',
                       selected.kabupaten,
                       selected.kode_pos,
                     ]
@@ -1216,42 +1360,27 @@ export default function PendaftaranInternalPage() {
                       <MessageCircle className="w-3.5 h-3.5" />
                       Chat WA Wali
                     </a>
-                    {selected.no_kuitansi_dp && (
+                    {(selected.no_kuitansi_dp ||
+                      (selected.status !== 'menunggu_verifikasi' &&
+                        selected.status !== 'ditolak' &&
+                        Number(selected.dp_terbayar || 0) > 0)) && (
                       <button
                         type="button"
                         onClick={() =>
                           setKuitansiPreview({
                             record: selected,
-                            jenis: 'dp',
-                            nomor: selected.no_kuitansi_dp,
-                            nominal: selected.dp_terbayar,
-                            metode: selected.metode_dp,
+                            nomor:
+                              selected.no_kuitansi_dp ||
+                              `KWT-PSBDP-${todayIso.replace(/-/g, '').slice(2)}-${selected.no_registrasi.slice(-3)}`,
+                            nominal: Number(selected.dp_terbayar || selected.dp_nominal || 0),
+                            metode: selected.metode_dp === 'tunai' ? 'tunai' : 'transfer',
                             tanggal: (selected.tgl_verifikasi_dp || todayIso).slice(0, 10),
                           })
                         }
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" />
-                        Kuitansi DP
-                      </button>
-                    )}
-                    {selected.no_kuitansi_lunas && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setKuitansiPreview({
-                            record: selected,
-                            jenis: 'pelunasan',
-                            nomor: selected.no_kuitansi_lunas,
-                            nominal: selected.pelunasan_terbayar,
-                            metode: 'tunai',
-                            tanggal: (selected.tgl_lunas || todayIso).slice(0, 10),
-                          })
-                        }
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        Kuitansi Lunas
+                        Cetak / Kirim Nota Kuitansi DP
                       </button>
                     )}
                   </div>
@@ -1336,21 +1465,22 @@ export default function PendaftaranInternalPage() {
                 </div>
               )}
 
-              {/* AKSI TAHAP 2: VERIFIKASI DP */}
+              {/* AKSI TAHAP 1: VERIFIKASI DP */}
               {canEdit && selected.status === 'menunggu_verifikasi' && (
                 <div className="border-2 siap-border-accent siap-soft-box rounded-xl p-4 space-y-3">
                   <p className="font-bold text-slate-900 flex items-center gap-1.5">
                     <Wallet className="w-4 h-4 siap-text-accent" />
-                    Tahap 2: Verifikasi DP &amp; Kunci Kuota Diskon 100 Pendaftar
+                    Tahap 1: Verifikasi DP &amp; Catat ke Dompet Pendaftaran (Min. Rp 300.000)
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Nominal DP Diterima (Rp)
+                        Nominal DP Diterima (Rp, min. 300.000)
                       </label>
                       <input
                         type="number"
-                        min={0}
+                        min={MIN_PSB_DP}
+                        step={10000}
                         value={dpVerifNominal}
                         onChange={(e) => setDpVerifNominal(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
@@ -1358,7 +1488,7 @@ export default function PendaftaranInternalPage() {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        Metode Penerimaan
+                        Jalur Dompet Pendaftaran
                       </label>
                       <select
                         value={dpVerifMetode}
@@ -1367,8 +1497,8 @@ export default function PendaftaranInternalPage() {
                         }
                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-semibold"
                       >
-                        <option value="transfer">Transfer Bank (Pemasukan Transfer)</option>
-                        <option value="tunai">Tunai di Kantor (Dompet Pendaftaran)</option>
+                        <option value="transfer">Transfer (Daftar Online)</option>
+                        <option value="tunai">Tunai di Kantor (Daftar Offline)</option>
                       </select>
                     </div>
                     <button
@@ -1382,8 +1512,8 @@ export default function PendaftaranInternalPage() {
                   </div>
                   <p className="text-[11px] text-slate-600">
                     {dpVerifMetode === 'transfer'
-                      ? 'DP Transfer tercatat di laporan Pemasukan Transfer (tidak menambah saldo kas tunai Dompet).'
-                      : 'DP Tunai langsung masuk ke saldo tunai Dompet Pendaftaran.'}
+                      ? 'Masuk ke Dompet Pendaftaran jalur Transfer (daftar online).'
+                      : 'Masuk ke Dompet Pendaftaran jalur Tunai (daftar offline).'}
                   </p>
                   <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
                     <p className="text-[11px] font-bold text-rose-800">
@@ -1406,107 +1536,78 @@ export default function PendaftaranInternalPage() {
                 </div>
               )}
 
-              {/* AKSI OPSIONAL: CATAT PELUNASAN BILA WALI SUDAH MEMBAYAR SISA */}
-              {canEdit && selected.status === 'dp_terverifikasi' && (
-                <div className="border border-sky-200 bg-sky-50/60 rounded-xl p-4 space-y-3">
-                  <p className="font-bold text-sky-950 flex items-center gap-1.5">
-                    <Wallet className="w-4 h-4 text-sky-700" />
-                    Pelunasan Sisa Biaya (Opsional — bisa menyusul di Keuangan setelah jadi Santri)
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">
-                        Nominal Pelunasan (Rp)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={pelunasanNominal}
-                        onChange={(e) => setPelunasanNominal(Number(e.target.value))}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Metode</label>
-                      <select
-                        value={pelunasanMetode}
-                        onChange={(e) =>
-                          setPelunasanMetode(e.target.value === 'transfer' ? 'transfer' : 'tunai')
-                        }
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-semibold"
-                      >
-                        <option value="tunai">Tunai di Kantor (Dompet Tunai)</option>
-                        <option value="transfer">Transfer Bank (Pemasukan Transfer)</option>
-                      </select>
-                    </div>
+              {/* STATUS TAHAP 1 SELESAI: CETAK / KIRIM NOTA KUITANSI DP */}
+              {selected.status !== 'menunggu_verifikasi' && selected.status !== 'ditolak' && (
+                <div className="border siap-border-accent siap-soft-box rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 siap-text-accent" />
+                      Tahap 1 Selesai: DP Terverifikasi ({formatRupiah(selected.dp_terbayar || selected.dp_nominal)})
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      Tercatat di Dompet Pendaftaran jalur{' '}
+                      <strong>{selected.metode_dp === 'tunai' ? 'Tunai (Offline)' : 'Transfer (Online)'}</strong>
+                      {selected.no_kuitansi_dp ? ` · No. ${selected.no_kuitansi_dp}` : ''}. Sisa tagihan:{' '}
+                      <strong className="font-mono text-amber-800">
+                        {formatRupiah(
+                          Math.max(0, Number(selected.total_biaya_akhir || 0) - Number(selected.dp_terbayar || 0))
+                        )}
+                      </strong>{' '}
+                      (dicicil/dilunasi di menu Keuangan).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      disabled={savingAction}
-                      onClick={handleCatatPelunasan}
-                      className="min-h-[38px] px-4 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl cursor-pointer"
+                      onClick={() =>
+                        setKuitansiPreview({
+                          record: selected,
+                          nomor:
+                            selected.no_kuitansi_dp ||
+                            `KWT-PSBDP-${todayIso.replace(/-/g, '').slice(2)}-${selected.no_registrasi.slice(-3)}`,
+                          nominal: Number(selected.dp_terbayar || selected.dp_nominal || 0),
+                          metode: selected.metode_dp === 'tunai' ? 'tunai' : 'transfer',
+                          tanggal: (selected.tgl_verifikasi_dp || todayIso).slice(0, 10),
+                        })
+                      }
+                      className="min-h-[38px] px-3.5 py-2 siap-btn-primary font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                     >
-                      Catat Pelunasan
+                      <Printer className="w-3.5 h-3.5" />
+                      Cetak / Kirim Nota Kuitansi DP
                     </button>
+                    <a
+                      href={buildWaNotaDpUrl(selected)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-h-[38px] px-3 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      Kirim WA Wali
+                    </a>
                   </div>
-
-                  {pelunasanMetode === 'transfer' && (
-                    <div className="bg-white border border-sky-200 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                      <span className="text-sky-900 font-semibold">
-                        Masuk ke laporan Pemasukan Transfer • Unggah Bukti TF (Opsional):
-                      </span>
-                      {pelunasanBuktiPreview ? (
-                        <div className="flex items-center gap-2">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={pelunasanBuktiPreview}
-                            alt="Pratinjau Bukti Transfer Pelunasan"
-                            className="w-8 h-8 rounded object-cover border border-sky-200"
-                            referrerPolicy="no-referrer"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPelunasanBuktiFile(null);
-                              setPelunasanBuktiPreview('');
-                            }}
-                            className="px-2 py-1 rounded bg-rose-50 text-rose-700 font-bold border border-rose-200 cursor-pointer"
-                          >
-                            Hapus
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="px-3 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer">
-                          <ImagePlus className="w-3.5 h-3.5" />
-                          Pilih Foto Bukti TF
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (!f) return;
-                              setPelunasanBuktiFile(f);
-                              const r = new FileReader();
-                              r.onload = () => setPelunasanBuktiPreview(String(r.result || ''));
-                              r.readAsDataURL(f);
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
-              {/* AKSI TAHAP 3: AKTIFKAN JADI SANTRI (SETELAH DP TERVERIFIKASI) */}
+              {/* AKSI TAHAP 2: RESMIKAN JADI SANTRI AKTIF */}
               {canEdit &&
                 (selected.status === 'dp_terverifikasi' ||
                   selected.status === 'lunas_menunggu_kedatangan') && (
                 <div className="border-2 border-indigo-200 bg-indigo-50/60 rounded-xl p-4 space-y-3">
-                  <p className="font-bold text-indigo-950 flex items-center gap-1.5">
-                    <BedDouble className="w-4 h-4 text-indigo-700" />
-                    Tahap 3: Aktifkan Menjadi Santri (Penempatan Kamar diatur di Data Santri)
-                  </p>
+                  <div className="space-y-1">
+                    <p className="font-bold text-indigo-950 flex items-center gap-1.5">
+                      <BedDouble className="w-4 h-4 text-indigo-700" />
+                      Tahap 2: Resmikan Jadi Santri Aktif (Terbitkan NIS &amp; Pindahkan ke Data Santri)
+                    </p>
+                    <p className="text-[11px] text-indigo-900/80">
+                      Menyimpan Total Biaya Pendaftaran{' '}
+                      <strong className="font-mono">{formatRupiah(selected.total_biaya_akhir)}</strong> dan DP Terbayar{' '}
+                      <strong className="font-mono">{formatRupiah(selected.dp_terbayar)}</strong> ke data santri agar sisa{' '}
+                      <strong className="font-mono">
+                        {formatRupiah(Math.max(0, Number(selected.total_biaya_akhir || 0) - Number(selected.dp_terbayar || 0)))}
+                      </strong>{' '}
+                      otomatis terbaca untuk dicicil/dilunasi di menu Keuangan.
+                    </p>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
@@ -1545,7 +1646,7 @@ export default function PendaftaranInternalPage() {
                       className="min-h-[40px] px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <UserCheck className="w-4 h-4" />
-                      Aktifkan Jadi Santri
+                      Resmikan Jadi Santri Aktif
                     </button>
                   </div>
                 </div>
@@ -1599,15 +1700,340 @@ export default function PendaftaranInternalPage() {
         </div>
       )}
 
-      {/* MODAL CETAK KUITANSI PSB 21 x 10 CM */}
+      {/* MODAL INPUT PENDAFTAR OFFLINE (DP TUNAI MIN. Rp 300.000) */}
+      {offlineModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
+            <div className="siap-btn-sidebar text-white px-5 py-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-white/80">
+                  Pendaftaran Offline di Kantor Pondok
+                </p>
+                <h2 className="text-base sm:text-lg font-extrabold">
+                  Input Pendaftar Offline (DP Minimal Rp 300.000)
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOfflineModalOpen(false)}
+                aria-label="Tutup form pendaftaran offline"
+                className="p-1.5 text-white/80 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              noValidate
+              onSubmit={handleSubmitOffline}
+              className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs"
+            >
+              {offlineError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-3 font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                  <span>{offlineError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Nama Lengkap Calon Santri *
+                  </label>
+                  <input
+                    type="text"
+                    value={offNamaLengkap}
+                    onChange={(e) => setOffNamaLengkap(e.target.value)}
+                    placeholder="Sesuai Akta / KK"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Jenis Kelamin *</label>
+                  <select
+                    value={offJk}
+                    onChange={(e) => setOffJk(e.target.value === 'P' ? 'P' : 'L')}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  >
+                    <option value="L">Laki-laki (Putra)</option>
+                    <option value="P">Perempuan (Putri)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Jenjang Pendidikan *
+                  </label>
+                  <select
+                    value={offJenjang}
+                    onChange={(e) => setOffJenjang(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  >
+                    {PSB_JENJANG_OPTIONS.map((j) => (
+                      <option key={j} value={j}>
+                        {j}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Tempat Lahir (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={offTempatLahir}
+                    onChange={(e) => setOffTempatLahir(e.target.value)}
+                    placeholder="Contoh: Malang"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Tanggal Lahir (Opsional)
+                  </label>
+                  <input
+                    type="date"
+                    value={offTglLahir}
+                    onChange={(e) => setOffTglLahir(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Nama Orang Tua / Wali *
+                  </label>
+                  <input
+                    type="text"
+                    value={offNamaWali}
+                    onChange={(e) => setOffNamaWali(e.target.value)}
+                    placeholder="Nama Wali Santri"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    No. HP / WA Wali *
+                  </label>
+                  <input
+                    type="tel"
+                    value={offNoWaWali}
+                    onChange={(e) => setOffNoWaWali(e.target.value)}
+                    placeholder="081234567890"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Desa / Kelurahan *
+                  </label>
+                  <input
+                    type="text"
+                    value={offDesa}
+                    onChange={(e) => setOffDesa(e.target.value)}
+                    placeholder="Desa/Kelurahan"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Kecamatan *</label>
+                  <input
+                    type="text"
+                    value={offKecamatan}
+                    onChange={(e) => setOffKecamatan(e.target.value)}
+                    placeholder="Kecamatan"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Kabupaten / Kota *
+                  </label>
+                  <input
+                    type="text"
+                    value={offKabupaten}
+                    onChange={(e) => setOffKabupaten(e.target.value)}
+                    placeholder="Kabupaten/Kota"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Detail Jalan / RT-RW (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={offAlamatJalan}
+                    onChange={(e) => setOffAlamatJalan(e.target.value)}
+                    placeholder="Dusun / Jalan / RT-RW"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Paket Pendaftaran *
+                    </label>
+                    <select
+                      value={offPaket}
+                      onChange={(e) => setOffPaket(e.target.value === 'vip' ? 'vip' : 'reguler')}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
+                    >
+                      <option value="reguler">Reguler</option>
+                      <option value="vip">VIP (Al-Fachriyah)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Nominal DP Tunai (Minimal Rp 300.000) *
+                    </label>
+                    <input
+                      type="number"
+                      min={MIN_PSB_DP}
+                      step={10000}
+                      value={offDpNominal === 0 ? '' : offDpNominal}
+                      onChange={(e) =>
+                        setOffDpNominal(e.target.value === '' ? 0 : Number(e.target.value))
+                      }
+                      className={`w-full px-3 py-2 bg-slate-50 border rounded-xl font-mono font-bold ${
+                        Number(offDpNominal || 0) < MIN_PSB_DP
+                          ? 'border-rose-400 text-rose-800'
+                          : 'border-slate-300'
+                      }`}
+                    />
+                    {Number(offDpNominal || 0) < MIN_PSB_DP && (
+                      <p className="text-[11px] font-bold text-rose-700 mt-1">
+                        Nominal DP minimal Rp 300.000
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Nominal Keringanan (Rp, Opsional)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={offKeringanan}
+                      onChange={(e) => setOffKeringanan(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Keterangan Keringanan / Catatan
+                    </label>
+                    <input
+                      type="text"
+                      value={offCatatanKeringanan}
+                      onChange={(e) => setOffCatatanKeringanan(e.target.value)}
+                      placeholder="Misal: Yatim / Beasiswa"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {(() => {
+                  const previewBilling = calculatePsbBilling({
+                    paket: offPaket,
+                    jumlahPendaftarTerhitung: quotaUsed,
+                    skema,
+                    nominalKeringanan: offKeringanan,
+                    dpTerbayar: Number(offDpNominal || 0),
+                    pelunasanTerbayar: 0,
+                  });
+                  return (
+                    <div className="siap-soft-box border rounded-xl p-3 grid grid-cols-3 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-slate-500 block">Total Biaya Paket</span>
+                        <strong className="font-mono text-slate-900">
+                          {formatRupiah(previewBilling.totalBiayaAkhir)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">DP Tunai Masuk</span>
+                        <strong className="font-mono siap-text-accent">
+                          {formatRupiah(Number(offDpNominal || 0))}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">Sisa (Menu Keuangan)</span>
+                        <strong className="font-mono text-amber-800">
+                          {formatRupiah(previewBilling.sisaTagihan)}
+                        </strong>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <label className="flex items-start gap-2 cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={offLangsungVerifikasi}
+                    onChange={(e) => setOffLangsungVerifikasi(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 siap-accent-control rounded"
+                  />
+                  <span className="text-[11px] font-semibold text-slate-700">
+                    Langsung verifikasi DP Tunai ke Dompet Pendaftaran (jalur Tunai) &amp; terbitkan Nota Kuitansi DP
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setOfflineModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={offlineSaving}
+                  className="px-5 py-2 siap-btn-primary font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {offlineSaving ? 'Menyimpan...' : 'Simpan Pendaftar Offline'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CETAK / KIRIM NOTA KUITANSI DP PSB (21 x 10 CM, KOP SURAT PENGATURAN) */}
       {kuitansiPreview && (
         <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4 overflow-y-auto print:bg-white print:p-0">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-5 space-y-4 print:shadow-none print:rounded-none">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3 print:hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 print:hidden">
               <h3 className="text-sm font-bold text-slate-900">
-                Pratinjau Kuitansi PSB ({kuitansiPreview.jenis.toUpperCase()}) · 21 × 10 cm
+                Nota Kuitansi DP PSB · 21 × 10 cm
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={buildWaNotaDpUrl(kuitansiPreview.record)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Kirim WA ke Wali
+                </a>
                 <button
                   type="button"
                   onClick={() => window.print()}
@@ -1631,102 +2057,144 @@ export default function PendaftaranInternalPage() {
                 style={{ borderColor: 'var(--siap-sidebar, #064e3b)' }}
                 className="print-clean-surface w-[21cm] min-h-[10cm] mx-auto border-2 rounded-xl p-5 flex flex-col justify-between bg-white text-slate-900"
               >
+                {/* KOP SURAT DARI PENGATURAN APLIKASI */}
                 <div
                   style={{ borderColor: 'var(--siap-primary, #047857)' }}
-                  className="flex items-center justify-between border-b-2 pb-2.5"
+                  className="flex items-center justify-between border-b-2 pb-2.5 gap-3"
                 >
                   <div className="flex items-center gap-3">
                     {pengaturan.logo_url && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={pengaturan.logo_url}
-                        alt="Logo"
-                        className="w-11 h-11 object-contain"
+                        alt="Logo Pesantren"
+                        className="w-12 h-12 object-contain shrink-0"
                         referrerPolicy="no-referrer"
                       />
                     )}
                     <div>
                       <p
                         style={{ color: 'var(--siap-sidebar, #064e3b)' }}
-                        className="text-sm font-black uppercase"
+                        className="text-sm font-black uppercase tracking-tight"
                       >
                         {pengaturan.nama_pesantren}
                       </p>
-                      <p className="text-[10px] text-slate-600">{pengaturan.alamat_lengkap}</p>
+                      <p className="text-[10px] text-slate-600 leading-snug">
+                        {pengaturan.alamat_lengkap}
+                      </p>
+                      <p className="text-[10px] text-slate-600">
+                        Telp/WA: {pengaturan.no_telepon}
+                        {pengaturan.email ? ` · Email: ${pengaturan.email}` : ''}
+                      </p>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <p
                       style={{ color: 'var(--siap-primary, #047857)' }}
-                      className="text-[10px] font-bold uppercase"
+                      className="text-[10px] font-bold uppercase tracking-wider"
                     >
-                      KUITANSI PENDAFTARAN PSB
+                      NOTA KUITANSI DP PSB
                     </p>
                     <p className="font-mono text-xs font-bold">{kuitansiPreview.nomor}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 text-xs my-3">
-                  <div className="space-y-1">
-                    <p>
-                      <span className="text-slate-500">No. Registrasi:</span>{' '}
-                      <strong className="font-mono">{kuitansiPreview.record.no_registrasi}</strong>
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Calon Santri:</span>{' '}
-                      <strong>{kuitansiPreview.record.nama_lengkap}</strong>
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Nama Wali:</span>{' '}
-                      {kuitansiPreview.record.nama_wali} ({kuitansiPreview.record.no_wa_wali})
-                    </p>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <p>
-                      <span className="text-slate-500">Paket:</span>{' '}
-                      <strong className="uppercase">{kuitansiPreview.record.paket}</strong>
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Pembayaran:</span>{' '}
-                      <strong>
-                        {kuitansiPreview.jenis === 'dp'
-                          ? 'DP Pendaftaran Online'
-                          : 'Pelunasan Pendaftaran PSB'}
-                      </strong>
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Metode:</span>{' '}
-                      <span className="uppercase font-semibold">{kuitansiPreview.metode}</span>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Tanggal: {kuitansiPreview.tanggal}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-end justify-between border-t border-slate-200 pt-2">
-                  <div className="siap-soft-box border rounded-lg px-4 py-2">
-                    <p className="text-[10px] font-semibold siap-text-accent uppercase">
-                      Nominal Diterima
-                    </p>
-                    <p className="text-lg font-black font-mono text-slate-900">
-                      {formatRupiah(kuitansiPreview.nominal)}
-                    </p>
-                  </div>
-                  <div className="text-center text-[11px] min-w-[160px]">
-                    <p>Bululawang, {kuitansiPreview.tanggal}</p>
-                    <p className="font-semibold">Bendahara / Penerima</p>
-                    <div className="h-10 flex items-center justify-center relative">
-                      {pengaturan.ttd_bendahara_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={pengaturan.ttd_bendahara_url}
-                          alt="TTD"
-                          className="h-9 object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      )}
-                    </div>
-                    <p className="font-bold underline">{pengaturan.nama_bendahara}</p>
-                  </div>
-                </div>
+                {(() => {
+                  const totalBiaya = Number(kuitansiPreview.record.total_biaya_akhir || 0);
+                  const dpBayar = Number(kuitansiPreview.nominal || 0);
+                  const sisaTagihan = Math.max(0, totalBiaya - dpBayar);
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-4 text-xs my-3">
+                        <div className="space-y-1">
+                          <p>
+                            <span className="text-slate-500">No. Registrasi:</span>{' '}
+                            <strong className="font-mono">{kuitansiPreview.record.no_registrasi}</strong>
+                          </p>
+                          <p>
+                            <span className="text-slate-500">Calon Santri:</span>{' '}
+                            <strong>{kuitansiPreview.record.nama_lengkap}</strong>
+                          </p>
+                          <p>
+                            <span className="text-slate-500">Nama Wali:</span>{' '}
+                            {kuitansiPreview.record.nama_wali} ({kuitansiPreview.record.no_wa_wali})
+                          </p>
+                        </div>
+                        <div className="space-y-1 text-right">
+                          <p>
+                            <span className="text-slate-500">Paket:</span>{' '}
+                            <strong className="uppercase">{kuitansiPreview.record.paket}</strong>
+                          </p>
+                          <p>
+                            <span className="text-slate-500">Pembayaran:</span>{' '}
+                            <strong>
+                              {kuitansiPreview.metode === 'tunai'
+                                ? 'DP Pendaftaran Offline (Tunai)'
+                                : 'DP Pendaftaran Online (Transfer)'}
+                            </strong>
+                          </p>
+                          <p>
+                            <span className="text-slate-500">Total Biaya / Sisa:</span>{' '}
+                            <span className="font-mono font-semibold">
+                              {formatRupiah(totalBiaya)} /{' '}
+                              {sisaTagihan > 0 ? (
+                                <strong className="text-amber-800">{formatRupiah(sisaTagihan)}</strong>
+                              ) : (
+                                <strong className="text-emerald-700">LUNAS</strong>
+                              )}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-end justify-between border-t border-slate-200 pt-2">
+                        <div className="space-y-1">
+                          <div className="siap-soft-box border rounded-lg px-4 py-2 inline-block">
+                            <p className="text-[10px] font-semibold siap-text-accent uppercase">
+                              Nominal DP Diterima
+                            </p>
+                            <p className="text-lg font-black font-mono text-slate-900">
+                              {formatRupiah(dpBayar)}
+                            </p>
+                          </div>
+                          {sisaTagihan > 0 && (
+                            <p className="text-[10px] text-slate-500">
+                              Sisa kekurangan {formatRupiah(sisaTagihan)} dicicil/dilunasi melalui menu Keuangan.
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-center text-[11px] min-w-[170px]">
+                          <p>Bululawang, {kuitansiPreview.tanggal}</p>
+                          <p className="font-semibold">Bendahara / Penerima</p>
+                          <div className="h-11 flex items-center justify-center relative">
+                            {pengaturan.stempel_url && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={pengaturan.stempel_url}
+                                alt="Stempel"
+                                className="h-10 object-contain opacity-65 absolute left-4"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            {pengaturan.ttd_bendahara_url && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={pengaturan.ttd_bendahara_url}
+                                alt="TTD"
+                                className="h-9 object-contain relative z-10"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                          </div>
+                          <p className="font-bold underline">{pengaturan.nama_bendahara}</p>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

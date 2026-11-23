@@ -63,6 +63,10 @@ interface PengaturanRow {
   no_telepon: string;
   email_resmi?: string;
   logo_url?: string;
+  kop_surat_url?: string;
+  kop_url?: string;
+  nama_yayasan?: string;
+  kota?: string;
   stempel_url?: string;
   nama_kepala_pondok: string;
   ttd_kepala_pondok_url?: string;
@@ -288,6 +292,10 @@ export default function AbsenJamaahPage() {
     no_telepon: '085604551562',
     email_resmi: 'annur1bululawang@gmail.com',
     logo_url: '',
+    kop_surat_url: '',
+    kop_url: '',
+    nama_yayasan: '',
+    kota: 'Bululawang',
     stempel_url: '',
     nama_kepala_pondok: 'Ust. M. Fajar Wahyudi',
     ttd_kepala_pondok_url: '',
@@ -1217,26 +1225,42 @@ export default function AbsenJamaahPage() {
 
       {/* AREA CETAK REKAP A4 RESMI */}
       <div id="print-absen-rekap" className="hidden bg-white text-slate-900 text-xs">
-        <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3 mb-4">
-          {pengaturan.logo_url && (
+        {pengaturan.kop_surat_url || pengaturan.kop_url ? (
+          <div className="border-b-4 border-double border-slate-800 pb-2.5 mb-4">
             <img
-              src={pengaturan.logo_url}
-              alt="Logo Pondok"
+              src={pengaturan.kop_surat_url || pengaturan.kop_url}
+              alt={`Kop Surat ${pengaturan.nama_pesantren}`}
               referrerPolicy="no-referrer"
-              className="w-14 h-14 object-contain shrink-0"
+              className="w-full max-h-28 object-contain mx-auto"
             />
-          )}
-          <div className="flex-1 text-center">
-            <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
-              YAYASAN PENDIDIKAN PONDOK PESANTREN AN-NUR
-            </p>
-            <h1 className="text-base font-extrabold uppercase text-slate-900">
-              {pengaturan.nama_pesantren}
-            </h1>
-            <p className="text-[10px] text-slate-600">{pengaturan.alamat_lengkap}</p>
-            <p className="text-[10px] text-slate-600">Telp/WA: {pengaturan.no_telepon}</p>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3 mb-4">
+            {pengaturan.logo_url && (
+              <img
+                src={pengaturan.logo_url}
+                alt="Logo Pondok"
+                referrerPolicy="no-referrer"
+                className="w-14 h-14 object-contain shrink-0"
+              />
+            )}
+            <div className="flex-1 text-center">
+              {pengaturan.nama_yayasan && (
+                <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
+                  {pengaturan.nama_yayasan}
+                </p>
+              )}
+              <h1 className="text-base font-extrabold uppercase text-slate-900">
+                {pengaturan.nama_pesantren}
+              </h1>
+              <p className="text-[10px] text-slate-600">{pengaturan.alamat_lengkap}</p>
+              <p className="text-[10px] text-slate-600">
+                Telp/WA: {pengaturan.no_telepon}
+                {pengaturan.email_resmi ? ` · Email: ${pengaturan.email_resmi}` : ''}
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="text-center mb-4">
           <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-900">
@@ -1321,7 +1345,7 @@ export default function AbsenJamaahPage() {
 
         <div className="mt-8 flex justify-end text-center text-[11px]">
           <div className="min-w-[200px] relative">
-            <p>Bululawang, {formatTanggalIndo(selectedDate)}</p>
+            <p>{pengaturan.kota || 'Bululawang'}, {formatTanggalIndo(selectedDate)}</p>
             <p className="font-bold">Kepala Pondok,</p>
             <div className="h-14 relative flex items-center justify-center my-1">
               {pengaturan.stempel_url && (

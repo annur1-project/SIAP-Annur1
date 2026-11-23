@@ -96,11 +96,20 @@ interface SantriRow {
   nis?: string;
   status: string;
   kamar?: string;
+  tgl_masuk?: string | null;
   tarif_syahriyah?: number;
   ktl_nominal?: number;
   no_wa_ayah?: string;
   no_wa_ibu?: string;
   no_wa_wali?: string;
+}
+
+interface PengurusRow {
+  id: string;
+  nama_lengkap?: string;
+  jabatan?: string | null;
+  divisi?: string | null;
+  status?: string | null;
 }
 
 interface TransaksiRow {
@@ -119,6 +128,7 @@ interface PengaturanRow {
   nama_pesantren?: string;
   kota_surat?: string;
   jatuh_tempo_tanggal?: number;
+  koreksi_hijriyah?: number | null;
   rekening_bank?: string;
   rekening_nomor?: string;
   rekening_atas_nama?: string;
@@ -239,6 +249,113 @@ function formatRupiah(nominal: number): string {
   return `${sign}Rp ${digits}`;
 }
 
+function getWibTimeHm(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hh = parts.find((p) => p.type === 'hour')?.value || '00';
+  const mm = parts.find((p) => p.type === 'minute')?.value || '00';
+  return `${hh === '24' ? '00' : hh}:${mm}`;
+}
+
+function getStartPeriodeDariTglMasuk(tglMasuk?: string | null): string | null {
+  if (!tglMasuk) return null;
+  const match = String(tglMasuk)
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  let yr = Number(match[1]);
+  let mo = Number(match[2]);
+  const dy = Number(match[3]);
+  if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+  if (dy >= 26) {
+    mo += 1;
+    if (mo > 12) {
+      mo = 1;
+      yr += 1;
+    }
+  }
+  return `${yr}-${String(mo).padStart(2, '0')}`;
+}
+
+function calcDiffDaysIso(startIso?: string | null, endIso?: string | null): number {
+  if (!startIso || !endIso) return 0;
+  const sm = String(startIso)
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const em = String(endIso)
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!sm || !em) return 0;
+  const startUtc = Date.UTC(Number(sm[1]), Number(sm[2]) - 1, Number(sm[3]));
+  const endUtc = Date.UTC(Number(em[1]), Number(em[2]) - 1, Number(em[3]));
+  return Math.max(0, Math.floor((endUtc - startUtc) / 86400000));
+}
+
+function isExcludedTopPengurus(p: PengurusRow): boolean {
+  const jab = String(p.jabatan || '').toLowerCase().trim();
+  const div = String(p.divisi || '').toLowerCase().trim();
+  if (
+    jab.includes('dewan pengasuh') ||
+    jab.includes('dzurriyah') ||
+    jab.includes('direktur pendidikan') ||
+    div.includes('dewan pengasuh') ||
+    div.includes('dzurriyah') ||
+    div.includes('direktur pendidikan')
+  ) {
+    return true;
+  }
+  if (jab === 'pengasuh' || jab === 'pengasuh pondok') return true;
+  if (jab.includes('pengasuh') && !jab.includes('kepala pondok')) return true;
+  return false;
+}
+
+const MONTH_NAME_TO_NUM: Record<string, string> = {
+  januari: '01',
+  jan: '01',
+  februari: '02',
+  feb: '02',
+  maret: '03',
+  mar: '03',
+  april: '04',
+  apr: '04',
+  mei: '05',
+  juni: '06',
+  jun: '06',
+  juli: '07',
+  jul: '07',
+  agustus: '08',
+  agu: '08',
+  ags: '08',
+  september: '09',
+  sep: '09',
+  oktober: '10',
+  okt: '10',
+  november: '11',
+  nov: '11',
+  desember: '12',
+  des: '12',
+};
+
+function extractPeriodeTokens(text: string): string[] {
+  const found = new Set<string>();
+  const isoMatches = text.matchAll(/\b(20\d{2})-(0[1-9]|1[0-2])\b/g);
+  for (const m of isoMatches) {
+    found.add(`${m[1]}-${m[2]}`);
+  }
+  const idMatches = text.toLowerCase().matchAll(
+    /\b(januari|jan|februari|feb|maret|mar|april|apr|mei|juni|jun|juli|jul|agustus|agu|ags|september|sep|oktober|okt|november|nov|desember|des)\s+(20\d{2})\b/g
+  );
+  for (const m of idMatches) {
+    const mm = MONTH_NAME_TO_NUM[m[1]];
+    if (mm) found.add(`${m[2]}-${mm}`);
+  }
+  return Array.from(found);
+}
+
 export default function DashboardPage() {
   const { canViewBisyaroh } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -260,6 +377,7 @@ export default function DashboardPage() {
     santriAktif: 0,
     santriNdalem: 0,
     santriBeasiswa: 0,
+    pengurusAktif: 0,
     totalPersonel: 0,
     saldoOperasional: 0,
     saldoPendaftaran: 0,
@@ -321,6 +439,7 @@ export default function DashboardPage() {
     dirujuk: 0,
     sembuhBulanIni: 0,
     totalAktif: 0,
+    peringatan3Hari: 0,
   });
 
   const [keamananStats, setKeamananStats] = useState<{
@@ -421,17 +540,35 @@ export default function DashboardPage() {
 
   const fetchDashboardData = async () => {
     const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const todayIso = `${yyyy}-${mm}-${dd}`;
-    const currentHm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const todayIso = getWibTodayIso(now);
+    const [yyyyNum, mmNum, ddNum] = todayIso.split('-').map(Number);
+    const yyyy = yyyyNum || now.getFullYear();
+    const mm = String(mmNum || now.getMonth() + 1).padStart(2, '0');
+    const currentHm = getWibTimeHm(now);
     const monthPrefix = `${yyyy}-${mm}`;
-    const lastDayOfMonth = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+    const lastDayOfMonth = new Date(yyyy, mmNum, 0).getDate();
     const monthStart = `${monthPrefix}-01`;
     const monthEnd = `${monthPrefix}-${String(lastDayOfMonth).padStart(2, '0')}`;
-    const startYear = now.getMonth() + 1 >= 7 ? yyyy : yyyy - 1;
-    const activeTa = getDynamicTahunAjaranAktif(now);
+    const startYear = mmNum >= 7 ? yyyy : yyyy - 1;
+    const wibAnchorDate = new Date(Date.UTC(yyyy, mmNum - 1, ddNum, 5, 0, 0));
+    const activeTa = getDynamicTahunAjaranAktif(wibAnchorDate);
+
+    // Hitung daftar bulan TA sampai jatuh tempo (tanggal > 10 untuk bulan berjalan)
+    const nowDay = ddNum;
+    let cutoffYear = yyyy;
+    let cutoffMonth = nowDay > 10 ? mmNum : mmNum - 1;
+    if (cutoffMonth === 0) {
+      cutoffMonth = 12;
+      cutoffYear -= 1;
+    }
+    const cutoffPeriode = `${cutoffYear}-${String(cutoffMonth).padStart(2, '0')}`;
+    const taMonths: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const mIdx = ((6 + i) % 12) + 1;
+      const yr = mIdx >= 7 ? startYear : startYear + 1;
+      const p = `${yr}-${String(mIdx).padStart(2, '0')}`;
+      if (p <= cutoffPeriode) taMonths.push(p);
+    }
 
     const namaBulan = [
       'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -440,6 +577,7 @@ export default function DashboardPage() {
 
     const [
       santriRes,
+      pengurusRes,
       transaksiRes,
       pengaturanRes,
       jamaahRes,
@@ -461,7 +599,8 @@ export default function DashboardPage() {
     ] = await Promise.all([
       supabase
         .from('santri')
-        .select('id, nama_lengkap, nis, status, kamar, tarif_syahriyah, ktl_nominal, no_wa_ayah, no_wa_ibu, no_wa_wali'),
+        .select('id, nama_lengkap, nis, status, kamar, tgl_masuk, tarif_syahriyah, ktl_nominal, no_wa_ayah, no_wa_ibu, no_wa_wali'),
+      supabase.from('pengurus').select('*'),
       supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi, metode_pembayaran, kategori, keterangan'),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
       supabase
@@ -476,10 +615,15 @@ export default function DashboardPage() {
       supabase.from('santri_sakit').select('id, santri_id, tgl_sakit, tgl_sembuh, status'),
       supabase.from('keamanan_pelanggaran').select('id, santri_id, tanggal, poin, status_takzir'),
       supabase.from('keamanan_sita_barang').select('id, status'),
-      supabase
-        .from('pembayaran_santri_detail')
-        .select('santri_id, tahun_ajaran, item_kode, periode_bulan')
-        .eq('tahun_ajaran', activeTa),
+      taMonths.length > 0
+        ? supabase
+            .from('pembayaran_santri_detail')
+            .select('santri_id, tahun_ajaran, item_kode, periode_bulan')
+            .in('periode_bulan', taMonths)
+        : supabase
+            .from('pembayaran_santri_detail')
+            .select('santri_id, tahun_ajaran, item_kode, periode_bulan')
+            .eq('tahun_ajaran', activeTa),
       supabase.from('master_pembayaran').select('id, kode, nama_item, tipe_periode, aktif'),
       supabase.from('master_pembayaran_riwayat').select('id, item_id, nominal, berlaku_mulai'),
       fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY),
@@ -496,18 +640,34 @@ export default function DashboardPage() {
     if (transaksiRes.error) throw transaksiRes.error;
 
     const santriList = (santriRes.data || []) as SantriRow[];
-    const allTransaksiList = (transaksiRes.data || []) as TransaksiRow[];
-    const transaksiList = canViewBisyaroh
-      ? allTransaksiList
-      : allTransaksiList.filter(
-          (tx) =>
-            !`${tx.kategori || ''} ${tx.keterangan || ''}`.toLowerCase().includes('bisyaroh')
-        );
+    const pengurusList = (pengurusRes.error ? [] : pengurusRes.data || []) as PengurusRow[];
+    const pengurusAktif = pengurusList.filter((p) => {
+      const st = String(p.status || 'aktif').toLowerCase().trim();
+      const isAktif = !['nonaktif', 'tidak_aktif', 'tidak aktif', 'keluar', 'alumni', 'pensiun', 'berhenti'].includes(st);
+      return isAktif && !isExcludedTopPengurus(p);
+    }).length;
+
+    const allTransaksiList = ((transaksiRes.data || []) as TransaksiRow[]).map((tx) => ({
+      ...tx,
+      nominal: Number(tx.nominal || 0),
+    }));
     const setting = (pengaturanRes.data || {}) as PengaturanRow;
     const localExt = readExtendedLocal();
     const mergedAturan = mergeAturanOperasional(
       setting.aturan_operasional ?? localExt?.aturan_operasional
     );
+    const rawAturanObj =
+      setting.aturan_operasional && typeof setting.aturan_operasional === 'object'
+        ? (setting.aturan_operasional as Record<string, unknown>)
+        : null;
+    const resolvedKoreksiHijriyah =
+      Number(
+        setting.koreksi_hijriyah ??
+          rawAturanObj?.koreksi_hijriyah ??
+          mergedAturan.jadwal.koreksi_hijriyah ??
+          0
+      ) || 0;
+
     const jamaahMonthList = (jamaahRes.error ? [] : jamaahRes.data || []) as AbsenRow[];
     const izinActiveList = (izinRes.error ? [] : izinRes.data || []) as IzinPulangRow[];
     const sakitList = (sakitRes.error ? [] : sakitRes.data || []) as SantriSakitRow[];
@@ -545,7 +705,7 @@ export default function DashboardPage() {
     const santriBeasiswa = santriList.filter((s) => s.status === 'beasiswa_lazis').length;
 
     const walletSummary = computeWalletAndTransferSummary(
-      transaksiList,
+      allTransaksiList,
       {
         pendaftaran: Number(setting.saldo_awal_pendaftaran || 0),
         operasional: Number(setting.saldo_awal_operasional || 0),
@@ -589,25 +749,28 @@ export default function DashboardPage() {
     for (const row of jamaahMonthList) {
       if (row.santri_id && !activeSantriIds.has(row.santri_id)) continue;
 
+      const rowStatus = String(row.status || '').toLowerCase().trim();
+      const rowWaktu = String(row.waktu_sholat || '').toLowerCase().trim();
+
       mTotal += 1;
       if (row.tgl) mDaysSet.add(row.tgl);
-      if (row.status === 'hadir') mHadir += 1;
-      else if (row.status === 'sakit') mSakit += 1;
-      else if (row.status === 'izin') mIzin += 1;
-      else if (row.status === 'alpha') mAlpha += 1;
+      if (rowStatus === 'hadir') mHadir += 1;
+      else if (rowStatus === 'sakit') mSakit += 1;
+      else if (rowStatus === 'izin') mIzin += 1;
+      else if (rowStatus === 'alpha') mAlpha += 1;
 
       if (row.tgl === todayIso) {
         jTotal += 1;
-        if (row.status === 'hadir') jHadir += 1;
-        else if (row.status === 'sakit') jSakit += 1;
-        else if (row.status === 'izin') jIzin += 1;
-        else if (row.status === 'alpha') jAlpha += 1;
+        if (rowStatus === 'hadir') jHadir += 1;
+        else if (rowStatus === 'sakit') jSakit += 1;
+        else if (rowStatus === 'izin') jIzin += 1;
+        else if (rowStatus === 'alpha') jAlpha += 1;
 
-        if (row.waktu_sholat === 'subuh') subuhCount += 1;
-        else if (row.waktu_sholat === 'dzuhur') dzuhurCount += 1;
-        else if (row.waktu_sholat === 'ashar') asharCount += 1;
-        else if (row.waktu_sholat === 'maghrib') maghribCount += 1;
-        else if (row.waktu_sholat === 'isya') isyaCount += 1;
+        if (rowWaktu === 'subuh') subuhCount += 1;
+        else if (rowWaktu === 'dzuhur') dzuhurCount += 1;
+        else if (rowWaktu === 'ashar') asharCount += 1;
+        else if (rowWaktu === 'maghrib') maghribCount += 1;
+        else if (rowWaktu === 'isya') isyaCount += 1;
       }
     }
 
@@ -650,23 +813,6 @@ export default function DashboardPage() {
     });
 
     // Hitung Ringkasan Santri Menunggak Syahriyah (sinkron dengan /keuangan?tab=tunggakan)
-    const jatuhTempoTgl = Number(setting.jatuh_tempo_tanggal || 10);
-    const nowDay = now.getDate();
-    let cutoffYear = yyyy;
-    let cutoffMonth = nowDay > jatuhTempoTgl ? now.getMonth() + 1 : now.getMonth();
-    if (cutoffMonth === 0) {
-      cutoffMonth = 12;
-      cutoffYear -= 1;
-    }
-    const cutoffPeriode = `${cutoffYear}-${String(cutoffMonth).padStart(2, '0')}`;
-    const taMonths: string[] = [];
-    for (let i = 0; i < 12; i += 1) {
-      const mIdx = ((6 + i) % 12) + 1;
-      const yr = mIdx >= 7 ? startYear : startYear + 1;
-      const p = `${yr}-${String(mIdx).padStart(2, '0')}`;
-      if (p <= cutoffPeriode) taMonths.push(p);
-    }
-
     const masterItems = (masterBayarRes.error ? [] : masterBayarRes.data || []) as MasterPembayaranItem[];
     const riwayatTarif = (riwayatTarifRes.error ? [] : riwayatTarifRes.data || []) as TarifRiwayatItem[];
     const paidSyahriyahMap = new Map<string, Set<string>>();
@@ -676,9 +822,50 @@ export default function DashboardPage() {
         item_kode: string;
         periode_bulan: string;
       }>) {
-        if (det.item_kode !== 'syahriyah') continue;
+        const kodeNorm = String(det.item_kode || '').toLowerCase();
+        if (!kodeNorm.startsWith('syahriyah')) continue;
+        if (!det.periode_bulan) continue;
         if (!paidSyahriyahMap.has(det.santri_id)) paidSyahriyahMap.set(det.santri_id, new Set());
         paidSyahriyahMap.get(det.santri_id)!.add(det.periode_bulan);
+      }
+    }
+
+    // Kecualikan juga bulan-bulan syahriyah yang tercatat lunas di keuangan_transaksi
+    const taMonthsSet = new Set(taMonths);
+    const activeSantriOnly = santriList.filter((s) => s.status === 'aktif');
+    const activeSantriByLongestName = [...activeSantriOnly].sort(
+      (a, b) => (b.nama_lengkap || '').trim().length - (a.nama_lengkap || '').trim().length
+    );
+    const escapeRe = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const tx of allTransaksiList) {
+      if (tx.tipe !== 'masuk') continue;
+      const kat = String(tx.kategori || '').toLowerCase();
+      const ket = String(tx.keterangan || '');
+      const isSyahriyahTx = tx.dompet === 'operasional' || kat.includes('syahriyah');
+      if (!isSyahriyahTx) continue;
+      const periodes = extractPeriodeTokens(`${kat} ${ket}`).filter((p) => taMonthsSet.has(p));
+      if (periodes.length === 0) continue;
+      const ketLower = ket.toLowerCase();
+      const nisMatched = activeSantriOnly.filter((s) => {
+        const nisClean = String(s.nis || '').trim().toLowerCase();
+        if (nisClean.length < 3) return false;
+        return new RegExp(`(^|[^a-z0-9])${escapeRe(nisClean)}([^a-z0-9]|$)`).test(ketLower);
+      });
+      const matchedSantri =
+        nisMatched.length > 0
+          ? nisMatched
+          : (() => {
+              const found = activeSantriByLongestName.find((s) => {
+                const namaClean = String(s.nama_lengkap || '').trim().toLowerCase();
+                if (namaClean.length < 4) return false;
+                return new RegExp(`(^|[^a-z0-9])${escapeRe(namaClean)}([^a-z0-9]|$)`).test(ketLower);
+              });
+              return found ? [found] : [];
+            })();
+      for (const s of matchedSantri) {
+        if (!paidSyahriyahMap.has(s.id)) paidSyahriyahMap.set(s.id, new Set());
+        const set = paidSyahriyahMap.get(s.id)!;
+        periodes.forEach((p) => set.add(p));
       }
     }
 
@@ -696,22 +883,20 @@ export default function DashboardPage() {
     let tunggakanSuratCount = 0;
     let tunggakanTotalNominal = 0;
 
-    for (const s of santriList) {
-      if (!['aktif', 'ndalem', 'beasiswa_lazis'].includes(s.status)) continue;
+    for (const s of activeSantriOnly) {
       const paidSet = paidSyahriyahMap.get(s.id) || new Set<string>();
+      const startPeriode = getStartPeriodeDariTglMasuk(s.tgl_masuk);
       const k = (s.kamar || '').toUpperCase();
       const isVip = k.includes('VIP') || k.includes('FACHRIYAH') || Number(s.tarif_syahriyah) >= 500000;
-      const isNdalem = s.status === 'ndalem';
       let unpaidMonths = 0;
       let unpaidNom = 0;
 
       for (const p of taMonths) {
+        if (startPeriode && p < startPeriode) continue;
         if (!paidSet.has(p)) {
           unpaidMonths += 1;
           const dateTarget = `${p}-01`;
-          if (isNdalem) {
-            unpaidNom += resolveNominalForKode('syahriyah_ndalem', dateTarget, 145000);
-          } else if (isVip) {
+          if (isVip) {
             unpaidNom += resolveNominalForKode(
               'syahriyah_vip',
               dateTarget,
@@ -753,11 +938,16 @@ export default function DashboardPage() {
     let dirawatUks = 0;
     let dirujuk = 0;
     let sembuhBulanIni = 0;
+    let sakitPeringatan3Hari = 0;
 
     for (const row of sakitList) {
-      if (row.status === 'rawat_uks') dirawatUks += 1;
-      else if (row.status === 'dirujuk') dirujuk += 1;
-      else if (row.status === 'sembuh') {
+      if (row.status === 'rawat_uks') {
+        dirawatUks += 1;
+        if (calcDiffDaysIso(row.tgl_sakit, todayIso) >= 3) sakitPeringatan3Hari += 1;
+      } else if (row.status === 'dirujuk') {
+        dirujuk += 1;
+        if (calcDiffDaysIso(row.tgl_sakit, todayIso) >= 3) sakitPeringatan3Hari += 1;
+      } else if (row.status === 'sembuh') {
         const tglRef = row.tgl_sembuh || row.tgl_sakit || '';
         if (tglRef.startsWith(monthPrefix)) sembuhBulanIni += 1;
       }
@@ -825,21 +1015,24 @@ export default function DashboardPage() {
     const srpActiveList: SarprasLaporanItem[] = [];
 
     for (const r of sarprasLapList) {
-      if (r.status === 'menunggu') {
+      const st = String(r.status || '').toLowerCase().trim();
+      if (st === 'menunggu') {
         srpMenunggu += 1;
         srpActiveList.push(r);
-      } else if (r.status === 'diproses') {
+      } else if (st === 'diproses' || st === 'proses') {
         srpDiproses += 1;
         srpActiveList.push(r);
-      } else if (r.status === 'selesai') {
+      } else if (st === 'selesai') {
         const ref = r.tgl_selesai || r.tanggal_lapor || '';
         if (ref.startsWith(monthPrefix)) srpSelesaiBulanIni += 1;
       }
-      if (r.status !== 'selesai' && r.urgensi === 'darurat') srpDaruratAktif += 1;
+      if (st !== 'selesai' && String(r.urgensi || '').toLowerCase() === 'darurat') srpDaruratAktif += 1;
     }
 
     srpActiveList.sort((a, b) => (b.tanggal_lapor || '').localeCompare(a.tanggal_lapor || ''));
-    const srpAsetRusak = sarprasInvList.filter((i) => i.kondisi !== 'baik').length;
+    const srpAsetRusak = sarprasInvList.filter(
+      (i) => String(i.kondisi || 'baik').toLowerCase().trim() !== 'baik'
+    ).length;
 
     const weekEndIso = addDaysIso(todayIso, 7);
     const activeKegiatan = (kegiatanListRes || []).filter(
@@ -882,14 +1075,15 @@ export default function DashboardPage() {
 
     return {
       tahunAjaran: `${startYear}/${startYear + 1}`,
-      bulanLabel: `${namaBulan[now.getMonth()]} ${yyyy}`,
+      bulanLabel: `${namaBulan[Math.max(0, Math.min(11, mmNum - 1))]} ${yyyy}`,
       menuCepatIds: mergedAturan.menu_cepat_ids,
-      koreksiHijriyah: mergedAturan.jadwal.koreksi_hijriyah,
+      koreksiHijriyah: resolvedKoreksiHijriyah,
       rawPengaturanDb: setting,
       stats: {
         santriAktif,
         santriNdalem,
         santriBeasiswa,
+        pengurusAktif,
         totalPersonel: santriList.length,
         saldoOperasional,
         saldoPendaftaran,
@@ -941,6 +1135,7 @@ export default function DashboardPage() {
         dirujuk,
         sembuhBulanIni,
         totalAktif: dirawatUks + dirujuk,
+        peringatan3Hari: sakitPeringatan3Hari,
       },
       keamananStats: {
         takzirBelumSelesai,
@@ -1084,7 +1279,6 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewBisyaroh]);
 
   const todayCalendarInfo = useMemo(() => {
@@ -1203,6 +1397,9 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/85">
             <span className="px-2.5 py-0.5 bg-white/15 rounded-md border border-white/25 text-white">
               TA {tahunAjaran || '...'}
+            </span>
+            <span className="px-2.5 py-0.5 bg-white/15 rounded-md border border-white/25 text-white tabular-nums">
+              {loading ? '...' : `${stats.pengurusAktif} Pengurus Aktif`}
             </span>
             <span className="truncate">{stats.namaPesantren}</span>
           </div>
@@ -1379,7 +1576,7 @@ export default function DashboardPage() {
               {loading ? '...' : stats.santriAktif}
             </strong>
             <span className="text-[10.5px] text-slate-500 block mt-0.5">
-              {stats.santriNdalem} Ndalem &bull; {stats.santriBeasiswa} Beasiswa
+              {stats.santriNdalem} Ndalem &bull; {stats.santriBeasiswa} Beasiswa &bull; {stats.pengurusAktif} Pengurus
             </span>
           </div>
         </div>
@@ -1720,7 +1917,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <p className="text-[11px] text-slate-500 tabular-nums">
-            Bulan ini: <strong>{jamaahMonthly.hariTercatat} hari</strong> tercatat ({jamaahMonthly.alpha} alpha total)
+            Hari ini: {jamaahToday.total} input &bull; Bulan ini: <strong>{jamaahMonthly.hariTercatat} hari</strong> ({jamaahMonthly.alpha} alpha)
           </p>
         </div>
 
@@ -1762,8 +1959,16 @@ export default function DashboardPage() {
               <strong className="text-base font-bold text-rose-900 tabular-nums">
                 {loading ? '...' : kesehatanStats.totalAktif}
               </strong>
-              <span className="text-[10px] text-rose-700 block">
-                {kesehatanStats.sembuhBulanIni} sembuh bulan ini
+              <span
+                className={`text-[10px] block ${
+                  kesehatanStats.peringatan3Hari > 0
+                    ? 'text-rose-700 font-bold'
+                    : 'text-rose-700'
+                }`}
+              >
+                {kesehatanStats.peringatan3Hari > 0
+                  ? `${kesehatanStats.peringatan3Hari} sakit ≥ 3 hari`
+                  : `${kesehatanStats.sembuhBulanIni} sembuh bulan ini`}
               </span>
             </div>
           </div>
@@ -1886,8 +2091,14 @@ export default function DashboardPage() {
               <strong className="text-sm font-bold text-slate-900 tabular-nums block">
                 {loading ? '...' : sarprasStats.menunggu + sarprasStats.diproses} aktif
               </strong>
-              <span className="text-[10px] text-slate-500 block">
-                {sarprasStats.asetRusak} aset perlu perbaikan
+              <span
+                className={`text-[10px] block ${
+                  sarprasStats.daruratAktif > 0 ? 'text-rose-700 font-bold' : 'text-slate-500'
+                }`}
+              >
+                {sarprasStats.daruratAktif > 0
+                  ? `${sarprasStats.daruratAktif} darurat · ${sarprasStats.asetRusak} aset rusak`
+                  : `${sarprasStats.asetRusak} aset perlu perbaikan`}
               </span>
             </div>
             <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200">

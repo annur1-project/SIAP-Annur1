@@ -58,6 +58,10 @@ interface PengaturanRow {
   no_telepon: string;
   email_resmi?: string;
   logo_url?: string;
+  kop_surat_url?: string;
+  kop_url?: string;
+  nama_yayasan?: string;
+  kota?: string;
   stempel_url?: string;
   nama_pengasuh?: string;
   ttd_pengasuh_url?: string;
@@ -326,6 +330,10 @@ export default function PerizinanPage() {
     no_telepon: '085604551562',
     email_resmi: 'annur1bululawang@gmail.com',
     logo_url: '',
+    kop_surat_url: '',
+    kop_url: '',
+    nama_yayasan: '',
+    kota: 'Bululawang',
     stempel_url: '',
     nama_pengasuh: 'DR. KH. A. Fahrur Rozi',
     ttd_pengasuh_url: '',
@@ -1148,12 +1156,12 @@ export default function PerizinanPage() {
 
   return (
     <div className="space-y-5 relative print:space-y-0">
-      {/* PRINT ISOLATION UNTUK SURAT IZIN PULANG RESMI */}
+      {/* PRINT ISOLATION UNTUK SURAT IZIN PULANG RESMI (A5 PORTRAIT) */}
       <style jsx global>{`
         @media print {
           @page {
-            size: A4 portrait;
-            margin: 12mm 14mm;
+            size: A5 portrait;
+            margin: 7mm 9mm;
           }
           body {
             background: #ffffff !important;
@@ -1181,39 +1189,58 @@ export default function PerizinanPage() {
         }
       `}</style>
 
-      {/* AREA CETAK SURAT IZIN PULANG RESMI (TERISOLASI SAAT PRINT) */}
+      {/* AREA CETAK SURAT IZIN PULANG RESMI (1 HALAMAN A5 PORTRAIT) */}
       {printTarget && (
-        <div id="print-surat-izin" className="hidden bg-white text-slate-900 text-xs leading-relaxed">
-          <div className="border-2 border-slate-800 p-6 space-y-5">
-            {/* Kop Lembaga */}
-            <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3">
-              {pengaturan.logo_url && (
+        <div
+          id="print-surat-izin"
+          className="hidden bg-white text-slate-900 text-[10px] leading-snug"
+        >
+          <div className="border-[1.5px] border-slate-800 p-3.5 space-y-2.5 break-inside-avoid">
+            {/* Kop Surat Resmi Dinamis */}
+            {pengaturan.kop_surat_url || pengaturan.kop_url ? (
+              <div className="border-b-2 border-double border-slate-800 pb-1.5">
                 <img
-                  src={pengaturan.logo_url}
-                  alt="Logo Pondok"
+                  src={pengaturan.kop_surat_url || pengaturan.kop_url}
+                  alt={`Kop Surat ${pengaturan.nama_pesantren}`}
                   referrerPolicy="no-referrer"
-                  className="w-16 h-16 object-contain shrink-0"
+                  className="w-full max-h-20 object-contain mx-auto"
                 />
-              )}
-              <div className="flex-1 text-center">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
-                  YAYASAN PENDIDIKAN PONDOK PESANTREN AN-NUR
-                </p>
-                <h1 className="text-lg font-extrabold uppercase text-slate-900">
-                  {pengaturan.nama_pesantren}
-                </h1>
-                <p className="text-[11px] text-slate-600">{pengaturan.alamat_lengkap}</p>
-                <p className="text-[11px] text-slate-600">
-                  Telp/WA Keamanan &amp; Kantor: {pengaturan.no_telepon}
-                </p>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3 border-b-2 border-double border-emerald-900 pb-2">
+                {pengaturan.logo_url && (
+                  <img
+                    src={pengaturan.logo_url}
+                    alt="Logo Pondok"
+                    referrerPolicy="no-referrer"
+                    className="w-11 h-11 object-contain shrink-0"
+                  />
+                )}
+                <div className="flex-1 text-center">
+                  {pengaturan.nama_yayasan && (
+                    <p className="text-[8.5px] font-bold tracking-widest uppercase text-emerald-900">
+                      {pengaturan.nama_yayasan}
+                    </p>
+                  )}
+                  <h1 className="text-sm font-extrabold uppercase text-slate-900 leading-tight">
+                    {pengaturan.nama_pesantren}
+                  </h1>
+                  <p className="text-[9.5px] text-slate-600 leading-tight">
+                    {pengaturan.alamat_lengkap}
+                  </p>
+                  <p className="text-[9px] text-slate-600 leading-tight">
+                    Telp/WA: {pengaturan.no_telepon}
+                    {pengaturan.email_resmi ? ` · Email: ${pengaturan.email_resmi}` : ''}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="text-center">
-              <h2 className="text-base font-extrabold uppercase underline underline-offset-4 text-slate-900">
+              <h2 className="text-xs font-extrabold uppercase underline underline-offset-2 text-slate-900">
                 SURAT IZIN PULANG SANTRI
               </h2>
-              <p className="text-[11px] font-mono text-slate-600 mt-1">
+              <p className="text-[9.5px] font-mono text-slate-600 mt-0.5">
                 Nomor: {printTarget.meta.ns || printTarget.id.slice(0, 8).toUpperCase()} &middot;{' '}
                 {printTarget.jenis_izin === 'tidak_menginap'
                   ? 'PULANG TIDAK MENGINAP'
@@ -1221,74 +1248,86 @@ export default function PerizinanPage() {
               </p>
             </div>
 
-            <p className="text-xs text-slate-800">
-              Assalamu&apos;alaikum Wr. Wb. Pengurus Sie Keamanan Pondok Pesantren An-Nur 1 Bululawang
+            <p className="text-[10px] text-slate-800">
+              Assalamu&apos;alaikum Wr. Wb. Pengurus Sie Keamanan {pengaturan.nama_pesantren}{' '}
               memberikan izin pulang kepada santri berikut ini:
             </p>
 
-            <table className="w-full text-xs border-collapse">
+            <table className="w-full text-[10px] border-collapse">
               <tbody>
                 <tr>
-                  <td className="py-1 w-44 font-semibold text-slate-700">Nama Lengkap Santri</td>
-                  <td className="py-1 w-4">:</td>
-                  <td className="py-1 font-bold text-slate-900">
+                  <td className="py-0.5 w-36 font-semibold text-slate-700 align-top">
+                    Nama Lengkap Santri
+                  </td>
+                  <td className="py-0.5 w-3 align-top">:</td>
+                  <td className="py-0.5 font-bold text-slate-900">
                     {printTarget.santri?.nama_lengkap || '-'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">NIS / Kamar</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1 font-mono">
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">NIS / Kamar</td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5 font-mono">
                     {printTarget.santri?.nis || '-'} / Kamar {printTarget.santri?.kamar || '-'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">Kategori &amp; Alasan Izin</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1">
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">
+                    Kategori &amp; Alasan Izin
+                  </td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5">
                     <strong>{printTarget.meta.k}</strong>
                     {printTarget.alasanTeks ? ` — ${printTarget.alasanTeks}` : ''}
                     {printTarget.meta.d ? ' (Disertai Surat Keterangan Dokter)' : ''}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">Orang Tua / Wali Penjemput</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1 font-semibold">
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">
+                    Wali Penjemput
+                  </td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5 font-semibold">
                     {printTarget.meta.p || '-'}
                     {printTarget.meta.w ? ` (${printTarget.meta.w})` : ''}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">Tanggal Berangkat</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1 font-mono">{formatTanggalIndo(printTarget.tgl_pulang)}</td>
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">
+                    Tanggal Berangkat
+                  </td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5 font-mono">{formatTanggalIndo(printTarget.tgl_pulang)}</td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">Batas Waktu Kembali</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1 font-bold text-slate-900">
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">
+                    Batas Waktu Kembali
+                  </td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5 font-bold text-slate-900">
                     {formatTanggalIndo(printTarget.tgl_rencana_kembali)}
                     {printTarget.jenis_izin === 'tidak_menginap'
-                      ? ` (Maksimal pukul ${printTarget.meta.b || '17:00'} WIB)`
-                      : ' (Maksimal 3 hari izin menginap)'}
+                      ? ` (Maks. ${printTarget.meta.b || '17:00'} WIB)`
+                      : ' (Maks. 3 hari izin menginap)'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-1 font-semibold text-slate-700">Infaq Administrasi Izin</td>
-                  <td className="py-1">:</td>
-                  <td className="py-1 font-mono font-bold">
+                  <td className="py-0.5 font-semibold text-slate-700 align-top">
+                    Infaq Administrasi
+                  </td>
+                  <td className="py-0.5 align-top">:</td>
+                  <td className="py-0.5 font-mono font-bold">
                     {formatRupiah(printTarget.infaq_nominal)}
                   </td>
                 </tr>
               </tbody>
             </table>
 
-            <div className="p-3 bg-slate-50 border border-slate-300 rounded text-[10.5px] text-slate-700 space-y-1">
+            <div className="p-2 bg-slate-50 border border-slate-300 rounded text-[9px] text-slate-700 leading-tight space-y-0.5">
               <p className="font-bold text-slate-900">Ketentuan Tata Tertib Perizinan:</p>
               <p>1. Santri wajib diantar/dijemput oleh orang tua atau wali yang sah.</p>
               <p>
-                2. Apabila berhalangan kembali tepat waktu wajib konfirmasi kepada Keamanan Pondok;
+                2. Apabila berhalangan kembali tepat waktu wajib konfirmasi ke Keamanan Pondok;
                 melampaui batas izin tanpa keterangan dikenakan denda infaq Rp 20.000,-.
               </p>
               {printTarget.jenis_izin === 'menginap' && (
@@ -1303,10 +1342,10 @@ export default function PerizinanPage() {
               </p>
             </div>
 
-            <div className="pt-2 grid grid-cols-3 gap-4 text-center text-[11px]">
+            <div className="pt-1 grid grid-cols-3 gap-2 text-center text-[9.5px]">
               <div>
                 <p>Orang Tua / Wali Penjemput,</p>
-                <div className="h-16" />
+                <div className="h-10" />
                 <p className="font-bold underline underline-offset-2">
                   {printTarget.meta.p || '..............................'}
                 </p>
@@ -1314,13 +1353,13 @@ export default function PerizinanPage() {
 
               <div className="relative">
                 <p>Petugas Keamanan Pondok,</p>
-                <div className="h-16 flex items-center justify-center relative">
+                <div className="h-10 flex items-center justify-center relative">
                   {pengaturan.stempel_url && (
                     <img
                       src={pengaturan.stempel_url}
                       alt="Stempel Pondok"
                       referrerPolicy="no-referrer"
-                      className="w-16 h-16 object-contain opacity-75"
+                      className="w-11 h-11 object-contain opacity-75"
                     />
                   )}
                 </div>
@@ -1328,19 +1367,21 @@ export default function PerizinanPage() {
               </div>
 
               <div>
-                <p>Bululawang, {formatTanggalIndo(printTarget.tgl_pulang)}</p>
+                <p>
+                  {pengaturan.kota || 'Bululawang'}, {formatTanggalIndo(printTarget.tgl_pulang)}
+                </p>
                 <p>
                   {printTarget.jenis_izin === 'menginap'
                     ? 'Mengetahui Kepala Pondok,'
                     : 'Mengetahui Pengurus,'}
                 </p>
-                <div className="h-12 flex items-center justify-center">
+                <div className="h-8 flex items-center justify-center">
                   {pengaturan.ttd_kepala_pondok_url && (
                     <img
                       src={pengaturan.ttd_kepala_pondok_url}
                       alt="TTD Kepala Pondok"
                       referrerPolicy="no-referrer"
-                      className="h-12 object-contain"
+                      className="h-8 object-contain"
                     />
                   )}
                 </div>
@@ -1351,20 +1392,20 @@ export default function PerizinanPage() {
             </div>
 
             {printTarget.jenis_izin === 'menginap' && (
-              <div className="pt-2 border-t border-slate-300 text-center text-[11px]">
-                <p>Mengesahkan, Pengasuh Pondok Pesantren An-Nur 1 Bululawang</p>
-                <div className="h-12 flex items-center justify-center">
+              <div className="pt-1.5 border-t border-slate-300 text-center text-[9.5px]">
+                <p>Mengesahkan, Pengasuh {pengaturan.nama_pesantren}</p>
+                <div className="h-9 flex items-center justify-center">
                   {pengaturan.ttd_pengasuh_url && (
                     <img
                       src={pengaturan.ttd_pengasuh_url}
                       alt="TTD Pengasuh"
                       referrerPolicy="no-referrer"
-                      className="h-12 object-contain"
+                      className="h-9 object-contain"
                     />
                   )}
                 </div>
                 <p className="font-bold underline underline-offset-2">
-                  {pengaturan.nama_pengasuh || 'DR. KH. A. Fahrur Rozi'}
+                  {pengaturan.nama_pengasuh || 'Pengasuh Pondok'}
                 </p>
               </div>
             )}
@@ -2811,7 +2852,9 @@ export default function PerizinanPage() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-6 space-y-4 my-6">
             <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Pratinjau Surat Izin Pulang</h2>
+                <h2 className="text-base font-bold text-slate-900">
+                  Pratinjau Surat Izin Pulang (A5 Portrait)
+                </h2>
                 <p className="text-xs text-slate-500">
                   {printTarget.meta.ns || '-'} &middot; {printTarget.santri?.nama_lengkap}
                 </p>
@@ -2871,7 +2914,7 @@ export default function PerizinanPage() {
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-2"
               >
                 <Printer className="w-4 h-4" />
-                Cetak Surat Izin Resmi
+                Cetak Surat Izin (A5 Portrait)
               </button>
             </div>
           </div>

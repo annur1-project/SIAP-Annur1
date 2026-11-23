@@ -39,7 +39,6 @@ import {
   generateNextNoRegistrasi,
   normalizeWaNumber,
   PSB_JENJANG_OPTIONS,
-  PSB_MIN_DP,
   PSB_PROFIL_PONDOK,
   savePsbRecord,
   toWaMeDigits,
@@ -47,6 +46,8 @@ import {
   type PsbPendaftaranRecord,
 } from '@/lib/psb';
 import { PsbPondokInfoCard, PsbPublicHeader } from '@/components/PsbPondokInfo';
+
+const MIN_DP_BOOKING = 300000;
 
 interface WilayahRow {
   Kelurahan: string;
@@ -108,7 +109,7 @@ export default function DaftarPublicPage() {
 
   // Step 3: Pembayaran DP
   const [jenisBayar, setJenisBayar] = useState<'dp' | 'lunas'>('dp');
-  const [dpNominal, setDpNominal] = useState<number>(PSB_MIN_DP);
+  const [dpNominal, setDpNominal] = useState<number>(MIN_DP_BOOKING);
   const [buktiFileLabel, setBuktiFileLabel] = useState('');
   const [buktiUrl, setBuktiUrl] = useState('');
   const [uploadingBukti, setUploadingBukti] = useState(false);
@@ -207,10 +208,9 @@ export default function DaftarPublicPage() {
   );
 
   const selectedBilling = paket === 'vip' ? billingVip : billingReguler;
+  const parsedDpInput = Number.isFinite(Number(dpNominal)) ? Number(dpNominal) : 0;
   const effectiveBayarNominal =
-    jenisBayar === 'lunas'
-      ? selectedBilling.totalBiayaAkhir
-      : Math.max(PSB_MIN_DP, Number(dpNominal || PSB_MIN_DP));
+    jenisBayar === 'lunas' ? selectedBilling.totalBiayaAkhir : parsedDpInput;
 
   const copyText = (key: string, text: string) => {
     navigator.clipboard?.writeText(text);
@@ -310,12 +310,17 @@ export default function DaftarPublicPage() {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (effectiveBayarNominal < PSB_MIN_DP) {
-      setErrorMsg(`Minimal transfer DP pendaftaran adalah ${formatRupiah(PSB_MIN_DP)}.`);
+    if (
+      (jenisBayar === 'dp' && parsedDpInput < MIN_DP_BOOKING) ||
+      effectiveBayarNominal < MIN_DP_BOOKING
+    ) {
+      setErrorMsg('Nominal DP minimal Rp 300.000');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     if (!buktiUrl) {
       setErrorMsg('Mohon unggah foto/screenshot bukti transfer DP terlebih dahulu.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -555,7 +560,7 @@ export default function DaftarPublicPage() {
                 Formulir Pendaftaran Online &amp; Booking DP
               </h2>
               <p className="text-xs sm:text-sm text-emerald-100/90 max-w-2xl">
-                Silakan pilih paket pendaftaran, lengkapi data calon santri, dan unggah bukti transfer DP minimal {formatRupiah(PSB_MIN_DP)}.
+                Silakan pilih paket pendaftaran, lengkapi data calon santri, dan unggah bukti transfer DP minimal {formatRupiah(MIN_DP_BOOKING)}.
               </p>
             </div>
 
@@ -717,7 +722,7 @@ export default function DaftarPublicPage() {
                 <div>
                   <p className="font-bold text-slate-900">Skema Pembayaran Fleksibel</p>
                   <p className="text-[11px] text-slate-600">
-                    Booking cukup transfer DP minimal <strong>{formatRupiah(PSB_MIN_DP)}</strong>. Sisa pembayaran dapat diselesaikan menyusul.
+                    Booking cukup transfer DP minimal <strong>{formatRupiah(MIN_DP_BOOKING)}</strong>. Sisa pembayaran dapat diselesaikan menyusul.
                   </p>
                 </div>
               </div>
@@ -1039,6 +1044,7 @@ export default function DaftarPublicPage() {
         {/* LANGKAH 3: TRANSFER DP & UPLOAD BUKTI */}
         {step === 3 && (
           <form
+            noValidate
             onSubmit={handleSubmitPendaftaran}
             className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 space-y-5 shadow-xs"
           >
@@ -1048,7 +1054,7 @@ export default function DaftarPublicPage() {
                 Langkah 3: Transfer DP &amp; Unggah Bukti Pembayaran
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Transfer DP minimal {formatRupiah(PSB_MIN_DP)} ke rekening resmi pondok di bawah ini, lalu unggah foto/screenshot bukti transfernya.
+                Transfer DP minimal {formatRupiah(MIN_DP_BOOKING)} ke rekening resmi pondok di bawah ini, lalu unggah foto/screenshot bukti transfernya.
               </p>
             </div>
 
@@ -1084,7 +1090,7 @@ export default function DaftarPublicPage() {
                   type="button"
                   onClick={() => {
                     setJenisBayar('dp');
-                    setDpNominal(PSB_MIN_DP);
+                    setDpNominal(MIN_DP_BOOKING);
                   }}
                   className={`p-3.5 rounded-xl border-2 text-left cursor-pointer ${
                     jenisBayar === 'dp'
@@ -1092,9 +1098,9 @@ export default function DaftarPublicPage() {
                       : 'border-slate-200 bg-white'
                   }`}
                 >
-                  <p className="font-bold text-slate-900">Booking DP (Minimal Rp500.000)</p>
+                  <p className="font-bold text-slate-900">Booking DP (Minimal Rp 300.000)</p>
                   <p className="text-[11px] text-slate-600 mt-0.5">
-                    Sisa tagihan ({formatRupiah(Math.max(0, selectedBilling.totalBiayaAkhir - PSB_MIN_DP))}) dilunasi saat santri datang/sowan.
+                    Sisa tagihan ({formatRupiah(Math.max(0, selectedBilling.totalBiayaAkhir - MIN_DP_BOOKING))}) dilunasi saat santri datang/sowan.
                   </p>
                 </button>
 
@@ -1122,17 +1128,24 @@ export default function DaftarPublicPage() {
               {jenisBayar === 'dp' && (
                 <div>
                   <label htmlFor="dp_nominal_input" className="block font-bold text-slate-700 mb-1">
-                    Nominal yang Ditransfer (Rp, minimal 500.000)
+                    Nominal yang Ditransfer (Rp, minimal 300.000)
                   </label>
                   <input
                     id="dp_nominal_input"
                     type="number"
-                    min={PSB_MIN_DP}
+                    min={MIN_DP_BOOKING}
                     step={10000}
-                    value={dpNominal}
-                    onChange={(e) => setDpNominal(Number(e.target.value))}
-                    className="w-full sm:w-64 px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-sm"
+                    value={dpNominal === 0 ? '' : dpNominal}
+                    onChange={(e) => setDpNominal(e.target.value === '' ? 0 : Number(e.target.value))}
+                    className={`w-full sm:w-64 px-3 py-2.5 bg-slate-50 border rounded-xl font-mono font-bold text-sm ${
+                      parsedDpInput < MIN_DP_BOOKING ? 'border-rose-400 text-rose-800' : 'border-slate-300'
+                    }`}
                   />
+                  {parsedDpInput < MIN_DP_BOOKING && (
+                    <p className="text-[11px] font-bold text-rose-700 mt-1">
+                      Nominal DP minimal Rp 300.000
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1219,6 +1232,12 @@ export default function DaftarPublicPage() {
                 </span>
               </div>
             </div>
+
+            {errorMsg && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-3 text-xs font-bold">
+                {errorMsg}
+              </div>
+            )}
 
             <div className="flex flex-col-reverse sm:flex-row justify-between gap-2.5 pt-2">
               <button

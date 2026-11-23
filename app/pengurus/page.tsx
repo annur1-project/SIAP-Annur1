@@ -1644,27 +1644,27 @@ export default function DataPengurusPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+        <div className={`grid ${canEditPengurus ? "grid-cols-2" : "grid-cols-1"} gap-2 w-full md:w-auto`}>
           <button
             type="button"
             onClick={() => {
               setActiveTab("bagan");
               setTimeout(() => window.print(), 250);
             }}
-            className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs sm:text-sm font-medium hover:bg-slate-50 shadow-sm transition whitespace-nowrap"
+            className="w-full min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs sm:text-sm font-medium hover:bg-slate-50 shadow-sm transition whitespace-nowrap"
           >
             <Printer className="w-4 h-4 text-slate-600 shrink-0" />
-            Cetak Bagan (A4)
+            <span className="truncate">Cetak Bagan (A4)</span>
           </button>
 
           {canEditPengurus && (
             <button
               type="button"
               onClick={openAddModal}
-              className="min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs sm:text-sm font-semibold hover:bg-emerald-800 shadow-sm transition whitespace-nowrap"
+              className="w-full min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs sm:text-sm font-semibold hover:bg-emerald-800 shadow-sm transition whitespace-nowrap"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              Tambah Pengurus
+              <span className="truncate">Tambah Pengurus</span>
             </button>
           )}
         </div>
@@ -1827,32 +1827,34 @@ export default function DataPengurusPage() {
           </div>
 
           {/* Legenda Warna Tingkatan */}
-          <div className="px-4 py-2 bg-slate-50/60 border-b border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
-            <span className="font-semibold text-slate-600">Keterangan Warna Baris:</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-amber-300 border border-amber-500" />
-              Pengasuh
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-indigo-300 border border-indigo-500" />
-              Dewan Pengasuh
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-sky-300 border border-sky-500" />
-              Direktur Pendidikan
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-emerald-300 border border-emerald-600" />
-              Dewan Harian
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-teal-300 border border-teal-500" />
-              10 Divisi / Sie
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-slate-300 border border-slate-400" />
-              Musyrif Kamar
-            </span>
+          <div className="px-4 py-2.5 bg-slate-50/60 border-b border-slate-100 space-y-1.5 text-[11px] text-slate-500">
+            <span className="font-semibold text-slate-600 block">Keterangan Warna Baris:</span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-amber-300 border border-amber-500 shrink-0" />
+                <span className="truncate">Pengasuh</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-indigo-300 border border-indigo-500 shrink-0" />
+                <span className="truncate">Dewan Pengasuh</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-sky-300 border border-sky-500 shrink-0" />
+                <span className="truncate">Direktur Pendidikan</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-300 border border-emerald-600 shrink-0" />
+                <span className="truncate">Dewan Harian</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-teal-300 border border-teal-500 shrink-0" />
+                <span className="truncate">10 Divisi / Sie</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-xs bg-slate-300 border border-slate-400 shrink-0" />
+                <span className="truncate">Musyrif Kamar</span>
+              </span>
+            </div>
           </div>
 
           {/* MOBILE CARD VIEW (PWA / HP) */}
@@ -1877,8 +1879,8 @@ export default function DataPengurusPage() {
 
                 return (
                   <div key={item.id} className={`${rowStyle.rowBg} ${rowStyle.leftAccent} p-4 space-y-2.5 text-xs`}>
-                    <div className="flex items-start justify-between gap-2.5">
-                      <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         {item.foto_url ? (
                           <img
                             src={item.foto_url}
@@ -1891,12 +1893,12 @@ export default function DataPengurusPage() {
                           </div>
                         )}
                         <div className="min-w-0">
-                          <p className="font-bold text-sm text-slate-900 leading-snug">
+                          <p className="font-bold text-sm text-slate-900 leading-snug break-words">
                             {item.nama_lengkap}
                           </p>
                           {item.ttd_url && (
                             <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium mt-0.5">
-                              <FileSignature className="w-3 h-3" /> TTD Digital Tersedia
+                              <FileSignature className="w-3 h-3 shrink-0" /> TTD Digital Tersedia
                             </span>
                           )}
                         </div>
@@ -1914,20 +1916,22 @@ export default function DataPengurusPage() {
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5 w-full mt-2">
                       {sortedBadges.map((jab, idx) => {
                         const label = formatTableJabatanLabel(jab);
                         const style = getHierarchyBadgeStyle(jab.divisi);
                         return (
                           <span
                             key={idx}
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${style.badgeClass}`}
+                            className={`w-full justify-start text-left inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border min-w-0 ${style.badgeClass}`}
                           >
                             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dotClass}`} />
-                            <span className="font-semibold">{label.primary}</span>
-                            {label.secondary && (
-                              <span className="text-[10.5px] opacity-75">({label.secondary})</span>
-                            )}
+                            <span className="min-w-0 leading-tight">
+                              <span className="font-semibold">{label.primary}</span>
+                              {label.secondary && (
+                                <span className="text-[10.5px] opacity-75"> ({label.secondary})</span>
+                              )}
+                            </span>
                           </span>
                         );
                       })}
@@ -1957,14 +1961,15 @@ export default function DataPengurusPage() {
                     </div>
 
                     {(canEditPengurus || canManageAccounts) && (
-                      <div className="flex items-center gap-2 pt-0.5">
+                      <div className="flex items-center gap-2 pt-1.5 border-t border-slate-200/60">
                         {canManageAccounts && (
                           <button
                             type="button"
                             onClick={() => openAccountModal(item)}
-                            className="min-h-[40px] px-3 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold inline-flex items-center justify-center gap-1.5"
+                            className="flex-1 min-w-0 min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
                           >
-                            <KeyRound className="w-3.5 h-3.5" /> {item.username ? `@${item.username}` : "Buat Akun"}
+                            <KeyRound className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{item.username ? `@${item.username}` : "Akun"}</span>
                           </button>
                         )}
                         {canEditPengurus && (
@@ -1972,16 +1977,17 @@ export default function DataPengurusPage() {
                             <button
                               type="button"
                               onClick={() => openEditModal(item)}
-                              className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-white text-slate-700 hover:text-emerald-700 border border-slate-200 font-bold inline-flex items-center justify-center gap-1.5"
+                              className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-white text-slate-700 hover:text-emerald-700 border border-slate-200 font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
                             >
-                              <Edit3 className="w-3.5 h-3.5" /> Edit
+                              <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Edit</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeletePengurus(item.id, item.nama_lengkap)}
                               title="Hapus Pengurus"
                               aria-label={`Hapus ${item.nama_lengkap}`}
-                              className="min-h-[40px] min-w-[40px] rounded-xl bg-white text-slate-500 hover:text-rose-600 border border-slate-200 inline-flex items-center justify-center"
+                              className="min-h-[38px] min-w-[38px] px-2.5 rounded-xl bg-white text-slate-500 hover:text-rose-600 border border-slate-200 inline-flex items-center justify-center shrink-0"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
