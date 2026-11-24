@@ -251,19 +251,19 @@ const ASSET_SLOTS: Array<{
   {
     field: 'logo_url',
     title: 'Logo 1: Kop Surat & Dokumen',
-    hint: 'Dipakai di header laporan, surat izin & kuitansi (PNG/JPG).',
+    hint: 'Dipakai di header laporan, surat izin & kuitansi.',
     accept: 'image/*',
   },
   {
     field: 'logo_watermark_url',
     title: 'Logo 2: Watermark Kuitansi',
-    hint: 'Logo outline latar belakang kuitansi resmi (PNG transparan).',
+    hint: 'Logo latar belakang kuitansi resmi.',
     accept: 'image/*',
   },
   {
     field: 'stempel_url',
     title: 'Stempel Resmi Pondok',
-    hint: 'Tampil di sebelah kiri TTD Pengasuh (rasio 3,27 × 4,5 cm · PNG transparan).',
+    hint: 'Tampil di sebelah kiri TTD Pengasuh.',
     accept: 'image/png,image/*',
   },
 ];
@@ -337,8 +337,7 @@ export function LogoLegalitasTab({
               />
             ) : (
               <div className="text-center px-4">
-                <p className="text-xs font-semibold text-slate-500">Belum ada gambar Kop Surat (17,46 × 4,13 cm)</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Unggah file JPG atau PNG resolusi tinggi agar hasil cetak PDF tajam</p>
+                <p className="text-xs font-semibold text-slate-500">Belum ada gambar Kop Surat</p>
               </div>
             )}
           </div>
@@ -347,10 +346,10 @@ export function LogoLegalitasTab({
             <label className="min-h-[38px] px-4 py-1.5 siap-btn-primary rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap">
               <Upload className="w-3.5 h-3.5 shrink-0" />
               {uploadingField === 'kop_surat_url'
-                ? 'Mengunggah Kop...'
+                ? 'Mengunggah...'
                 : formData.kop_surat_url
-                ? 'Ganti Kop Surat JPG/PNG'
-                : 'Unggah Kop Surat JPG/PNG'}
+                ? 'Ganti File'
+                : 'Unggah Foto'}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/*"
@@ -381,7 +380,7 @@ export function LogoLegalitasTab({
             Logo Lembaga &amp; Stempel Resmi
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Unggah PNG transparan agar hasil cetak kuitansi dan dokumen PDF terlihat tajam di atas kertas putih.
+            Unggah logo lembaga dan stempel resmi pondok.
           </p>
         </div>
 
@@ -503,7 +502,7 @@ export function LogoLegalitasTab({
                 <div className="flex items-center gap-2">
                   <label className="flex-1 min-h-[38px] px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap">
                     <Upload className="w-3.5 h-3.5 siap-text-accent shrink-0" />
-                    {isUploading ? 'Mengunggah...' : ttdUrl ? 'Ganti TTD (PNG)' : 'Unggah TTD (PNG)'}
+                    {isUploading ? 'Mengunggah...' : ttdUrl ? 'Ganti TTD' : 'Unggah TTD'}
                     <input
                       type="file"
                       accept="image/png,image/*"

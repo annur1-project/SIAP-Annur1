@@ -1553,12 +1553,12 @@ export default function DataPengurusPage() {
   // ============================================================
   return (
     <div className="min-h-screen bg-slate-50/70 p-4 md:p-6 space-y-6 print:p-0 print:bg-white">
-      {/* STYLE KHUSUS CETAK A4 HEMAT KERTAS & HALAMAN 2 KHUSUS MUSYRIF */}
+      {/* STYLE KHUSUS CETAK A4 PADAT & MENYATU TANPA HALAMAN KOSONG */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 7mm 8mm;
+            margin: 6mm 7mm;
           }
           html,
           body {
@@ -1590,36 +1590,30 @@ export default function DataPengurusPage() {
           .print-grid-2 {
             display: grid !important;
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 6px !important;
+            gap: 4px !important;
           }
           .print-grid-3 {
             display: grid !important;
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-            gap: 5px !important;
+            gap: 4px !important;
           }
           .print-grid-4 {
             display: grid !important;
             grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-            gap: 6px !important;
+            gap: 4px !important;
           }
           .print-card-pad {
-            padding: 3.5px 6px !important;
+            padding: 2.5px 5px !important;
           }
           .print-header-pad {
-            padding: 3.5px 8px !important;
+            padding: 2.5px 7px !important;
           }
           .print-connector {
-            height: 6px !important;
+            height: 4px !important;
           }
           .print-avoid-break {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
-          }
-          .print-page-2 {
-            break-before: page !important;
-            page-break-before: always !important;
-            margin-top: 0 !important;
-            padding-top: 1mm !important;
           }
         }
       `}</style>
@@ -2197,12 +2191,12 @@ export default function DataPengurusPage() {
           TAB 2: BAGAN STRUKTUR KEPENGURUSAN
           - KOP LEMBAGA DI PALING ATAS
           - JUDUL "STRUKTUR KEPENGURUSAN" DI BAWAH KOP & DI ATAS PENGASUH
-          - HALAMAN 1 PDF: PIMPINAN + 10 DIVISI | HALAMAN 2 PDF: MUSYRIF KAMAR
+          - MENGALIR MENYATU DARI PENGASUH HINGGA MUSYRIF KAMAR TANPA HALAMAN KOSONG
       ============================================================ */}
       {activeTab === "bagan" && (
         <div
           id="printable-bagan-area"
-          className="bg-white rounded-2xl border border-slate-200/80 p-6 md:p-8 shadow-sm space-y-5 print:space-y-2"
+          className="bg-white rounded-2xl border border-slate-200/80 p-6 md:p-8 shadow-sm space-y-5 print:space-y-1.5"
         >
           {/* 1. KOP LEMBAGA RESMI */}
           <div className="border-b-2 border-slate-800 pb-3.5 print:pb-1.5">
@@ -2400,7 +2394,7 @@ export default function DataPengurusPage() {
             <div className="w-full h-0.5 bg-slate-300 rounded-full" />
           </div>
 
-          {/* TINGKAT 5A: JAJARAN 10 DIVISI / SIE (TETAP DI HALAMAN 1 PDF) */}
+          {/* TINGKAT 5A: JAJARAN 10 DIVISI / SIE */}
           <div className="space-y-2.5 print:space-y-1">
             <div className="flex items-center gap-2 text-xs print:text-[9px] font-bold uppercase tracking-wider text-teal-900">
               <UserCheck className="w-4 h-4 print:w-3 print:h-3 text-teal-700" />
@@ -2422,7 +2416,7 @@ export default function DataPengurusPage() {
                     </span>
                   </div>
 
-                  <div className="p-3 print:p-1.5 flex-1 flex flex-col justify-start space-y-2 print:space-y-1">
+                  <div className="p-3 print:p-1 flex-1 flex flex-col justify-start space-y-2 print:space-y-0.5">
                     {divCard.members.length === 0 ? (
                       <div className="flex-1 flex items-center justify-center py-3 print:py-1 text-xs print:text-[8px] italic text-slate-400">
                         Belum ada personel ditugaskan
@@ -2475,35 +2469,20 @@ export default function DataPengurusPage() {
             </div>
           </div>
 
-          {/* TINGKAT 5B: BLOK KHUSUS MUSYRIF KAMAR (OTOMATIS KE HALAMAN 2 SAAT CETAK PDF) */}
-          <div className="print-page-2 space-y-2.5">
-            {/* Header Lampiran Khusus Muncul di Halaman 2 Saat Cetak PDF */}
-            <div className="hidden print:flex items-center justify-between border-b-2 border-slate-800 pb-1.5 mb-2">
-              <div>
-                <p className="text-[10px] font-extrabold text-slate-900 uppercase tracking-wide">
-                  LAMPIRAN STRUKTUR KEPENGURUSAN — {pengaturan.nama_pesantren}
-                </p>
-                <p className="text-[8px] text-slate-500">
-                  Jajaran Musyrif Kamar Santri • Masa Khidmat {masaKhidmat}
-                </p>
-              </div>
-              <span className="text-[8px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-300">
-                Halaman 2
-              </span>
-            </div>
-
+          {/* TINGKAT 5B: JAJARAN MUSYRIF KAMAR (MENGALIR LANGSUNG TANPA PEMISAH HALAMAN PAKSA) */}
+          <div className="space-y-2.5 print:space-y-1 print:pt-1">
             <div className="rounded-xl border border-slate-300 bg-white overflow-hidden shadow-2xs">
-              <div className="bg-slate-800 text-white px-4 py-2 print:py-1.5 print:px-3 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs print:text-[9.5px] font-bold uppercase tracking-wider">
-                  <DoorOpen className="w-4 h-4 print:w-3.5 print:h-3.5 text-slate-300" />
+              <div className="bg-slate-800 text-white px-4 py-2 print-header-pad flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs print:text-[9px] font-bold uppercase tracking-wider">
+                  <DoorOpen className="w-4 h-4 print:w-3 print:h-3 text-slate-300" />
                   Jajaran Musyrif Kamar (Sesuai Data Kamar Santri)
                 </div>
-                <span className="text-[11px] print:text-[8.5px] font-bold bg-slate-700 px-2.5 py-0.5 rounded-full">
+                <span className="text-[11px] print:text-[8px] font-bold bg-slate-700 px-2.5 py-0.5 rounded-full">
                   {strukturBagan.musyrifAssignments.length} Musyrif
                 </span>
               </div>
 
-              <div className="p-3.5 print:p-2.5">
+              <div className="p-3.5 print:p-1.5">
                 {strukturBagan.musyrifAssignments.length === 0 ? (
                   <p className="text-center py-3 text-xs print:text-[9px] italic text-slate-400">
                     Belum ada Musyrif Kamar yang ditugaskan.
@@ -2513,24 +2492,24 @@ export default function DataPengurusPage() {
                     {strukturBagan.musyrifAssignments.map((m, idx) => (
                       <div
                         key={`${m.pengurus.id}-musyrif-${idx}`}
-                        className="flex items-center gap-2.5 p-2.5 print:py-1.5 print:px-2 rounded-lg border border-slate-200 bg-slate-50/70 print-avoid-break"
+                        className="flex items-center gap-2.5 p-2.5 print:py-1 print:px-1.5 rounded-lg border border-slate-200 bg-slate-50/70 print-avoid-break"
                       >
                         {m.pengurus.foto_url ? (
                           <img
                             src={m.pengurus.foto_url}
                             alt={m.pengurus.nama_lengkap}
-                            className="w-8 h-8 print:w-6 print:h-6 rounded-full object-cover border border-slate-200 shrink-0"
+                            className="w-8 h-8 print:w-5 print:h-5 rounded-full object-cover border border-slate-200 shrink-0"
                           />
                         ) : (
-                          <div className="w-8 h-8 print:w-6 print:h-6 rounded-full bg-slate-200 text-slate-800 font-bold text-[10px] print:text-[8px] flex items-center justify-center shrink-0">
+                          <div className="w-8 h-8 print:w-5 print:h-5 rounded-full bg-slate-200 text-slate-800 font-bold text-[10px] print:text-[7px] flex items-center justify-center shrink-0">
                             {getInitials(m.pengurus.nama_lengkap)}
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <span className="inline-block text-[9.5px] print:text-[8px] font-bold text-slate-700 bg-slate-200/80 px-1.5 py-0.5 rounded leading-none">
+                          <span className="inline-block text-[9.5px] print:text-[7px] font-bold text-slate-700 bg-slate-200/80 px-1.5 py-0.5 rounded leading-none">
                             {m.nama_jabatan}
                           </span>
-                          <p className="text-xs print:text-[10px] font-bold text-slate-800 truncate mt-0.5 leading-tight">
+                          <p className="text-xs print:text-[9px] font-bold text-slate-800 truncate mt-0.5 leading-tight">
                             {m.pengurus.nama_lengkap}
                           </p>
                         </div>
@@ -2587,7 +2566,7 @@ export default function DataPengurusPage() {
                   )}
                   <label className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition">
                     <Upload className="w-3.5 h-3.5" />
-                    {uploadingFoto ? "Mengunggah..." : "Upload Foto"}
+                    {uploadingFoto ? "Mengunggah..." : "Unggah Foto"}
                     <input
                       type="file"
                       accept="image/*"
@@ -2895,12 +2874,12 @@ export default function DataPengurusPage() {
                 <div className="space-y-2.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      TTD Digital Pengurus (Opsional - PNG)
+                      TTD Digital Pengurus (Opsional)
                     </label>
                     <div className="flex items-center gap-2">
                       <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-700 transition">
                         <Upload className="w-3.5 h-3.5" />
-                        {uploadingTtd ? "Mengunggah..." : "Upload TTD (.png)"}
+                        {uploadingTtd ? "Mengunggah..." : "Unggah TTD"}
                         <input
                           type="file"
                           accept="image/png,image/*"

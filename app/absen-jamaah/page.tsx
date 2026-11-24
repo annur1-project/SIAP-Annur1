@@ -154,8 +154,9 @@ const STATUS_META: Record<
   hadir: {
     code: 'H',
     label: 'Hadir',
-    buttonClass: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100',
-    textClass: 'text-emerald-700',
+    buttonClass:
+      'siap-soft-box border border-[var(--siap-primary-border)] hover:bg-[var(--siap-primary-soft-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--siap-primary)]',
+    textClass: 'siap-text-accent',
   },
   alpha: {
     code: 'A',
@@ -1235,7 +1236,7 @@ export default function AbsenJamaahPage() {
             />
           </div>
         ) : (
-          <div className="flex items-center gap-4 border-b-4 border-double border-emerald-900 pb-3 mb-4">
+          <div className="flex items-center gap-4 border-b-4 border-double border-slate-800 pb-3 mb-4">
             {pengaturan.logo_url && (
               <img
                 src={pengaturan.logo_url}
@@ -1246,7 +1247,7 @@ export default function AbsenJamaahPage() {
             )}
             <div className="flex-1 text-center">
               {pengaturan.nama_yayasan && (
-                <p className="text-[10px] font-bold tracking-widest uppercase text-emerald-900">
+                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-700">
                   {pengaturan.nama_yayasan}
                 </p>
               )}
@@ -1269,7 +1270,7 @@ export default function AbsenJamaahPage() {
           <p className="text-[11px] text-slate-600 mt-0.5">
             {rekapBounds.label} &bull; Cakupan Kamar: {selectedKamar === 'SEMUA' ? 'Semua Kamar' : `Kamar ${selectedKamar}`}
           </p>
-          <p className="text-[11px] font-bold text-emerald-900 mt-1">
+          <p className="text-[11px] font-bold text-slate-800 mt-1">
             Persentase Jamaah Seluruh Santri ({rekapPeriod.toUpperCase()}):{' '}
             {rekapGlobalStats.total > 0 ? `${rekapGlobalStats.pctHadir}%` : '-'} (
             {rekapGlobalStats.hadir}/{rekapGlobalStats.total} sesi &bull; Alpha:{' '}
@@ -1377,14 +1378,14 @@ export default function AbsenJamaahPage() {
             key={t.id}
             className={`pointer-events-auto bg-white border border-slate-200 border-l-4 rounded-2xl shadow-xl p-4 flex items-start gap-3 ${
               t.type === 'success'
-                ? 'border-l-emerald-700'
+                ? 'border-l-[var(--siap-primary)]'
                 : t.type === 'error'
                 ? 'border-l-rose-600'
                 : 'border-l-amber-600'
             }`}
           >
             {t.type === 'success' && (
-              <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+              <CheckCircle2 className="w-5 h-5 siap-text-accent shrink-0 mt-0.5" />
             )}
             {t.type === 'error' && (
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -1412,7 +1413,7 @@ export default function AbsenJamaahPage() {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <CheckSquare className="w-6 h-6 text-emerald-700 shrink-0" />
+              <CheckSquare className="w-6 h-6 siap-text-accent shrink-0" />
               Absen Sholat Jamaah 5 Waktu
             </h1>
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
@@ -1439,7 +1440,7 @@ export default function AbsenJamaahPage() {
             <button
               type="button"
               onClick={handleExportExcel}
-              className="min-h-[40px] px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+              className="min-h-[40px] px-3.5 py-2 siap-soft-box border hover:bg-[var(--siap-primary-soft-hover)] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4" />
               Ekspor Excel
@@ -1462,7 +1463,7 @@ export default function AbsenJamaahPage() {
             onClick={() => setActiveTab('input')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
               activeTab === 'input'
-                ? 'bg-emerald-800 text-white shadow-xs'
+                ? 'siap-btn-sidebar shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -1475,7 +1476,7 @@ export default function AbsenJamaahPage() {
             onClick={() => setActiveTab('laporan')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
               activeTab === 'laporan'
-                ? 'bg-emerald-800 text-white shadow-xs'
+                ? 'siap-btn-sidebar shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -1488,7 +1489,7 @@ export default function AbsenJamaahPage() {
             onClick={() => setActiveTab('rekap')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
               activeTab === 'rekap'
-                ? 'bg-emerald-800 text-white shadow-xs'
+                ? 'siap-btn-sidebar shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -1501,7 +1502,7 @@ export default function AbsenJamaahPage() {
             onClick={() => setActiveTab('alpha')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors ${
               activeTab === 'alpha'
-                ? 'bg-emerald-800 text-white shadow-xs'
+                ? 'siap-btn-sidebar shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
@@ -1571,7 +1572,7 @@ export default function AbsenJamaahPage() {
                   'Tempel dan klik Run di SQL Editor Supabase, lalu coba simpan presensi lagi.'
                 );
               }}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl flex items-center gap-1.5"
+              className="px-3.5 py-2 siap-btn-primary font-bold rounded-xl flex items-center gap-1.5"
             >
               <Copy className="w-3.5 h-3.5" />
               Salin Kode SQL
@@ -1590,12 +1591,12 @@ export default function AbsenJamaahPage() {
               placeholder="Cari Nama atau NIS..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full min-h-[40px] pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full min-h-[40px] pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white siap-ring-focus"
             />
           </div>
 
           <div className="lg:col-span-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 min-h-[40px] min-w-0 overflow-hidden">
-            <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
+            <Calendar className="w-4 h-4 siap-text-accent shrink-0" />
             <input
               type="date"
               value={selectedDate}
@@ -1607,7 +1608,7 @@ export default function AbsenJamaahPage() {
           <select
             value={selectedKamar}
             onChange={(e) => setSelectedKamar(e.target.value)}
-            className="lg:col-span-4 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl"
+            className="lg:col-span-4 min-h-[40px] bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 px-3 py-2 rounded-xl siap-ring-focus"
           >
             <option value="SEMUA">Semua Kamar ({santriList.length})</option>
             {kamarOptions.map((km) => (
@@ -1620,7 +1621,7 @@ export default function AbsenJamaahPage() {
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 pt-0.5">
           <span className="font-semibold text-slate-600">Keterangan Status:</span>
-          <span><strong className="text-emerald-800">H</strong> Hadir</span>
+          <span><strong className="siap-text-accent">H</strong> Hadir</span>
           <span aria-hidden="true">&middot;</span>
           <span><strong className="text-rose-700">A</strong> Alpha</span>
           <span aria-hidden="true">&middot;</span>
@@ -1646,9 +1647,9 @@ export default function AbsenJamaahPage() {
                   {dailySummary.totalSantri}
                 </strong>
               </div>
-              <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200">
-                <span className="text-[11px] text-emerald-700 block">Hadir (H)</span>
-                <strong className="text-lg font-bold text-emerald-900 tabular-nums">
+              <div className="p-2.5 siap-soft-box rounded-xl border">
+                <span className="text-[11px] opacity-85 block">Hadir (H)</span>
+                <strong className="text-lg font-bold tabular-nums">
                   {dailySummary.hadir}
                 </strong>
               </div>
@@ -1675,8 +1676,8 @@ export default function AbsenJamaahPage() {
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0">
               <div className="text-xs text-slate-600 mr-1 w-full sm:w-auto">
                 {savedCountInScope > 0 ? (
-                  <span className="text-emerald-800 font-semibold flex items-center gap-1.5 whitespace-nowrap">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="siap-text-accent font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 className="w-4 h-4 siap-text-accent shrink-0" />
                     Tercatat ({savedCountInScope}/{filteredSantri.length})
                   </span>
                 ) : (
@@ -1702,7 +1703,7 @@ export default function AbsenJamaahPage() {
                     type="button"
                     disabled={saving || loading || filteredSantri.length === 0}
                     onClick={handleSaveDailyFiveWaktu}
-                    className="flex-1 sm:flex-none min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
+                    className="flex-1 sm:flex-none min-h-[40px] px-4 py-2 siap-btn-primary disabled:bg-slate-300 disabled:text-slate-100 text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 transition-colors"
                   >
                     <Save className="w-4 h-4" />
                     {saving ? 'Menyimpan...' : 'Simpan Absen'}
@@ -1736,8 +1737,10 @@ export default function AbsenJamaahPage() {
                   return (
                     <div
                       key={s.id}
-                      className={`p-3.5 space-y-2.5 text-xs ${
-                        hasNonHadir ? 'bg-amber-50/40' : ''
+                      className={`p-3.5 space-y-2.5 text-xs border-l-2 ${
+                        hasNonHadir
+                          ? 'bg-amber-50/40 border-l-amber-400'
+                          : 'border-l-[var(--siap-primary)]'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -1755,7 +1758,7 @@ export default function AbsenJamaahPage() {
                             Ada Ketidakhadiran
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-semibold shrink-0 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md siap-soft-box border text-[10px] font-semibold shrink-0 whitespace-nowrap">
                             Hadir 5 Waktu
                           </span>
                         )}
@@ -1789,7 +1792,7 @@ export default function AbsenJamaahPage() {
                           placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
                           value={entry.alasan}
                           onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
-                          className="w-full min-h-[38px] px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-50 disabled:text-slate-600"
+                          className="w-full min-h-[38px] px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl siap-ring-focus disabled:bg-slate-50 disabled:text-slate-600"
                         />
                       )}
                     </div>
@@ -1849,7 +1852,7 @@ export default function AbsenJamaahPage() {
                           </td>
                           <td className="py-3 px-3.5">
                             <div className="font-semibold text-slate-900">{s.nama_lengkap}</div>
-                            <div className="font-mono text-[11px] text-emerald-800 tabular-nums">
+                            <div className="font-mono text-[11px] siap-text-accent tabular-nums">
                               {s.nis}
                             </div>
                           </td>
@@ -1887,7 +1890,7 @@ export default function AbsenJamaahPage() {
                                 placeholder="Tulis alasan (misal sakit demam / izin pulang)..."
                                 value={entry.alasan}
                                 onChange={(e) => handleChangeAlasan(s.id, e.target.value)}
-                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-50 disabled:text-slate-600"
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl siap-ring-focus disabled:bg-slate-50 disabled:text-slate-600"
                               />
                             ) : (
                               <span className="text-[11px] text-slate-400">Hadir 5 waktu</span>
@@ -1929,9 +1932,9 @@ export default function AbsenJamaahPage() {
                     key={f}
                     type="button"
                     onClick={() => setTakzirFilter(f)}
-                    className={`px-3 py-1.5 rounded-lg font-bold capitalize whitespace-nowrap shrink-0 transition-colors ${
+                      className={`px-3 py-1.5 rounded-lg font-bold capitalize whitespace-nowrap shrink-0 transition-colors ${
                       takzirFilter === f
-                        ? 'bg-emerald-800 text-white'
+                        ? 'siap-btn-sidebar'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -1977,7 +1980,7 @@ export default function AbsenJamaahPage() {
                         }
                         className={`w-full min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition-colors border ${
                           item.sudahTakzir
-                            ? 'bg-emerald-700 text-white border-emerald-700'
+                            ? 'siap-btn-primary border-[var(--siap-primary)]'
                             : 'bg-rose-50 text-rose-700 border-rose-300'
                         }`}
                       >
@@ -1991,7 +1994,7 @@ export default function AbsenJamaahPage() {
                       <span
                         className={`inline-flex items-center justify-center w-full min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold border ${
                           item.sudahTakzir
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            ? 'siap-soft-box'
                             : 'bg-rose-50 text-rose-700 border-rose-200'
                         }`}
                       >
@@ -2049,7 +2052,7 @@ export default function AbsenJamaahPage() {
                               }
                               className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors border ${
                                 item.sudahTakzir
-                                  ? 'bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800'
+                                  ? 'siap-btn-primary border-[var(--siap-primary)]'
                                   : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
                               }`}
                             >
@@ -2063,7 +2066,7 @@ export default function AbsenJamaahPage() {
                             <span
                               className={`inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold border ${
                                 item.sudahTakzir
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  ? 'siap-soft-box'
                                   : 'bg-rose-50 text-rose-700 border-rose-200'
                               }`}
                             >
@@ -2084,7 +2087,7 @@ export default function AbsenJamaahPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                  <MessageCircle className="w-4 h-4 text-emerald-700" />
+                  <MessageCircle className="w-4 h-4 siap-text-accent" />
                   Laporan Harian Grup WA Pengurus
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -2111,7 +2114,7 @@ export default function AbsenJamaahPage() {
                     'Format laporan harian seluruh kamar sudah disalin dan siap ditempel ke grup WA pengurus.'
                   );
                 }}
-                className="flex-1 min-h-[40px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
+                className="flex-1 min-h-[40px] px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
               >
                 <Copy className="w-4 h-4" />
                 Salin Teks Laporan WA
@@ -2146,7 +2149,7 @@ export default function AbsenJamaahPage() {
                     onClick={() => setRekapPeriod(p)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize whitespace-nowrap shrink-0 transition-colors ${
                       rekapPeriod === p
-                        ? 'bg-emerald-800 text-white shadow-xs'
+                        ? 'siap-btn-sidebar shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -2185,7 +2188,7 @@ export default function AbsenJamaahPage() {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
               <span>{rekapBounds.label}</span>
               <span aria-hidden="true">&middot;</span>
-              <span className="tabular-nums font-bold text-emerald-800">
+              <span className="tabular-nums font-bold siap-text-accent">
                 Hadir (Filter): {rekapTotals.hadir}
               </span>
               <span className="tabular-nums font-bold text-rose-700">
@@ -2218,21 +2221,21 @@ export default function AbsenJamaahPage() {
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="col-span-2 lg:col-span-1 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <span className="text-[11px] font-semibold text-emerald-800 block">
+              <div className="col-span-2 lg:col-span-1 p-3 siap-soft-box border rounded-xl">
+                <span className="text-[11px] font-semibold block">
                   Persentase Jamaah
                 </span>
-                <strong className="text-2xl font-extrabold text-emerald-900 tabular-nums block mt-0.5">
+                <strong className="text-2xl font-extrabold tabular-nums block mt-0.5">
                   {rekapGlobalStats.total > 0 ? `${rekapGlobalStats.pctHadir}%` : '0%'}
                 </strong>
-                <span className="text-[11px] text-emerald-700 tabular-nums">
+                <span className="text-[11px] opacity-85 tabular-nums">
                   {rekapGlobalStats.hadir}/{rekapGlobalStats.total} sesi hadir
                 </span>
               </div>
 
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
                 <span className="text-[11px] font-semibold text-slate-600 block">Hadir (H)</span>
-                <strong className="text-xl font-bold text-emerald-800 tabular-nums block mt-0.5">
+                <strong className="text-xl font-bold siap-text-accent tabular-nums block mt-0.5">
                   {rekapGlobalStats.hadir}
                 </strong>
                 <span className="text-[11px] text-slate-500 tabular-nums">
@@ -2301,7 +2304,7 @@ export default function AbsenJamaahPage() {
                               row.total === 0
                                 ? 'text-slate-400'
                                 : row.pct >= 90
-                                ? 'text-emerald-700'
+                                ? 'siap-text-accent'
                                 : row.pct >= 75
                                 ? 'text-amber-700'
                                 : 'text-rose-700'
@@ -2322,7 +2325,7 @@ export default function AbsenJamaahPage() {
                           <span className="text-slate-500 block text-[10px]">Sesi</span>
                           <strong>{row.total}</strong>
                         </div>
-                        <div className="py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800">
+                        <div className="py-1.5 rounded-lg siap-soft-box border">
                           <span className="block text-[10px]">Hadir</span>
                           <strong>{row.hadir}</strong>
                         </div>
@@ -2361,7 +2364,7 @@ export default function AbsenJamaahPage() {
                       </strong>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 text-center tabular-nums text-[11px]">
-                      <div className="py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800">
+                      <div className="py-1.5 rounded-lg siap-soft-box border">
                         <span className="block text-[10px]">Hadir</span>
                         <strong>{row.hadir}</strong>
                       </div>
@@ -2414,7 +2417,7 @@ export default function AbsenJamaahPage() {
                           <td className="py-3 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="py-3 px-3 font-mono font-bold text-emerald-800 tabular-nums whitespace-nowrap">
+                          <td className="py-3 px-3 font-mono font-bold siap-text-accent tabular-nums whitespace-nowrap">
                             {row.santri.nis}
                           </td>
                           <td className="py-3 px-3.5 font-semibold text-slate-900">
@@ -2422,7 +2425,7 @@ export default function AbsenJamaahPage() {
                           </td>
                           <td className="py-3 px-3 text-slate-600 whitespace-nowrap">{row.santri.kamar}</td>
                           <td className="py-3 px-3 text-right font-mono tabular-nums">{row.total}</td>
-                          <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-700 tabular-nums">
+                          <td className="py-3 px-3 text-right font-mono font-semibold siap-text-accent tabular-nums">
                             {row.hadir}
                           </td>
                           <td className="py-3 px-3 text-right font-mono font-bold text-rose-700 tabular-nums">
@@ -2441,7 +2444,7 @@ export default function AbsenJamaahPage() {
                             {row.total === 0 ? (
                               <span className="text-slate-400">Belum ada sesi</span>
                             ) : row.pct >= 90 ? (
-                              <span className="text-emerald-700 font-semibold">Baik</span>
+                              <span className="siap-text-accent font-semibold">Baik</span>
                             ) : row.pct >= 75 ? (
                               <span className="text-amber-700 font-semibold">Perlu Pantau</span>
                             ) : (
@@ -2484,7 +2487,7 @@ export default function AbsenJamaahPage() {
                           <td className="py-3 px-3.5 font-bold text-slate-900 whitespace-nowrap">Kamar {row.kamar}</td>
                           <td className="py-3 px-3.5 text-right font-mono tabular-nums">{row.jumlahSantri}</td>
                           <td className="py-3 px-3.5 text-right font-mono tabular-nums">{row.total}</td>
-                          <td className="py-3 px-3.5 text-right font-mono font-semibold text-emerald-700 tabular-nums">
+                          <td className="py-3 px-3.5 text-right font-mono font-semibold siap-text-accent tabular-nums">
                             {row.hadir}
                           </td>
                           <td className="py-3 px-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">
@@ -2604,7 +2607,7 @@ export default function AbsenJamaahPage() {
                             href={`https://wa.me/${wali.wa}?text=${encodeURIComponent(msg)}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="min-h-[40px] px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold flex items-center justify-center gap-1.5"
+                            className="min-h-[40px] px-3 py-2 siap-btn-primary rounded-xl font-bold flex items-center justify-center gap-1.5"
                           >
                             <MessageCircle className="w-3.5 h-3.5" />
                             Kirim WA
@@ -2647,7 +2650,7 @@ export default function AbsenJamaahPage() {
                           <td className="py-3.5 px-3 text-center font-mono text-slate-400 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="py-3.5 px-3 font-mono font-bold text-emerald-800 tabular-nums whitespace-nowrap">
+                          <td className="py-3.5 px-3 font-mono font-bold siap-text-accent tabular-nums whitespace-nowrap">
                             {item.santri.nis}
                           </td>
                           <td className="py-3.5 px-3.5 font-semibold text-slate-900">
@@ -2683,7 +2686,7 @@ export default function AbsenJamaahPage() {
                                   href={`https://wa.me/${wali.wa}?text=${encodeURIComponent(msg)}`}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold flex items-center gap-1 whitespace-nowrap shrink-0"
+                                  className="px-2.5 py-1.5 siap-btn-primary rounded-lg font-bold flex items-center gap-1 whitespace-nowrap shrink-0"
                                 >
                                   <MessageCircle className="w-3.5 h-3.5" />
                                   Kirim WA

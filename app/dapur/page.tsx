@@ -1826,14 +1826,14 @@ export default function DapurPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Navigasi Tanggal Aktif */}
-          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-1">
+        <div className="w-full lg:w-auto flex flex-col gap-2">
+          {/* Baris 1: Navigasi Tanggal Aktif melebar penuh */}
+          <div className="w-full flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-1 gap-1">
             <button
               type="button"
               onClick={() => selectedDate && setSelectedDate(addDaysIso(selectedDate, -1))}
               aria-label="Hari sebelumnya"
-              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white text-slate-600"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white text-slate-600 shrink-0"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -1845,13 +1845,13 @@ export default function DapurPage() {
                 setSelectedDate(v);
                 if (v) setSelectedMonth(v.slice(0, 7));
               }}
-              className="bg-transparent text-xs font-bold text-slate-800 px-1.5 focus:outline-none tabular-nums"
+              className="flex-1 min-w-0 bg-transparent text-xs font-bold text-slate-800 px-1.5 text-center focus:outline-none tabular-nums"
             />
             <button
               type="button"
               onClick={() => selectedDate && setSelectedDate(addDaysIso(selectedDate, 1))}
               aria-label="Hari berikutnya"
-              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white text-slate-600"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white text-slate-600 shrink-0"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1869,24 +1869,26 @@ export default function DapurPage() {
             )}
           </div>
 
-          {/* Filter Bulan Analitik */}
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            aria-label="Periode bulan analitik"
-            className="min-w-[185px] sm:min-w-[205px] w-full sm:w-auto min-h-[40px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 tabular-nums"
-          />
+          {/* Baris 2: Dropdown Bulan & Muat Ulang berdampingan */}
+          <div className="grid grid-cols-2 gap-2 w-full">
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              aria-label="Periode bulan analitik"
+              className="w-full min-w-0 min-h-[40px] px-2.5 sm:px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 tabular-nums"
+            />
 
-          <button
-            type="button"
-            onClick={loadAllData}
-            disabled={loading}
-            className="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Muat Ulang
-          </button>
+            <button
+              type="button"
+              onClick={loadAllData}
+              disabled={loading}
+              className="w-full min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Muat Ulang
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2376,32 +2378,34 @@ export default function DapurPage() {
                   Rincian menu Pagi (matang ≤ 05:45) dan Sore (matang ≤ 16:45) beserta estimasi porsi.
                 </p>
               </div>
-              <div className="print:hidden flex flex-wrap items-center gap-2">
-                {canEditDapur && (
+              <div className="print:hidden space-y-2 w-full md:w-auto md:min-w-[320px]">
+                <div className={`grid gap-2 w-full ${canEditDapur ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {canEditDapur && (
+                    <button
+                      type="button"
+                      onClick={handleCopyLastWeekMenu}
+                      disabled={saving}
+                      className="w-full min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Copy className="w-3.5 h-3.5 shrink-0" />
+                      Salin Minggu Lalu
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={handleCopyLastWeekMenu}
-                    disabled={saving}
-                    className="min-h-[38px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                    onClick={handleCopyMenuWa}
+                    className="w-full min-h-[38px] px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
                   >
-                    <Copy className="w-3.5 h-3.5" />
-                    Salin Minggu Lalu
+                    <Copy className="w-3.5 h-3.5 shrink-0" />
+                    Salin WA Mingguan
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleCopyMenuWa}
-                  className="min-h-[38px] px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  Salin WA Mingguan
-                </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="min-h-[38px] px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  className="w-full min-h-[38px] px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
-                  <Printer className="w-3.5 h-3.5" />
+                  <Printer className="w-3.5 h-3.5 shrink-0" />
                   Cetak Jadwal
                 </button>
               </div>
@@ -3271,31 +3275,33 @@ export default function DapurPage() {
               </div>
 
               {canEditDapur && (
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-2 w-full">
                   <button
                     type="button"
                     onClick={() => openBuku1Modal('jatah_harian')}
-                    className="flex-1 min-h-[44px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    className="w-full min-h-[44px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
                   >
                     <Plus className="w-4 h-4 shrink-0" />
                     Terima Jatah Harian
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openBuku1Modal('belanja_pagi')}
-                    className="min-h-[44px] px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
-                  >
-                    <Sun className="w-3.5 h-3.5 shrink-0" />
-                    Belanja Pagi
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openBuku1Modal('belanja_sore')}
-                    className="min-h-[44px] px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
-                  >
-                    <Sunset className="w-3.5 h-3.5 shrink-0" />
-                    Belanja Sore
-                  </button>
+                  <div className="grid grid-cols-2 gap-2 w-full">
+                    <button
+                      type="button"
+                      onClick={() => openBuku1Modal('belanja_pagi')}
+                      className="w-full min-h-[44px] px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Sun className="w-3.5 h-3.5 shrink-0" />
+                      Belanja Pagi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openBuku1Modal('belanja_sore')}
+                      className="w-full min-h-[44px] px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Sunset className="w-3.5 h-3.5 shrink-0" />
+                      Belanja Sore
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

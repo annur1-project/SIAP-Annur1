@@ -347,13 +347,13 @@ export function buildLaundryDailyWaText(
 ): string {
   const hariLabel = formatHariTanggalIndo(tanggal);
   if (rows.length === 0) {
-    return `*LAPORAN SIE LAUNDRY e-PONDOK AN-NUR 1*\nTanggal: ${hariLabel}\nBelum ada setoran laundry tercatat.`;
+    return `*LAPORAN SIE LAUNDRY PONDOK PESANTREN AN-NUR 1*\nTanggal: ${hariLabel}\nBelum ada setoran laundry tercatat.`;
   }
   const totalPcs = rows.reduce((sum, r) => sum + Number(r.jumlah_potong || 0), 0);
   const selesaiCount = rows.filter((r) => r.status === 'selesai').length;
 
   const lines = [
-    `*LAPORAN SIE LAUNDRY e-PONDOK AN-NUR 1*`,
+    `*LAPORAN SIE LAUNDRY PONDOK PESANTREN AN-NUR 1*`,
     `Hari/Tgl: ${hariLabel}`,
     `Total: *${rows.length} kamar* (${totalPcs} potong) · Selesai: ${selesaiCount}/${rows.length}`,
     ``,

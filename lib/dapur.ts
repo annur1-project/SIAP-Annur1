@@ -938,7 +938,7 @@ export function buildAnalitikPetugasWaText(
   rekap: PetugasRekapItem[]
 ): string {
   const lines: string[] = [
-    `*LAPORAN KEDISIPLINAN & DAPUR e-PONDOK AN-NUR 1*`,
+    `*LAPORAN KEDISIPLINAN & DAPUR PONDOK PESANTREN AN-NUR 1*`,
     `Periode: ${periodeLabel}`,
     ``,
     `*1. KETEPATAN WAKTU MEMASAK*`,

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Image as ImageIcon, Palette, RefreshCw, ShieldCheck, Sliders, Upload } from 'lucide-react';
+import { CheckCircle2, Download, Image as ImageIcon, Palette, RefreshCw, ShieldCheck, Sliders, Upload } from 'lucide-react';
 import { TransparencyBanner, useAuth } from '@/lib/auth';
 
 interface GeneratedVariant {
@@ -25,6 +25,10 @@ export default function PwaIconGeneratorPage() {
 
   const [mainSrc, setMainSrc] = useState<string>('/icons/logo-e1.png');
   const [monoSrc, setMonoSrc] = useState<string>('/icons/icon-monochrome-512.png');
+  const [mainLoaded, setMainLoaded] = useState<boolean>(false);
+  const [monoLoaded, setMonoLoaded] = useState<boolean>(false);
+  const [mainFileName, setMainFileName] = useState<string>('');
+  const [monoFileName, setMonoFileName] = useState<string>('');
   const [bgColor, setBgColor] = useState<string>('#065f46');
   const [safeScale, setSafeScale] = useState<number>(76);
   const [whiteThreshold, setWhiteThreshold] = useState<number>(220);
@@ -39,7 +43,9 @@ export default function PwaIconGeneratorPage() {
   const loadImage = (src: string): Promise<HTMLImageElement> =>
     new Promise((resolve, reject) => {
       const img = new window.Image();
-      img.crossOrigin = 'anonymous';
+      if (!src.startsWith('data:') && !src.startsWith('blob:')) {
+        img.crossOrigin = 'anonymous';
+      }
       img.onload = () => resolve(img);
       img.onerror = reject;
       img.src = src;
@@ -49,7 +55,16 @@ export default function PwaIconGeneratorPage() {
     setProcessing(true);
     try {
       const mainImg = await loadImage(mainSrc);
-      const monoImg = await loadImage(monoSrc || mainSrc);
+      setMainLoaded(true);
+      let monoImg = mainImg;
+      if (monoSrc && monoSrc !== mainSrc) {
+        try {
+          monoImg = await loadImage(monoSrc);
+          setMonoLoaded(true);
+        } catch {
+          monoImg = mainImg;
+        }
+      }
 
       const renderStandard = (size: number, scalePct: number, withSolidBg: boolean): string => {
         const canvas = document.createElement('canvas');
@@ -150,7 +165,10 @@ export default function PwaIconGeneratorPage() {
       ];
       setVariants(next);
     } catch {
-      // ignore load errors
+      if (!mainSrc.startsWith('data:')) {
+        setMainLoaded(false);
+      }
+      setVariants([]);
     } finally {
       setProcessing(false);
     }
@@ -163,16 +181,28 @@ export default function PwaIconGeneratorPage() {
     return () => clearTimeout(timer);
   }, [renderCanvasVariants]);
 
-  const handleFileRead = (file: File | undefined, target: 'main' | 'mono') => {
+  const handleFileRead = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    target: 'main' | 'mono'
+  ) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        if (target === 'main') setMainSrc(reader.result);
-        else setMonoSrc(reader.result);
+        if (target === 'main') {
+          setMainSrc(reader.result);
+          setMainFileName(file.name);
+          setMainLoaded(true);
+        } else {
+          setMonoSrc(reader.result);
+          setMonoFileName(file.name);
+          setMonoLoaded(true);
+        }
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const downloadDataUrl = (filename: string, dataUrl: string) => {
@@ -208,11 +238,11 @@ export default function PwaIconGeneratorPage() {
         <button
           type="button"
           onClick={handleDownloadAll}
-          disabled={variants.length === 0 || processing}
+          disabled={(!mainLoaded && variants.length === 0) || variants.length === 0 || processing}
           className="inline-flex items-center gap-2 rounded-xl siap-btn-primary px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 min-h-[44px] whitespace-nowrap"
         >
           <Download className="w-4 h-4" />
-          Unduh Semua Paket ({variants.length} File)
+          Unduh Semua Paket ({variants.length || 6} File)
         </button>
       </div>
 
@@ -230,18 +260,41 @@ export default function PwaIconGeneratorPage() {
               <input
                 ref={mainInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.png,.jpg,.jpeg,.webp"
                 className="hidden"
-                onChange={(e) => handleFileRead(e.target.files?.[0], 'main')}
+                onChange={(e) => handleFileRead(e, 'main')}
               />
               <button
                 type="button"
                 onClick={() => mainInputRef.current?.click()}
                 disabled={isReadOnly}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-700 disabled:opacity-50 min-h-[44px]"
+                className="w-full rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-700 disabled:opacity-50 min-h-[44px] flex items-center gap-3 text-left transition-colors"
               >
-                <ImageIcon className="w-4 h-4" />
-                Unggah Logo Utama Baru
+                {mainLoaded && mainSrc ? (
+                  <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={mainSrc}
+                      alt="Pratinjau Logo Utama"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0">
+                    <ImageIcon className="w-4 h-4 text-slate-500" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    {mainFileName ? mainFileName : 'Unggah Logo Utama Baru'}
+                  </span>
+                  {mainLoaded && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold siap-text-accent mt-0.5">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                      Logo berhasil dimuat
+                    </span>
+                  )}
+                </div>
               </button>
             </div>
 
@@ -250,18 +303,41 @@ export default function PwaIconGeneratorPage() {
               <input
                 ref={monoInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.png,.jpg,.jpeg,.webp"
                 className="hidden"
-                onChange={(e) => handleFileRead(e.target.files?.[0], 'mono')}
+                onChange={(e) => handleFileRead(e, 'mono')}
               />
               <button
                 type="button"
                 onClick={() => monoInputRef.current?.click()}
                 disabled={isReadOnly}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-700 disabled:opacity-50 min-h-[44px]"
+                className="w-full rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-700 disabled:opacity-50 min-h-[44px] flex items-center gap-3 text-left transition-colors"
               >
-                <ImageIcon className="w-4 h-4" />
-                Unggah Siluet Monokrom
+                {monoLoaded && monoSrc ? (
+                  <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={monoSrc}
+                      alt="Pratinjau Siluet Monokrom"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0">
+                    <ImageIcon className="w-4 h-4 text-slate-500" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    {monoFileName ? monoFileName : 'Unggah Siluet Monokrom'}
+                  </span>
+                  {monoLoaded && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold siap-text-accent mt-0.5">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                      Logo berhasil dimuat
+                    </span>
+                  )}
+                </div>
               </button>
             </div>
           </div>

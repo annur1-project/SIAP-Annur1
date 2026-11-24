@@ -7,10 +7,10 @@ import {
   CheckCircle2,
   ClipboardCopy,
   Database,
+  Download,
   ExternalLink,
   Eye,
   MessageCircle,
-  Printer,
   RefreshCw,
   Search,
   Sparkles,
@@ -86,6 +86,7 @@ export default function PendaftaranInternalPage() {
     no_telepon: DEFAULT_PENGATURAN_FORM.no_telepon,
     email: '',
     logo_url: '',
+    logo_watermark_url: '',
     stempel_url: '',
     nama_bendahara: DEFAULT_PENGATURAN_FORM.nama_bendahara,
     ttd_bendahara_url: '',
@@ -138,7 +139,7 @@ export default function PendaftaranInternalPage() {
   const [offCatatanPengurus, setOffCatatanPengurus] = useState('');
   const [offLangsungVerifikasi, setOffLangsungVerifikasi] = useState(true);
 
-  // Print Kuitansi Modal (21x10 cm)
+  // Nota Kuitansi DP PSB Modal (21x10 cm -> Unduh Gambar PNG)
   const [kuitansiPreview, setKuitansiPreview] = useState<{
     record: PsbPendaftaranRecord;
     nomor: string;
@@ -146,6 +147,7 @@ export default function PendaftaranInternalPage() {
     metode: string;
     tanggal: string;
   } | null>(null);
+  const [downloadingNotaPng, setDownloadingNotaPng] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -176,6 +178,7 @@ export default function PendaftaranInternalPage() {
       no_telepon: String(row.no_telepon || DEFAULT_PENGATURAN_FORM.no_telepon),
       email: String(row.email || ''),
       logo_url: String(row.logo_url || ''),
+      logo_watermark_url: String(row.logo_watermark_url || ''),
       stempel_url: String(row.stempel_url || ''),
       nama_bendahara: String(row.nama_bendahara || DEFAULT_PENGATURAN_FORM.nama_bendahara),
       ttd_bendahara_url: String(row.ttd_bendahara_url || ''),
@@ -325,10 +328,259 @@ export default function PendaftaranInternalPage() {
       `Jalur Bayar : ${jalur}\n` +
       `DP Diterima : ${formatRupiah(dpMasuk)}\n` +
       `Total Biaya : ${formatRupiah(totalBiaya)}\n` +
-      `Sisa Kekurangan : ${sisaKekurangan > 0 ? `${formatRupiah(sisaKekurangan)} (dicicil/dilunasi di menu Keuangan)` : 'LUNAS'}\n` +
+      `Sisa Kekurangan : ${
+        sisaKekurangan > 0
+          ? `${formatRupiah(sisaKekurangan)} (dapat dicicil atau dilunasi melalui Kantor Bendahara Pondok / transfer rekening resmi pesantren)`
+          : 'LUNAS'
+      }\n` +
       `--------------------------------\n` +
       `Terima kasih. Mohon simpan pesan ini sebagai bukti pembayaran DP yang sah.`;
     return `https://wa.me/${toWaMeDigits(rec.no_wa_wali)}?text=${encodeURIComponent(msg)}`;
+  };
+
+  const handleDownloadNotaDpPng = async (preview: {
+    record: PsbPendaftaranRecord;
+    nomor: string;
+    nominal: number;
+    metode: string;
+    tanggal: string;
+  }) => {
+    setDownloadingNotaPng(true);
+    try {
+      const width = 1680; // 210mm * 8px/mm
+      const height = 800; // 100mm * 8px/mm
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Browser tidak mendukung pembuatan gambar');
+
+      // Background putih bersih
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      // Bingkai luar 21 x 10 cm
+      ctx.strokeStyle = '#065f46';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(20, 20, width - 40, height - 40);
+
+      const loadImg = (url?: string): Promise<HTMLImageElement | null> =>
+        new Promise((resolve) => {
+          if (!url) return resolve(null);
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => resolve(null);
+          img.src = url;
+        });
+
+      const [logoKopImg, watermarkImg, stempelImg, ttdBendaharaImg] = await Promise.all([
+        loadImg(pengaturan.logo_url),
+        loadImg(pengaturan.logo_watermark_url || pengaturan.logo_url),
+        loadImg(pengaturan.stempel_url),
+        loadImg(pengaturan.ttd_bendahara_url),
+      ]);
+
+      // Watermark logo di tengah
+      if (watermarkImg) {
+        ctx.save();
+        ctx.globalAlpha = 0.08;
+        ctx.globalCompositeOperation = 'multiply';
+        const wmSize = 420;
+        const aspect = watermarkImg.width / Math.max(1, watermarkImg.height);
+        const wmW = aspect >= 1 ? wmSize : wmSize * aspect;
+        const wmH = aspect >= 1 ? wmSize / aspect : wmSize;
+        ctx.drawImage(watermarkImg, (width - wmW) / 2, (height - wmH) / 2 + 20, wmW, wmH);
+        ctx.restore();
+      }
+
+      // Header Kop Kiri
+      let textStartX = 48;
+      if (logoKopImg) {
+        ctx.drawImage(logoKopImg, 44, 34, 88, 88);
+        textStartX = 148;
+      }
+
+      ctx.fillStyle = '#064e3b';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(pengaturan.nama_pesantren.toUpperCase(), textStartX, 68);
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '18px sans-serif';
+      ctx.fillText(pengaturan.alamat_lengkap, textStartX, 96);
+      ctx.fillText(
+        `Telp/WA: ${pengaturan.no_telepon}${pengaturan.email ? `  |  Email: ${pengaturan.email}` : ''}`,
+        textStartX,
+        120
+      );
+
+      // Badge Kanan Atas
+      ctx.fillStyle = '#065f46';
+      ctx.fillRect(width - 450, 36, 406, 44);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 21px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('NOTA KUITANSI DP PSB', width - 247, 65);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText(preview.nomor, width - 247, 105);
+      ctx.fillStyle = '#475569';
+      ctx.font = '16px sans-serif';
+      ctx.fillText(`Tanggal: ${preview.tanggal}`, width - 247, 127);
+      ctx.textAlign = 'left';
+
+      // Garis Kop
+      ctx.strokeStyle = '#065f46';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(40, 142);
+      ctx.lineTo(width - 40, 142);
+      ctx.stroke();
+
+      const rec = preview.record;
+      const totalBiaya = Number(rec.total_biaya_akhir || 0);
+      const dpBayar = Number(preview.nominal || 0);
+      const sisaTagihan = Math.max(0, totalBiaya - dpBayar);
+      const jalurLabel =
+        preview.metode === 'tunai'
+          ? 'DP Pendaftaran Offline (Tunai)'
+          : 'DP Pendaftaran Online (Transfer)';
+
+      // Kotak Data Calon Santri & Pembayaran
+      ctx.fillStyle = 'rgba(248, 250, 252, 0.88)';
+      ctx.fillRect(44, 166, width - 88, 224);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(44, 166, width - 88, 224);
+
+      const drawPair = (label: string, val: string, xLabel: number, xVal: number, y: number, boldVal = true) => {
+        ctx.fillStyle = '#475569';
+        ctx.font = '19px sans-serif';
+        ctx.fillText(label, xLabel, y);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = boldVal ? 'bold 20px sans-serif' : '20px sans-serif';
+        ctx.fillText(val, xVal, y);
+      };
+
+      drawPair('No. Registrasi :', rec.no_registrasi, 72, 260, 214);
+      drawPair('Calon Santri :', rec.nama_lengkap, 72, 260, 262);
+      drawPair('Nama Wali :', `${rec.nama_wali} (${rec.no_wa_wali})`, 72, 260, 310, false);
+      drawPair(
+        'Asal Daerah :',
+        [rec.desa, rec.kecamatan, rec.kabupaten].filter(Boolean).join(', ') || '-',
+        72,
+        260,
+        358,
+        false
+      );
+
+      drawPair('Paket Program :', `${rec.paket.toUpperCase()}${rec.dapat_promo_pangkal ? ' (Free Uang Pangkal)' : ''}`, 880, 1080, 214);
+      drawPair('Jalur Pembayaran :', jalurLabel, 880, 1080, 262);
+      drawPair('Total Biaya Paket :', formatRupiah(totalBiaya), 880, 1080, 310);
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '19px sans-serif';
+      ctx.fillText('Sisa Kekurangan :', 880, 358);
+      ctx.fillStyle = sisaTagihan > 0 ? '#92400e' : '#047857';
+      ctx.font = 'bold 21px sans-serif';
+      ctx.fillText(sisaTagihan > 0 ? formatRupiah(sisaTagihan) : 'LUNAS', 1080, 358);
+
+      // Kotak Nominal DP Diterima
+      ctx.fillStyle = '#ecfdf5';
+      ctx.fillRect(44, 422, 980, 118);
+      ctx.strokeStyle = '#059669';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(44, 422, 980, 118);
+
+      ctx.fillStyle = '#047857';
+      ctx.font = 'bold 19px sans-serif';
+      ctx.fillText('NOMINAL DP DITERIMA', 68, 460);
+
+      ctx.fillStyle = '#064e3b';
+      ctx.font = 'bold 38px sans-serif';
+      ctx.fillText(formatRupiah(dpBayar), 68, 514);
+
+      // Keterangan Sisa Kekurangan di bawah box nominal
+      ctx.fillStyle = '#334155';
+      ctx.font = '18px sans-serif';
+      if (sisaTagihan > 0) {
+        ctx.fillText(
+          `Sisa kekurangan sebesar ${formatRupiah(sisaTagihan)}`,
+          48,
+          590
+        );
+        ctx.fillText(
+          '(dapat dicicil atau dilunasi melalui Kantor Bendahara Pondok / transfer rekening resmi pesantren).',
+          48,
+          620
+        );
+      } else {
+        ctx.fillText(
+          'Status Pembayaran Pendaftaran: LUNAS. Simpan bukti ini sebagai tanda terima yang sah.',
+          48,
+          594
+        );
+      }
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'italic 16px sans-serif';
+      ctx.fillText(
+        'Catatan: Harap simpan gambar nota kuitansi ini sebagai bukti pembayaran resmi pondok.',
+        48,
+        724
+      );
+
+      // Blok TTD & Stempel Kanan Bawah
+      const signCenterX = width - 255;
+      ctx.fillStyle = '#334155';
+      ctx.font = '19px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Bululawang, ${preview.tanggal}`, signCenterX, 456);
+      ctx.fillText('Bendahara / Penerima,', signCenterX, 484);
+
+      if (stempelImg) {
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(stempelImg, signCenterX - 115, 505, 115, 115);
+        ctx.restore();
+      }
+      if (ttdBendaharaImg) {
+        ctx.drawImage(ttdBendaharaImg, signCenterX - 75, 515, 150, 88);
+      }
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(pengaturan.nama_bendahara, signCenterX, 668);
+
+      // Garis bawah nama bendahara
+      const nameW = ctx.measureText(pengaturan.nama_bendahara).width;
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(signCenterX - nameW / 2, 675);
+      ctx.lineTo(signCenterX + nameW / 2, 675);
+      ctx.stroke();
+      ctx.textAlign = 'left';
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `Nota_DP_${preview.nomor}_${rec.nama_lengkap.replace(/\s+/g, '_')}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      showToast(
+        'success',
+        `Nota Kuitansi PNG (${preview.nomor}) berhasil diunduh & siap dikirim via WhatsApp.`
+      );
+    } catch (err: unknown) {
+      showToast(
+        'error',
+        err instanceof Error ? err.message : 'Gagal membuat gambar PNG nota kuitansi.'
+      );
+    } finally {
+      setDownloadingNotaPng(false);
+    }
   };
 
   // INPUT PENDAFTAR OFFLINE (Tunai di Kantor, minimal DP Rp 300.000)
@@ -879,7 +1131,7 @@ export default function PendaftaranInternalPage() {
             Pendaftaran Santri Baru (PSB) &amp; Verifikasi DP
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Alur 2 Tahap: (1) Verifikasi DP Online/Offline ke Dompet Pendaftaran &amp; cetak/kirim Nota Kuitansi DP, lalu (2) Resmikan Jadi Santri Aktif. Pelunasan/cicilan dilakukan di menu Keuangan.
+            Alur 2 Tahap: (1) Verifikasi DP Online/Offline ke Dompet Pendaftaran &amp; unduh/kirim Nota Kuitansi DP, lalu (2) Resmikan Jadi Santri Aktif. Pelunasan/cicilan dilakukan melalui Kantor Bendahara Pondok.
           </p>
         </div>
 
@@ -1379,8 +1631,8 @@ export default function PendaftaranInternalPage() {
                         }
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                       >
-                        <Printer className="w-3.5 h-3.5" />
-                        Cetak / Kirim Nota Kuitansi DP
+                        <Download className="w-3.5 h-3.5" />
+                        Unduh / Kirim Nota Kuitansi DP
                       </button>
                     )}
                   </div>
@@ -1553,7 +1805,7 @@ export default function PendaftaranInternalPage() {
                           Math.max(0, Number(selected.total_biaya_akhir || 0) - Number(selected.dp_terbayar || 0))
                         )}
                       </strong>{' '}
-                      (dicicil/dilunasi di menu Keuangan).
+                      (dapat dicicil atau dilunasi melalui Kantor Bendahara Pondok / transfer rekening resmi pesantren).
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1572,8 +1824,8 @@ export default function PendaftaranInternalPage() {
                       }
                       className="min-h-[38px] px-3.5 py-2 siap-btn-primary font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Printer className="w-3.5 h-3.5" />
-                      Cetak / Kirim Nota Kuitansi DP
+                      <Download className="w-3.5 h-3.5" />
+                      Unduh / Kirim Nota Kuitansi DP
                     </button>
                     <a
                       href={buildWaNotaDpUrl(selected)}
@@ -1605,7 +1857,7 @@ export default function PendaftaranInternalPage() {
                       <strong className="font-mono">
                         {formatRupiah(Math.max(0, Number(selected.total_biaya_akhir || 0) - Number(selected.dp_terbayar || 0)))}
                       </strong>{' '}
-                      otomatis terbaca untuk dicicil/dilunasi di menu Keuangan.
+                      otomatis terbaca untuk dicicil atau dilunasi melalui Kantor Bendahara Pondok.
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
@@ -1972,7 +2224,7 @@ export default function PendaftaranInternalPage() {
                         </strong>
                       </div>
                       <div>
-                        <span className="text-slate-500 block">Sisa (Menu Keuangan)</span>
+                        <span className="text-slate-500 block">Sisa Kekurangan</span>
                         <strong className="font-mono text-amber-800">
                           {formatRupiah(previewBilling.sisaTagihan)}
                         </strong>
@@ -2016,11 +2268,11 @@ export default function PendaftaranInternalPage() {
         </div>
       )}
 
-      {/* MODAL CETAK / KIRIM NOTA KUITANSI DP PSB (21 x 10 CM, KOP SURAT PENGATURAN) */}
+      {/* MODAL NOTA KUITANSI DP PSB (21 x 10 CM, UNDUH PNG SIAP KIRIM WA) */}
       {kuitansiPreview && (
-        <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4 overflow-y-auto print:bg-white print:p-0">
-          <div className="bg-white rounded-2xl max-w-4xl w-full p-5 space-y-4 print:shadow-none print:rounded-none">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 print:hidden">
+        <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <h3 className="text-sm font-bold text-slate-900">
                 Nota Kuitansi DP PSB · 21 × 10 cm
               </h3>
@@ -2036,11 +2288,12 @@ export default function PendaftaranInternalPage() {
                 </a>
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  disabled={downloadingNotaPng}
+                  onClick={() => void handleDownloadNotaDpPng(kuitansiPreview)}
+                  className="px-4 py-2 siap-btn-primary text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
                 >
-                  <Printer className="w-4 h-4" />
-                  Cetak / Simpan PDF
+                  <Download className="w-4 h-4" />
+                  {downloadingNotaPng ? 'Membuat PNG...' : 'Unduh Gambar PNG'}
                 </button>
                 <button
                   type="button"
@@ -2055,7 +2308,7 @@ export default function PendaftaranInternalPage() {
             <div className="overflow-x-auto">
               <div
                 style={{ borderColor: 'var(--siap-sidebar, #064e3b)' }}
-                className="print-clean-surface w-[21cm] min-h-[10cm] mx-auto border-2 rounded-xl p-5 flex flex-col justify-between bg-white text-slate-900"
+                className="w-[21cm] min-h-[10cm] mx-auto border-2 rounded-xl p-5 flex flex-col justify-between bg-white text-slate-900"
               >
                 {/* KOP SURAT DARI PENGATURAN APLIKASI */}
                 <div
@@ -2161,8 +2414,8 @@ export default function PendaftaranInternalPage() {
                             </p>
                           </div>
                           {sisaTagihan > 0 && (
-                            <p className="text-[10px] text-slate-500">
-                              Sisa kekurangan {formatRupiah(sisaTagihan)} dicicil/dilunasi melalui menu Keuangan.
+                            <p className="text-[10px] text-slate-500 max-w-md">
+                              Sisa kekurangan {formatRupiah(sisaTagihan)} (dapat dicicil atau dilunasi melalui Kantor Bendahara Pondok / transfer rekening resmi pesantren).
                             </p>
                           )}
                         </div>
