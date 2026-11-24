@@ -1717,7 +1717,7 @@ export default function DashboardPage() {
               })}
               {izinPrioritasList.length > 4 && (
                 <p className="text-[11px] text-slate-500 text-right">
-                  +{izinPrioritasList.length - 4} santri lainnya di menu Perizinan
+                  +{izinPrioritasList.length - 4} santri lainnya pada daftar Perizinan
                 </p>
               )}
             </div>

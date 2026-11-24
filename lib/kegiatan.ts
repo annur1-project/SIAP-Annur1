@@ -630,7 +630,7 @@ export async function fetchPersonelOptions(): Promise<PersonelOption[]> {
 export function buildKegiatanWaText(item: KegiatanAgendaItem): string {
   const kategoriLabel = item.kategori === 'event_besar' ? 'Event Besar' : 'Kegiatan Rutin';
   const lines: string[] = [
-    `*JADWAL KEGIATAN e-PONDOK AN-NUR 1*`,
+    `*JADWAL KEGIATAN PONDOK PESANTREN AN-NUR 1*`,
     `*${item.judul}* (${kategoriLabel})`,
     `Hari/Tgl: ${formatHariTanggalIndo(item.tanggal)}`,
     `Waktu: ${item.jam_mulai}${item.jam_selesai ? ` - ${item.jam_selesai}` : ''} WIB`,

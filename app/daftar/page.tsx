@@ -398,7 +398,7 @@ export default function DaftarPublicPage() {
         `• Paket: ${submittedRecord.paket.toUpperCase()}\n` +
         `• Transfer DP: ${formatRupiah(submittedRecord.dp_nominal)}\n` +
         `• Tanggal Daftar: ${submittedRecord.rencana_tgl_masuk}\n` +
-        `Mohon verifikasi bukti transfer kami. Terima kasih.`
+        `Mohon konfirmasi bukti transfer kami. Terima kasih.`
     );
 
     return (
@@ -1153,7 +1153,7 @@ export default function DaftarPublicPage() {
             {/* Upload Bukti Transfer */}
             <div className="space-y-2 text-xs">
               <label htmlFor="upload_bukti_dp" className="block font-bold text-slate-800">
-                Upload Foto / Screenshot Bukti Transfer *
+                Unggah Foto Bukti Transfer *
               </label>
               <label
                 htmlFor="upload_bukti_dp"
@@ -1162,13 +1162,10 @@ export default function DaftarPublicPage() {
                 <Upload className="w-6 h-6 text-emerald-700 mb-1.5" />
                 <span className="font-bold text-slate-800">
                   {uploadingBukti
-                    ? 'Memproses gambar...'
+                    ? 'Mengunggah foto...'
                     : buktiFileLabel
                     ? `Terpilih: ${buktiFileLabel}`
-                    : 'Ketuk untuk pilih foto / screenshot struk transfer'}
-                </span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  Format JPG / PNG (otomatis dikompresi agar hemat kuota)
+                    : 'Unggah Foto / Pilih File'}
                 </span>
                 <input
                   id="upload_bukti_dp"

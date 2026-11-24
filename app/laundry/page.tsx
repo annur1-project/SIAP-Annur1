@@ -596,7 +596,7 @@ export default function LaundryPage() {
       pushToast('info', 'Belum Ada Data', 'Tidak ada data laporan pada filter terpilih.');
       return;
     }
-    const header = `*REKAP LAPORAN SIE LAUNDRY e-annursatu AN-NUR 1*\nPeriode: ${
+    const header = `*REKAP LAPORAN SIE LAUNDRY PONDOK PESANTREN AN-NUR 1*\nPeriode: ${
       reportMonth || 'Semua Bulan'
     }${reportHariFilter !== 'semua' ? ` · Hari ${HARI_LABEL_MAP[reportHariFilter]}` : ''}\nTotal: ${
       reportAggregate.totalHari

@@ -290,9 +290,9 @@ export default function LaporanDocument({
 
             <div className="mt-8 border-t border-slate-200 pt-6">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-                Cakupan Data Laporan (Real Sistem):
+                Cakupan Data Laporan:
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-800">
+              <div className="grid grid-flow-col grid-rows-5 gap-x-8 gap-y-1.5 text-xs sm:text-sm text-slate-800">
                 {LAPORAN_DIVISIONS.filter((d) => hasDiv(d.key)).map((d) => (
                   <div key={d.key} className="flex items-center gap-2">
                     <span className="font-mono text-xs font-bold text-emerald-700 w-6">

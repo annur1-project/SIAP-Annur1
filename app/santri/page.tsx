@@ -545,7 +545,7 @@ export default function DataSantriPage() {
     showToast(
       'success',
       'Santri Berhasil Didaftarkan!',
-      `${newSantri.nama_lengkap} (NIS ${assignedNis}) aktif. Tagihan pendaftaran Rp ${tagihanPendaftaranPenuh.toLocaleString('id-ID')} siap dibayar/dicicil di menu Keuangan.`
+      `${newSantri.nama_lengkap} (NIS ${assignedNis}) aktif. Tagihan pendaftaran Rp ${tagihanPendaftaranPenuh.toLocaleString('id-ID')} dapat dicicil atau dilunasi melalui Bendahara Pondok.`
     );
     fetchSantri();
   };
@@ -1905,7 +1905,7 @@ export default function DataSantriPage() {
                         Status Awal: Belum Lunas (Tagihan Rp {rincianPsbAktif.nominalDompetPendaftaran.toLocaleString('id-ID')})
                       </p>
                       <p className="text-slate-600">
-                        Pembayaran/cicilan pendaftaran &amp; Syahriyah bulanan (Rp {rincianPsbAktif.nominalSyahriyahBulanPertama.toLocaleString('id-ID')}/bln) dilakukan terpisah di menu Keuangan.
+                        Pembayaran/cicilan pendaftaran &amp; Syahriyah bulanan (Rp {rincianPsbAktif.nominalSyahriyahBulanPertama.toLocaleString('id-ID')}/bln) dilakukan melalui bagian Keuangan Pondok.
                       </p>
                     </div>
                   </div>
