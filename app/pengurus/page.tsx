@@ -424,12 +424,11 @@ export default function DataPengurusPage() {
   const {
     canEditModule,
     canViewBisyaroh,
-    canManageAccounts,
     isSuperAdmin,
     refreshAuth,
     pengurus: currentPengurus,
   } = useAuth();
-  const canEditPengurus = canEditModule("pengurus");
+  const canEditPengurus = canEditModule("pengurus") || isSuperAdmin;
 
   // State Data Utama
   const [pengurusList, setPengurusList] = useState<PengurusItem[]>([]);
@@ -695,6 +694,40 @@ export default function DataPengurusPage() {
     const totalBisyaroh = aktifList.reduce((acc, p) => acc + (p.nominal_bisyaroh || 0), 0);
     return { totalPersonel, totalPosisi, rangkapJabatan, totalBisyaroh };
   }, [pengurusByMasaKhidmat]);
+
+  // Tombol Akun (buat akun, atur login, reset password) dikunci KHUSUS untuk:
+  // Admin Utama (super_admin), Pengasuh Pondok, dan Kepala Pondok
+  const canManagePengurusAccounts = useMemo(() => {
+    if (isSuperAdmin) return true;
+    const matched = currentPengurus?.id
+      ? pengurusList.find((p) => p.id === currentPengurus.id) || null
+      : null;
+    const target =
+      matched ||
+      (currentPengurus as unknown as {
+        status?: string | null;
+        role?: string | null;
+        username?: string | null;
+        jabatan_list?: JabatanItem[];
+      } | null);
+    if (!target) return false;
+    const statusNorm = String(target.status || "aktif").trim().toLowerCase();
+    if (statusNorm !== "aktif") return false;
+    const roleNorm = String(target.role || "").trim().toLowerCase();
+    const unameNorm = String(target.username || "").trim().toLowerCase();
+    if (roleNorm === "super_admin" || unameNorm === "admin.utama") return true;
+    const jabs = Array.isArray(target.jabatan_list) ? target.jabatan_list : [];
+    return jabs.some((j) => {
+      const div = normalizeDivisi(j.divisi || "").trim().toLowerCase();
+      const jab = String(j.nama_jabatan || "").trim().toLowerCase();
+      if (div === "pengasuh pondok" || div.startsWith("dewan pengasuh")) return true;
+      if (jab === "pengasuh" || jab === "pengasuh pondok" || jab.startsWith("dewan pengasuh")) {
+        return true;
+      }
+      if (jab === "kepala pondok") return true;
+      return false;
+    });
+  }, [isSuperAdmin, currentPengurus, pengurusList]);
 
   const filteredPengurus = useMemo(() => {
     const filtered = pengurusByMasaKhidmat.filter((p) => {
@@ -1201,7 +1234,7 @@ export default function DataPengurusPage() {
       }
 
       // Sinkronkan status nonaktif/boyong ke Supabase Auth agar akun otomatis diblokir
-      if (editingId && canManageAccounts && isSupabaseConfigured()) {
+      if (editingId && canManagePengurusAccounts && isSupabaseConfigured()) {
         const targetObj = pengurusList.find((p) => p.id === editingId);
         if (targetObj?.auth_user_id) {
           const { data: sessData } = await supabase.auth.getSession();
@@ -1265,7 +1298,7 @@ export default function DataPengurusPage() {
   // MANAJEMEN AKUN LOGIN TERPUSAT (CREATE / RESET PASSWORD / MODUL RBAC)
   // ============================================================
   const openAccountModal = (item: PengurusItem) => {
-    if (!canManageAccounts) return;
+    if (!canManagePengurusAccounts) return;
     const suggested = normalizeUsername(
       item.username ||
         item.nama_lengkap
@@ -1383,7 +1416,7 @@ export default function DataPengurusPage() {
   };
 
   const handleAccountAction = async (mode: "create_account" | "reset_password") => {
-    if (!accountTarget || !canManageAccounts) return;
+    if (!accountTarget || !canManagePengurusAccounts) return;
     const cleanUname = normalizeUsername(accountUsername);
     const tempPw = accountTempPassword.trim();
 
@@ -1746,7 +1779,7 @@ export default function DataPengurusPage() {
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
             }`}
           >
-            1. Daftar Pengurus ({pengurusByMasaKhidmat.length})
+            1. Daftar Pengurus ({stats.totalPersonel})
           </button>
           <button
             type="button"
@@ -1954,9 +1987,9 @@ export default function DataPengurusPage() {
                       )}
                     </div>
 
-                    {(canEditPengurus || canManageAccounts) && (
+                    {(canEditPengurus || canManagePengurusAccounts) && (
                       <div className="flex items-center gap-2 pt-1.5 border-t border-slate-200/60">
-                        {canManageAccounts && (
+                        {canManagePengurusAccounts && (
                           <button
                             type="button"
                             onClick={() => openAccountModal(item)}
@@ -2005,7 +2038,7 @@ export default function DataPengurusPage() {
                   <th className="py-3 px-3.5 w-36 whitespace-nowrap">Kontak WA</th>
                   {canViewBisyaroh && <th className="py-3 px-3.5 w-28 whitespace-nowrap">Bisyaroh</th>}
                   <th className="py-3 px-3.5 w-24 whitespace-nowrap">Status</th>
-                  {(canEditPengurus || canManageAccounts) && (
+                  {(canEditPengurus || canManagePengurusAccounts) && (
                     <th className="py-3 px-3.5 w-32 text-right whitespace-nowrap">Aksi</th>
                   )}
                 </tr>
@@ -2134,10 +2167,10 @@ export default function DataPengurusPage() {
                         </td>
 
                         {/* Aksi */}
-                        {(canEditPengurus || canManageAccounts) && (
+                        {(canEditPengurus || canManagePengurusAccounts) && (
                           <td className="py-3 px-3.5 text-right whitespace-nowrap">
                             <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
-                              {canManageAccounts && (
+                              {canManagePengurusAccounts && (
                                 <button
                                   type="button"
                                   onClick={() => openAccountModal(item)}
@@ -2933,7 +2966,7 @@ export default function DataPengurusPage() {
       {/* ============================================================
           MODAL MANAJEMEN AKUN LOGIN TERPUSAT (TANPA LOGOUT ADMIN)
       ============================================================ */}
-      {accountTarget && (
+      {accountTarget && canManagePengurusAccounts && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 no-print">
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
             <div className="bg-emerald-800 text-white px-5 py-4 flex items-center justify-between shrink-0">
