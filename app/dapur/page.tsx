@@ -127,9 +127,51 @@ function createUuidFallback(): string {
   });
 }
 
+function formatWibHhMm(iso?: string | null): string {
+  if (!iso) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(iso));
+    const hh = parts.find((p) => p.type === 'hour')?.value || '';
+    const mm = parts.find((p) => p.type === 'minute')?.value || '';
+    return hh && mm ? `${hh}:${mm}` : '';
+  } catch {
+    return '';
+  }
+}
+
+function getWibHhMmSsNow(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const hh = parts.find((p) => p.type === 'hour')?.value || '05';
+    const mm = parts.find((p) => p.type === 'minute')?.value || '00';
+    const ss = parts.find((p) => p.type === 'second')?.value || '00';
+    return `${hh}:${mm}:${ss}`;
+  } catch {
+    return '05:00:00';
+  }
+}
+
 export default function DapurPage() {
   const { canEditModule, pengurus } = useAuth();
   const canEditDapur = canEditModule('dapur');
+
+  const [authProfile, setAuthProfile] = useState<{
+    id?: string;
+    role?: string;
+    nama_divisi?: string;
+    username?: string;
+  } | null>(null);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('timer');
   const [todayStr, setTodayStr] = useState<string>('');
@@ -156,6 +198,8 @@ export default function DapurPage() {
   const [riwayatFilterShift, setRiwayatFilterShift] = useState<'semua' | DapurShift>('semua');
   const [riwayatFilterStatus, setRiwayatFilterStatus] = useState<'semua' | 'tepat_waktu' | 'terlambat'>('semua');
   const [editingSesi, setEditingSesi] = useState<DapurSesiMasak | null>(null);
+  const [sesiStartTimeInput, setSesiStartTimeInput] = useState<string>('');
+  const [sesiFinishTimeInput, setSesiFinishTimeInput] = useState<string>('');
   const [sesiMenuInput, setSesiMenuInput] = useState<string>('');
   const [sesiPjInput, setSesiPjInput] = useState<string>('');
   const [sesiCatatanInput, setSesiCatatanInput] = useState<string>('');
@@ -257,7 +301,7 @@ export default function DapurPage() {
   const loadAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sesiRes, menuRes, absenRes, kasRes, bukuMasakRes, jualanMalamRes, pengurusRes] =
+      const [sesiRes, menuRes, absenRes, kasRes, bukuMasakRes, jualanMalamRes, pengurusRes, authRes] =
         await Promise.all([
           fetchTableWithFallback<DapurSesiMasak>('dapur_sesi_masak', LS_DAPUR_SESI_KEY, {
             col: 'tanggal',
@@ -285,7 +329,23 @@ export default function DapurPage() {
             { col: 'tanggal', ascending: false }
           ),
           supabase.from('v_pengurus_lengkap').select('*'),
+          supabase.auth.getUser(),
         ]);
+
+      if (authRes.data?.user) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, role, nama_divisi, username')
+          .eq('id', authRes.data.user.id)
+          .maybeSingle();
+        setAuthProfile(
+          prof
+            ? (prof as { id?: string; role?: string; nama_divisi?: string; username?: string })
+            : null
+        );
+      } else {
+        setAuthProfile(null);
+      }
 
       setSesiList(sesiRes.rows);
       setMenuList(menuRes.rows);
@@ -399,6 +459,65 @@ export default function DapurPage() {
       }
     },
     []
+  );
+
+  const isSuperAdmin = useMemo(() => {
+    const roleVal = String(authProfile?.role || '').trim().toLowerCase();
+    const divVal = String(authProfile?.nama_divisi || '').trim().toLowerCase();
+    const userVal = String(authProfile?.username || '').trim().toLowerCase();
+    const pgRecord = (pengurus as unknown as Record<string, unknown> | null) || null;
+    const pgRole = String(pgRecord?.role || '').trim().toLowerCase();
+    const pgJab = String(pgRecord?.jabatan || pgRecord?.nama_jabatan || '').trim().toLowerCase();
+    const pgDiv = String(pgRecord?.divisi || '').trim().toLowerCase();
+
+    const checkText = (txt: string) =>
+      txt === 'super_admin' ||
+      txt === 'superadmin' ||
+      txt === 'admin' ||
+      txt.includes('super_admin') ||
+      txt.includes('super admin') ||
+      (txt.includes('kepala pondok') && !txt.includes('wakil')) ||
+      (txt.includes('pengasuh') && !txt.includes('wakil'));
+
+    if (
+      checkText(roleVal) ||
+      checkText(divVal) ||
+      checkText(userVal) ||
+      checkText(pgRole) ||
+      checkText(pgJab) ||
+      checkText(pgDiv)
+    ) {
+      return true;
+    }
+
+    if (pengurus) {
+      const matched = pengurusSource.find(
+        (p) =>
+          (pengurus.id && String(p.id) === String(pengurus.id)) ||
+          (pengurus.nama_lengkap &&
+            p.nama_lengkap.trim().toLowerCase() === pengurus.nama_lengkap.trim().toLowerCase())
+      );
+      if (matched) {
+        const jabs = Array.isArray(matched.jabatan_list) ? matched.jabatan_list : [];
+        const allTexts = [
+          matched.divisi || '',
+          matched.jabatan || '',
+          ...jabs.flatMap((j) => [j.divisi || '', j.nama_jabatan || '']),
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (checkText(allTexts)) return true;
+      }
+    }
+
+    return false;
+  }, [authProfile, pengurus, pengurusSource]);
+
+  const canOperateDapur = canEditDapur || isSuperAdmin;
+  const isTodaySelected = Boolean(todayStr && selectedDate === todayStr);
+  const isPastOrTodaySelected = Boolean(selectedDate && (!todayStr || selectedDate <= todayStr));
+  const canOperateSelectedDate = Boolean(
+    canOperateDapur && isPastOrTodaySelected && (isSuperAdmin || isTodaySelected)
   );
 
   // Derived Today/Selected Menu & Session
@@ -564,13 +683,24 @@ export default function DapurPage() {
   );
 
   // =========================================================
-  // HANDLERS TAB 1: MULAI / SELESAI MEMASAK REAL-TIME
+  // HANDLERS TAB 1: MULAI / SELESAI MEMASAK REAL-TIME & BACKDATE ADMIN UTAMA
   // =========================================================
   const handleStartCooking = async (shift: DapurShift) => {
     if (!selectedDate) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Input operasional tanggal sebelumnya hanya dapat dilakukan oleh Admin Utama.'
+      );
+      return;
+    }
     setSaving(true);
     try {
-      const nowIso = new Date().toISOString();
+      const isBackdated = Boolean(todayStr && selectedDate < todayStr && isSuperAdmin);
+      const nowIso = isBackdated
+        ? new Date(`${selectedDate}T${getWibHhMmSsNow()}+07:00`).toISOString()
+        : new Date().toISOString();
       const linkedMenu = shift === 'pagi' ? activeMenuPagi : activeMenuSore;
       const existing = shift === 'pagi' ? activeSesiPagi : activeSesiSore;
       const menuText = linkedMenu
@@ -601,7 +731,7 @@ export default function DapurPage() {
       showToast(
         'info',
         `Masak ${shift === 'pagi' ? 'Pagi' : 'Sore'} Dimulai`,
-        `Waktu mulai tercatat pukul ${formatTimeClock(nowIso)} WIB. Batas matang ${SHIFT_TARGET_TIME[shift]} WIB.`
+        `Waktu mulai tercatat pukul ${formatTimeClock(nowIso)} WIB (${formatTanggalPendek(selectedDate)}). Batas matang ${SHIFT_TARGET_TIME[shift]} WIB.`
       );
     } finally {
       setSaving(false);
@@ -611,9 +741,20 @@ export default function DapurPage() {
   const handleFinishCooking = async (shift: DapurShift) => {
     const existing = shift === 'pagi' ? activeSesiPagi : activeSesiSore;
     if (!existing || !existing.started_at) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Input operasional tanggal sebelumnya hanya dapat dilakukan oleh Admin Utama.'
+      );
+      return;
+    }
     setSaving(true);
     try {
-      const finishedIso = new Date().toISOString();
+      const isBackdated = Boolean(todayStr && existing.tanggal < todayStr && isSuperAdmin);
+      const finishedIso = isBackdated
+        ? new Date(`${existing.tanggal}T${getWibHhMmSsNow()}+07:00`).toISOString()
+        : new Date().toISOString();
       const evalResult = evaluateCookingCompletion(
         existing.tanggal,
         shift,
@@ -649,29 +790,122 @@ export default function DapurPage() {
 
   const openEditSesiModal = (sesi: DapurSesiMasak) => {
     setEditingSesi(sesi);
+    setSesiStartTimeInput(formatWibHhMm(sesi.started_at) || (sesi.shift === 'pagi' ? '04:00' : '15:00'));
+    setSesiFinishTimeInput(formatWibHhMm(sesi.finished_at) || '');
     setSesiMenuInput(sesi.menu_ringkas || '');
     setSesiPjInput(sesi.petugas_pj || '');
     setSesiCatatanInput(sesi.catatan || '');
   };
 
+  const openAdminBackdateSesiModal = (
+    shift: DapurShift,
+    existing: DapurSesiMasak | null,
+    menu: DapurMenuJadwal | null
+  ) => {
+    if (!isSuperAdmin || !selectedDate) return;
+    if (existing) {
+      openEditSesiModal(existing);
+      return;
+    }
+    const defaultStart = shift === 'pagi' ? '04:00' : '15:00';
+    const defaultFinish = shift === 'pagi' ? '05:30' : '16:30';
+    const menuText = menu
+      ? [menu.menu_utama, menu.sayur_pendamping, menu.lauk_tambahan].filter(Boolean).join(' + ')
+      : '';
+    const startIso = new Date(`${selectedDate}T${defaultStart}:00+07:00`).toISOString();
+    const finishIso = new Date(`${selectedDate}T${defaultFinish}:00+07:00`).toISOString();
+    const evalResult = evaluateCookingCompletion(selectedDate, shift, startIso, finishIso);
+
+    const draftSesi: DapurSesiMasak = {
+      id: createDapurId('sesi'),
+      tanggal: selectedDate,
+      shift,
+      target_selesai: SHIFT_TARGET_TIME[shift],
+      started_at: startIso,
+      finished_at: finishIso,
+      durasi_menit: evalResult.durasi_menit,
+      status_waktu: evalResult.status_waktu,
+      selisih_menit: evalResult.selisih_menit,
+      menu_ringkas: menuText,
+      petugas_pj: pengurus?.nama_lengkap || '',
+      catatan: '',
+      created_at: new Date().toISOString(),
+    };
+    setEditingSesi(draftSesi);
+    setSesiStartTimeInput(defaultStart);
+    setSesiFinishTimeInput(defaultFinish);
+    setSesiMenuInput(menuText);
+    setSesiPjInput(pengurus?.nama_lengkap || '');
+    setSesiCatatanInput('');
+  };
+
   const handleSaveEditSesi = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSesi) return;
+    const canEditTargetSesi =
+      canOperateDapur && (isSuperAdmin || (todayStr && editingSesi.tanggal === todayStr));
+    if (!canEditTargetSesi) {
+      showToast(
+        'error',
+        'Akses Terbatas',
+        'Perubahan sesi pada tanggal lalu hanya dapat disimpan oleh Admin Utama.'
+      );
+      return;
+    }
     setSaving(true);
     try {
-      // Waktu mulai, waktu selesai, durasi, dan status ketepatan terkunci permanen (immutable)
-      const nextItem: DapurSesiMasak = {
+      let nextItem: DapurSesiMasak = {
         ...editingSesi,
         menu_ringkas: sesiMenuInput.trim(),
         petugas_pj: sesiPjInput.trim(),
         catatan: sesiCatatanInput.trim(),
       };
 
+      if (isSuperAdmin && sesiStartTimeInput) {
+        const startIso = new Date(
+          `${editingSesi.tanggal}T${sesiStartTimeInput}:00+07:00`
+        ).toISOString();
+        const finishIso = sesiFinishTimeInput
+          ? new Date(`${editingSesi.tanggal}T${sesiFinishTimeInput}:00+07:00`).toISOString()
+          : null;
+
+        if (finishIso) {
+          const evalResult = evaluateCookingCompletion(
+            editingSesi.tanggal,
+            editingSesi.shift,
+            startIso,
+            finishIso
+          );
+          nextItem = {
+            ...nextItem,
+            started_at: startIso,
+            finished_at: finishIso,
+            target_selesai: evalResult.target_selesai,
+            durasi_menit: evalResult.durasi_menit,
+            status_waktu: evalResult.status_waktu,
+            selisih_menit: evalResult.selisih_menit,
+          };
+        } else {
+          nextItem = {
+            ...nextItem,
+            started_at: startIso,
+            finished_at: null,
+            durasi_menit: 0,
+            status_waktu: 'sedang_masak',
+            selisih_menit: 0,
+          };
+        }
+      }
+
       const nextList = [nextItem, ...sesiList.filter((s) => s.id !== nextItem.id)];
       setSesiList(nextList);
       await persistUpsert('dapur_sesi_masak', LS_DAPUR_SESI_KEY, nextList, nextItem);
       setEditingSesi(null);
-      showToast('success', 'Catatan Sesi Disimpan', 'Menu ringkas, PJ, dan catatan sesi berhasil diperbarui.');
+      showToast(
+        'success',
+        'Sesi Masak Disimpan',
+        `Data sesi masak ${nextItem.shift === 'pagi' ? 'Pagi' : 'Sore'} (${formatTanggalPendek(nextItem.tanggal)}) berhasil diperbarui.`
+      );
     } finally {
       setSaving(false);
     }
@@ -686,6 +920,14 @@ export default function DapurPage() {
   );
 
   const openMenuModal = (tanggal: string, shift: DapurShift, existing?: DapurMenuJadwal | null) => {
+    if (!canOperateDapur || (!isSuperAdmin && todayStr && tanggal < todayStr)) {
+      showToast(
+        'error',
+        'Akses Terbatas',
+        'Perubahan menu untuk tanggal sebelumnya hanya dapat dilakukan oleh Admin Utama.'
+      );
+      return;
+    }
     setEditingMenuId(existing?.id || null);
     setMenuFormTanggal(tanggal);
     setMenuFormShift(shift);
@@ -699,6 +941,15 @@ export default function DapurPage() {
 
   const handleSaveMenu = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canOperateDapur) return;
+    if (!isSuperAdmin && todayStr && menuFormTanggal < todayStr) {
+      showToast(
+        'error',
+        'Tanggal Terkunci',
+        'Perubahan menu untuk tanggal sebelumnya hanya dapat dilakukan oleh Admin Utama.'
+      );
+      return;
+    }
     if (!menuFormUtama.trim()) {
       showToast('error', 'Validasi Menu', 'Menu utama wajib diisi.');
       return;
@@ -731,12 +982,13 @@ export default function DapurPage() {
   };
 
   const handleCopyLastWeekMenu = async () => {
-    if (weekDays.length !== 7) return;
+    if (weekDays.length !== 7 || !canOperateDapur) return;
     let copiedCount = 0;
     const nextList = [...menuList];
     const itemsToSync: DapurMenuJadwal[] = [];
 
     for (const targetDay of weekDays) {
+      if (!isSuperAdmin && todayStr && targetDay < todayStr) continue;
       const prevWeekDay = addDaysIso(targetDay, -7);
       for (const shift of ['pagi', 'sore'] as DapurShift[]) {
         const already = nextList.find((m) => m.tanggal === targetDay && m.shift === shift);
@@ -912,6 +1164,14 @@ export default function DapurPage() {
     status: StatusAbsenPetugas
   ) => {
     if (!selectedDate) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Absensi petugas pada tanggal sebelumnya hanya dapat diisi oleh Admin Utama.'
+      );
+      return;
+    }
     const nowTime = formatTimeClock(new Date().toISOString(), false);
     const existing = normalizedAbsenList.find(
       (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === petugas.id
@@ -984,6 +1244,14 @@ export default function DapurPage() {
 
   const handleMarkAllHadir = async (shift: DapurShift) => {
     if (!selectedDate || petugasList.length === 0) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Absensi petugas pada tanggal sebelumnya hanya dapat diisi oleh Admin Utama.'
+      );
+      return;
+    }
     const nowTime = formatTimeClock(new Date().toISOString(), false);
     const activeRoster = petugasList.filter((x) => x.aktif !== false);
     setSaving(true);
@@ -1088,7 +1356,7 @@ export default function DapurPage() {
 
   const handleSaveKeteranganAbsen = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingKetTarget || !selectedDate) return;
+    if (!editingKetTarget || !selectedDate || !canOperateSelectedDate) return;
     const { petugas, shift } = editingKetTarget;
     const existing = normalizedAbsenList.find(
       (a) => a.tanggal === selectedDate && a.shift === shift && a.petugas_id === petugas.id
@@ -1157,7 +1425,14 @@ export default function DapurPage() {
   // HANDLERS TAB 4: BUKU 1 (BELANJA MASAK) & BUKU 2 (JUALAN MALAM)
   // =========================================================
   const openBuku1Modal = (tipe: 'jatah_harian' | 'belanja_pagi' | 'belanja_sore') => {
-    if (!canEditDapur) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Transaksi Buku 1 pada tanggal lalu hanya dapat dicatat oleh Admin Utama.'
+      );
+      return;
+    }
     setBuku1Tipe(tipe);
     setBuku1Tanggal(selectedDate || todayStr);
     setBuku1Nominal(tipe === 'jatah_harian' ? String(DEFAULT_JATAH_MASAK_HARIAN) : '');
@@ -1175,7 +1450,16 @@ export default function DapurPage() {
 
   const handleSaveBuku1 = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEditDapur) return;
+    if (!canOperateDapur) return;
+    const tglSave = buku1Tanggal || selectedDate || todayStr;
+    if (!isSuperAdmin && todayStr && tglSave !== todayStr) {
+      showToast(
+        'error',
+        'Tanggal Terkunci',
+        'Akun non-admin hanya diperbolehkan mencatat transaksi untuk hari ini.'
+      );
+      return;
+    }
     const nom = parseInt(buku1Nominal.replace(/\D/g, ''), 10) || 0;
     if (!buku1Uraian.trim() || nom <= 0) {
       showToast('error', 'Validasi', 'Uraian dan nominal (> 0) wajib diisi.');
@@ -1185,7 +1469,7 @@ export default function DapurPage() {
     try {
       const nextItem: DapurBukuMasakItem = {
         id: createDapurId('bmasak'),
-        tanggal: buku1Tanggal || selectedDate || todayStr,
+        tanggal: tglSave,
         tipe: buku1Tipe,
         arah: buku1Tipe === 'jatah_harian' ? 'masuk' : 'keluar',
         nominal: nom,
@@ -1209,7 +1493,14 @@ export default function DapurPage() {
   };
 
   const openBuku2Modal = (tipe: 'omzet_jualan' | 'modal_belanja') => {
-    if (!canEditDapur) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Transaksi Buku 2 pada tanggal lalu hanya dapat dicatat oleh Admin Utama.'
+      );
+      return;
+    }
     setBuku2Tipe(tipe);
     setBuku2Tanggal(selectedDate || todayStr);
     setBuku2Nominal('');
@@ -1225,7 +1516,16 @@ export default function DapurPage() {
 
   const handleSaveBuku2 = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEditDapur) return;
+    if (!canOperateDapur) return;
+    const tglSave = buku2Tanggal || selectedDate || todayStr;
+    if (!isSuperAdmin && todayStr && tglSave !== todayStr) {
+      showToast(
+        'error',
+        'Tanggal Terkunci',
+        'Akun non-admin hanya diperbolehkan mencatat transaksi untuk hari ini.'
+      );
+      return;
+    }
     const nom = parseInt(buku2Nominal.replace(/\D/g, ''), 10) || 0;
     if (!buku2Uraian.trim() || nom <= 0) {
       showToast('error', 'Validasi', 'Uraian dan nominal (> 0) wajib diisi.');
@@ -1235,7 +1535,7 @@ export default function DapurPage() {
     try {
       const nextItem: DapurJualanMalamItem = {
         id: createDapurId('bjual'),
-        tanggal: buku2Tanggal || selectedDate || todayStr,
+        tanggal: tglSave,
         tipe: buku2Tipe,
         arah: buku2Tipe === 'omzet_jualan' ? 'masuk' : 'keluar',
         nominal: nom,
@@ -1259,7 +1559,14 @@ export default function DapurPage() {
   };
 
   const openSubsidiModal = () => {
-    if (!canEditDapur) return;
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Subsidi pada tanggal lalu hanya dapat dicatat oleh Admin Utama.'
+      );
+      return;
+    }
     if (!bukuMasakSummary.isMinus) {
       showToast(
         'info',
@@ -1280,7 +1587,7 @@ export default function DapurPage() {
 
   const handleConfirmSubsidi = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEditDapur) return;
+    if (!canOperateSelectedDate) return;
     if (!bukuMasakSummary.isMinus) return;
 
     const nom = parseInt(subsidiNominal.replace(/\D/g, ''), 10) || 0;
@@ -1349,6 +1656,14 @@ export default function DapurPage() {
   // HANDLERS TAB 4 LEGACY: BUKU KAS DAPUR
   // =========================================================
   const openKasModal = (jenis: JenisKasDapur, item?: DapurKasItem) => {
+    if (!canOperateSelectedDate) {
+      showToast(
+        'error',
+        'Akses Terbatas Hari Berjalan',
+        'Kas Dapur pada tanggal lalu hanya dapat dicatat oleh Admin Utama.'
+      );
+      return;
+    }
     setEditingKas(item || null);
     setKasFormTanggal(item?.tanggal || selectedDate || todayStr);
     const j = item?.jenis || jenis;
@@ -1365,6 +1680,16 @@ export default function DapurPage() {
 
   const handleSaveKas = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canOperateDapur) return;
+    const tglSave = kasFormTanggal || selectedDate || todayStr;
+    if (!isSuperAdmin && todayStr && tglSave !== todayStr) {
+      showToast(
+        'error',
+        'Tanggal Terkunci',
+        'Akun non-admin hanya diperbolehkan mencatat transaksi untuk hari ini.'
+      );
+      return;
+    }
     const nom = parseInt(kasFormNominal.replace(/\D/g, ''), 10) || 0;
     if (!kasFormUraian.trim() || nom <= 0) {
       showToast('error', 'Validasi Kas', 'Uraian transaksi dan nominal (> 0) wajib diisi.');
@@ -1375,7 +1700,7 @@ export default function DapurPage() {
       const id = editingKas?.id || createDapurId('kas');
       const nextItem: DapurKasItem = {
         id,
-        tanggal: kasFormTanggal || selectedDate || todayStr,
+        tanggal: tglSave,
         jenis: kasFormJenis,
         kategori: kasFormKategori,
         uraian: kasFormUraian.trim(),
@@ -1539,7 +1864,6 @@ export default function DapurPage() {
 
     const diffToDeadlineSec =
       deadlineMs > 0 && nowMs > 0 ? Math.floor((deadlineMs - nowMs) / 1000) : 0;
-    const isTodaySelected = Boolean(todayStr && selectedDate === todayStr);
 
     return (
       <div
@@ -1602,7 +1926,7 @@ export default function DapurPage() {
           <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-500">Menu Terjadwal:</span>
-              {canEditDapur && (
+              {canOperateSelectedDate && (
                 <button
                   type="button"
                   onClick={() => openMenuModal(selectedDate, shift, menu)}
@@ -1730,7 +2054,7 @@ export default function DapurPage() {
         </div>
 
         {/* Action Buttons */}
-        {canEditDapur && (
+        {canOperateSelectedDate ? (
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {!isRunning && !isDone && (
               <button
@@ -1763,10 +2087,30 @@ export default function DapurPage() {
                 className="flex-1 min-h-[44px] px-3.5 py-2 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                Tambah / Edit Catatan &amp; PJ
+                {isSuperAdmin ? 'Edit Jam, Catatan & PJ' : 'Tambah / Edit Catatan & PJ'}
+              </button>
+            )}
+
+            {isSuperAdmin && !isDone && (
+              <button
+                type="button"
+                onClick={() => openAdminBackdateSesiModal(shift, sesi, menu)}
+                className="min-h-[48px] px-3.5 py-2 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                Input Jam Manual
               </button>
             )}
           </div>
+        ) : (
+          canOperateDapur && (
+            <div className="pt-1">
+              <div className="w-full min-h-[40px] px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-semibold flex items-center justify-center gap-1.5 text-center">
+                <Lock className="w-3.5 h-3.5 shrink-0" />
+                Terkunci untuk tanggal lalu (Khusus Admin Utama)
+              </div>
+            </div>
+          )
         )}
       </div>
     );
@@ -1774,7 +2118,7 @@ export default function DapurPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <TransparencyBanner moduleLabel="Dapur & Masak Pondok" isReadOnly={!canEditDapur} />
+      <TransparencyBanner moduleLabel="Dapur & Masak Pondok" isReadOnly={!canOperateDapur} />
       {/* TOAST NOTIFICATIONS */}
       {toasts.length > 0 && (
         <div className="print:hidden fixed top-14 md:top-5 right-4 left-4 md:left-auto z-50 flex flex-col gap-2 md:w-96">
@@ -1839,19 +2183,28 @@ export default function DapurPage() {
             </button>
             <input
               type="date"
+              max={todayStr || undefined}
               value={selectedDate}
               onChange={(e) => {
-                const v = e.target.value;
-                setSelectedDate(v);
-                if (v) setSelectedMonth(v.slice(0, 7));
+                const raw = e.target.value;
+                const clamped = todayStr && raw > todayStr ? todayStr : raw;
+                setSelectedDate(clamped);
+                if (clamped) setSelectedMonth(clamped.slice(0, 7));
               }}
               className="flex-1 min-w-0 bg-transparent text-xs font-bold text-slate-800 px-1.5 text-center focus:outline-none tabular-nums"
             />
             <button
               type="button"
-              onClick={() => selectedDate && setSelectedDate(addDaysIso(selectedDate, 1))}
+              disabled={Boolean(todayStr && selectedDate >= todayStr)}
+              onClick={() => {
+                if (!selectedDate) return;
+                const next = addDaysIso(selectedDate, 1);
+                if (todayStr && next > todayStr) return;
+                setSelectedDate(next);
+                setSelectedMonth(next.slice(0, 7));
+              }}
               aria-label="Hari berikutnya"
-              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white text-slate-600 shrink-0"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white disabled:opacity-40 text-slate-600 shrink-0"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1891,6 +2244,36 @@ export default function DapurPage() {
           </div>
         </div>
       </div>
+
+      {todayStr && selectedDate && selectedDate !== todayStr && (
+        <div
+          className={`print:hidden rounded-2xl border p-3.5 flex items-start sm:items-center justify-between gap-3 text-xs ${
+            isSuperAdmin
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+              : 'bg-amber-50 border-amber-200 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start sm:items-center gap-2.5">
+            {isSuperAdmin ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+            ) : (
+              <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            )}
+            <span>
+              {isSuperAdmin ? (
+                <>
+                  <strong>Mode Admin Utama (Input Susulan Aktif):</strong> Anda dapat mengisi dan menyimpan sesi masak, absen petugas, serta transaksi kas untuk{' '}
+                  <strong>{formatHariTanggalIndo(selectedDate)}</strong>.
+                </>
+              ) : (
+                <>
+                  <strong>Mode Arsip / Lihat Saja ({formatHariTanggalIndo(selectedDate)}):</strong> Akun non-admin hanya dapat mengisi operasional harian pada hari berjalan. Hubungi Admin Utama (Pengasuh / Kepala Pondok) untuk input data susulan.
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* TOP 4 KPI STRIP */}
       <div className="print:hidden grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -2295,13 +2678,13 @@ export default function DapurPage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
-                            {canEditDapur && (
+                            {canOperateDapur && (isSuperAdmin || (todayStr && s.tanggal === todayStr)) && (
                               <button
                                 type="button"
                                 onClick={() => openEditSesiModal(s)}
                                 className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold"
                               >
-                                Catatan
+                                {isSuperAdmin ? 'Edit' : 'Catatan'}
                               </button>
                             )}
                           </td>
@@ -2342,13 +2725,13 @@ export default function DapurPage() {
                           Mulai {formatTimeClock(s.started_at, false)} &rarr; Selesai{' '}
                           {s.finished_at ? formatTimeClock(s.finished_at, false) : '-'} ({s.durasi_menit} mnt)
                         </span>
-                        {canEditDapur && (
+                        {canOperateDapur && (isSuperAdmin || (todayStr && s.tanggal === todayStr)) && (
                           <button
                             type="button"
                             onClick={() => openEditSesiModal(s)}
                             className="min-h-[36px] px-3 py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold font-sans"
                           >
-                            Catatan
+                            {isSuperAdmin ? 'Edit' : 'Catatan'}
                           </button>
                         )}
                       </div>
@@ -2379,8 +2762,8 @@ export default function DapurPage() {
                 </p>
               </div>
               <div className="print:hidden space-y-2 w-full md:w-auto md:min-w-[320px]">
-                <div className={`grid gap-2 w-full ${canEditDapur ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  {canEditDapur && (
+                <div className={`grid gap-2 w-full ${canOperateDapur ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {canOperateDapur && (
                     <button
                       type="button"
                       onClick={handleCopyLastWeekMenu}
@@ -2457,7 +2840,7 @@ export default function DapurPage() {
                         </p>
                       )}
                     </div>
-                    {canEditDapur && (
+                    {canOperateSelectedDate && (
                       <div className="print:hidden flex items-center gap-2 pt-1">
                         <button
                           type="button"
@@ -2544,7 +2927,7 @@ export default function DapurPage() {
                             : 'Belum diatur'}
                         </p>
                       </div>
-                      {canEditDapur && (
+                      {canOperateDapur && (isSuperAdmin || !todayStr || day >= todayStr) && (
                         <button
                           type="button"
                           onClick={() => openMenuModal(day, 'pagi', pagi)}
@@ -2568,7 +2951,7 @@ export default function DapurPage() {
                             : 'Belum diatur'}
                         </p>
                       </div>
-                      {canEditDapur && (
+                      {canOperateDapur && (isSuperAdmin || !todayStr || day >= todayStr) && (
                         <button
                           type="button"
                           onClick={() => openMenuModal(day, 'sore', sore)}
@@ -2670,7 +3053,7 @@ export default function DapurPage() {
                     className="w-full min-h-[38px] pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500"
                   />
                 </div>
-                {canEditDapur && rosterFiltered.length > 0 && (
+                {canOperateSelectedDate && rosterFiltered.length > 0 && (
                   <button
                     type="button"
                     disabled={saving}
@@ -2773,8 +3156,10 @@ export default function DapurPage() {
                             <button
                               key={opt.val}
                               type="button"
-                              disabled={!canEditDapur || isRowSaving}
-                              onClick={() => canEditDapur && handleMarkAbsen(p, absenShiftView, opt.val)}
+                              disabled={!canOperateSelectedDate || isRowSaving}
+                              onClick={() =>
+                                canOperateSelectedDate && handleMarkAbsen(p, absenShiftView, opt.val)
+                              }
                               className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap shrink-0 disabled:opacity-60 ${
                                 isSelected
                                   ? opt.activeCls
@@ -2786,7 +3171,7 @@ export default function DapurPage() {
                           );
                         })}
 
-                        {canEditDapur && (
+                        {canOperateSelectedDate && (
                           <button
                             type="button"
                             disabled={isRowSaving}
@@ -3274,7 +3659,7 @@ export default function DapurPage() {
                 </div>
               </div>
 
-              {canEditDapur && (
+              {canOperateSelectedDate && (
                 <div className="space-y-2 w-full">
                   <button
                     type="button"
@@ -3361,7 +3746,7 @@ export default function DapurPage() {
                 </div>
               </div>
 
-              {canEditDapur && (
+              {canOperateSelectedDate && (
                 <div className="space-y-2">
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -3471,7 +3856,7 @@ export default function DapurPage() {
                             Saldo {formatRupiah(item.saldoBerjalan)}
                           </span>
                         </div>
-                        {canEditDapur && (
+                        {canOperateDapur && (isSuperAdmin || !todayStr || item.tanggal === todayStr) && (
                           <button
                             type="button"
                             onClick={() =>
@@ -3558,7 +3943,7 @@ export default function DapurPage() {
                             Saldo {formatRupiah(item.saldoBerjalan)}
                           </span>
                         </div>
-                        {canEditDapur && (
+                        {canOperateDapur && (isSuperAdmin || !todayStr || item.tanggal === todayStr) && (
                           <button
                             type="button"
                             onClick={() =>
@@ -3583,7 +3968,7 @@ export default function DapurPage() {
           </div>
 
           {/* ARSIP BUKU KAS DAPUR UMUM (JIKA ADA DATA LAMA) */}
-          {(kasList.length > 0 || canEditDapur) && (
+          {(kasList.length > 0 || canOperateSelectedDate) && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-4 border-b border-slate-200 flex flex-col gap-3">
                 <div>
@@ -3596,7 +3981,7 @@ export default function DapurPage() {
                 </div>
 
                 <div className="flex flex-col gap-2 w-full">
-                  {canEditDapur && (
+                  {canOperateSelectedDate && (
                     <div className="grid grid-cols-2 gap-2 w-full">
                       <button
                         type="button"
@@ -3676,7 +4061,7 @@ export default function DapurPage() {
                             Saldo {formatRupiah(k.saldoBerjalan)}
                           </span>
                         </div>
-                        {canEditDapur && (
+                        {canOperateDapur && (isSuperAdmin || !todayStr || k.tanggal === todayStr) && (
                           <button
                             type="button"
                             onClick={() => openKasModal(k.jenis, k)}
@@ -3719,28 +4104,62 @@ export default function DapurPage() {
               </button>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
-                <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                <span>Waktu Masak Terkunci Real-Time (Tidak Dapat Diubah)</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <span className="text-[11px] text-slate-500 block">Jam Mulai</span>
-                  <strong className="font-mono text-sm text-slate-900 tabular-nums">
-                    {formatTimeClock(editingSesi.started_at)} WIB
-                  </strong>
+            {isSuperAdmin ? (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2 text-xs">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Mode Admin Utama: Atur Jam Masak ({formatTanggalPendek(editingSesi.tanggal)})</span>
                 </div>
-                <div>
-                  <span className="text-[11px] text-slate-500 block">Jam Matang / Selesai</span>
-                  <strong className="font-mono text-sm text-slate-900 tabular-nums">
-                    {editingSesi.finished_at
-                      ? `${formatTimeClock(editingSesi.finished_at)} WIB`
-                      : 'Masih Memasak'}
-                  </strong>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-[11px] text-slate-600 font-semibold block mb-1">
+                      Jam Mulai (WIB)
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={sesiStartTimeInput}
+                      onChange={(e) => setSesiStartTimeInput(e.target.value)}
+                      className="w-full min-h-[38px] px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg font-mono text-xs text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-600 font-semibold block mb-1">
+                      Jam Selesai (WIB)
+                    </label>
+                    <input
+                      type="time"
+                      value={sesiFinishTimeInput}
+                      onChange={(e) => setSesiFinishTimeInput(e.target.value)}
+                      className="w-full min-h-[38px] px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg font-mono text-xs text-slate-900"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                  <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <span>Waktu Masak Terkunci Real-Time (Tidak Dapat Diubah)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Jam Mulai</span>
+                    <strong className="font-mono text-sm text-slate-900 tabular-nums">
+                      {formatTimeClock(editingSesi.started_at)} WIB
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Jam Matang / Selesai</span>
+                    <strong className="font-mono text-sm text-slate-900 tabular-nums">
+                      {editingSesi.finished_at
+                        ? `${formatTimeClock(editingSesi.finished_at)} WIB`
+                        : 'Masih Memasak'}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="text-xs">
               <label className="font-semibold text-slate-700 block mb-1">Menu Ringkas</label>
@@ -3820,6 +4239,7 @@ export default function DapurPage() {
                 <label className="font-semibold text-slate-700 block mb-1">Tanggal</label>
                 <input
                   type="date"
+                  min={!isSuperAdmin && todayStr ? todayStr : undefined}
                   value={menuFormTanggal}
                   onChange={(e) => setMenuFormTanggal(e.target.value)}
                   required
@@ -4009,9 +4429,14 @@ export default function DapurPage() {
                 <input
                   type="date"
                   required
+                  max={todayStr || undefined}
+                  min={!isSuperAdmin && todayStr ? todayStr : undefined}
+                  readOnly={!isSuperAdmin}
                   value={kasFormTanggal}
-                  onChange={(e) => setKasFormTanggal(e.target.value)}
-                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                  onChange={(e) => {
+                    if (isSuperAdmin) setKasFormTanggal(e.target.value);
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl read-only:bg-slate-50"
                 />
               </div>
             </div>
@@ -4138,9 +4563,14 @@ export default function DapurPage() {
                 <input
                   type="date"
                   required
+                  max={todayStr || undefined}
+                  min={!isSuperAdmin && todayStr ? todayStr : undefined}
+                  readOnly={!isSuperAdmin}
                   value={buku1Tanggal}
-                  onChange={(e) => setBuku1Tanggal(e.target.value)}
-                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                  onChange={(e) => {
+                    if (isSuperAdmin) setBuku1Tanggal(e.target.value);
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl read-only:bg-slate-50"
                 />
               </div>
               <div>
@@ -4233,9 +4663,14 @@ export default function DapurPage() {
                 <input
                   type="date"
                   required
+                  max={todayStr || undefined}
+                  min={!isSuperAdmin && todayStr ? todayStr : undefined}
+                  readOnly={!isSuperAdmin}
                   value={buku2Tanggal}
-                  onChange={(e) => setBuku2Tanggal(e.target.value)}
-                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl"
+                  onChange={(e) => {
+                    if (isSuperAdmin) setBuku2Tanggal(e.target.value);
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 border border-slate-200 rounded-xl read-only:bg-slate-50"
                 />
               </div>
               <div>
