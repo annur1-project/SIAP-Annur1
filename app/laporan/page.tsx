@@ -1034,7 +1034,7 @@ export default function PusatLaporanPage() {
         verif,
       };
     });
-    const psbMaxTrend = Math.max(1, ...psbWeeklyTrend.map((w) => w.total));
+    const psbMaxTrend = Math.max(5, ...psbWeeklyTrend.map((w) => w.total));
 
     const psbDetail = psbCur
       .slice()
@@ -1146,7 +1146,7 @@ export default function PusatLaporanPage() {
       tglKembaliIso: string;
       tglKembali: string;
       keperluan: string;
-      keterangan: 'Tepat Waktu' | 'Terlambat' | 'Sedang Izin / Terlambat Kembali' | 'Sedang Izin';
+      keterangan: 'Tepat Waktu' | 'Terlambat' | 'Sedang Izin';
     }
 
     const rows: PerizinanDetailRow[] = [];
@@ -1233,8 +1233,6 @@ export default function PusatLaporanPage() {
         } else {
           keterangan = 'Tepat Waktu';
         }
-      } else if (resolvedRencanaIso && refToday > resolvedRencanaIso) {
-        keterangan = 'Sedang Izin / Terlambat Kembali';
       } else {
         keterangan = 'Sedang Izin';
       }
@@ -1739,6 +1737,181 @@ export default function PusatLaporanPage() {
     rawData,
   ]);
 
+  const validChartData = useMemo(() => {
+    if (!rawData || !bundle || !todayStr) return null;
+
+    const pickMetric = (
+      sec: unknown,
+      keys: string[]
+    ): { cur: number; prev: number } | null => {
+      if (!sec || typeof sec !== 'object') return null;
+      const rec = sec as Record<string, unknown>;
+      for (const k of keys) {
+        const v = rec[k];
+        if (v && typeof v === 'object' && 'current' in v) {
+          const pair = v as { current?: unknown; previous?: unknown };
+          return { cur: Number(pair.current) || 0, prev: Number(pair.previous) || 0 };
+        }
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          return { cur: v, prev: 0 };
+        }
+      }
+      for (const [k, v] of Object.entries(rec)) {
+        const kl = k.toLowerCase();
+        if (keys.some((h) => kl.includes(h.toLowerCase()))) {
+          if (v && typeof v === 'object' && 'current' in v) {
+            const pair = v as { current?: unknown; previous?: unknown };
+            return { cur: Number(pair.current) || 0, prev: Number(pair.previous) || 0 };
+          }
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            return { cur: v, prev: 0 };
+          }
+        }
+      }
+      return null;
+    };
+
+    const sixWeeks = buildSixWeekWindows(activeRange.end);
+    const wkBundles = sixWeeks.map((win) => {
+      const wp = computePeriodWindow('rentang', {
+        anchorDate: win.end,
+        monthStr: win.end.slice(0, 7),
+        startDate: win.start,
+        endDate: win.end,
+        todayStr,
+      });
+      return {
+        win,
+        b: buildAllDivisionReports(rawData, wp, todayStr, { canViewBisyaroh }),
+      };
+    });
+
+    const curRec = bundle as unknown as Record<string, unknown>;
+
+    // Aktivitas Divisi (Periode Ini vs Periode Lalu)
+    const izinM = pickMetric(curRec.perizinan, ['totalIzin', 'izin', 'total']) || { cur: 0, prev: 0 };
+    const amanM = pickMetric(curRec.keamanan, ['totalKasus', 'kasus', 'pelanggaran', 'total']) || { cur: 0, prev: 0 };
+    const sehatM = pickMetric(curRec.kesehatan, ['totalSakit', 'santriSakit', 'totalKasus', 'totalKunjungan', 'kunjungan', 'sakit', 'total']) || { cur: 0, prev: 0 };
+    const sarprasM = pickMetric(curRec.sarpras, ['totalLaporan', 'totalTiket', 'laporan', 'tiket', 'aduan', 'total']) || { cur: 0, prev: 0 };
+    const giatM = pickMetric(curRec.kegiatan, ['totalAgenda', 'totalKegiatan', 'agenda', 'kegiatan', 'total']) || { cur: 0, prev: 0 };
+    const laundryActM = pickMetric(curRec.laundry, ['totalSetoran', 'jumlahSetoran', 'totalTransaksi', 'totalPotong', 'setoran', 'potong', 'total']) || { cur: 0, prev: 0 };
+
+    const aktivitasDivisi = [
+      { label: 'Izin Pulang', cur: izinM.cur, prev: izinM.prev },
+      { label: 'Pelanggaran', cur: amanM.cur, prev: amanM.prev },
+      { label: 'Santri Sakit', cur: sehatM.cur, prev: sehatM.prev },
+      { label: 'Laporan Sarpras', cur: sarprasM.cur, prev: sarprasM.prev },
+      { label: 'Agenda Kegiatan', cur: giatM.cur, prev: giatM.prev },
+      { label: 'Setoran Laundry', cur: laundryActM.cur, prev: laundryActM.prev },
+    ];
+
+    // Keuangan Tunai & Transfer (dari bundle.keuangan atau fallback transaksi riil)
+    let mTunai = pickMetric(curRec.keuangan, ['masukTunai', 'tunaiMasuk']);
+    let mTrans = pickMetric(curRec.keuangan, ['masukTransfer', 'transferMasuk']);
+    let kTunai = pickMetric(curRec.keuangan, ['keluarTunai', 'tunaiKeluar']);
+    let kTrans = pickMetric(curRec.keuangan, ['keluarTransfer', 'transferKeluar']);
+
+    if ((!mTunai || !mTrans) && extraRaw.keuanganTransaksiRows.length > 0) {
+      const { start, end, prevStart, prevEnd } = activeRange;
+      let mtC = 0; let mtP = 0;
+      let mtrC = 0; let mtrP = 0;
+      let ktC = 0; let ktP = 0;
+      let ktrC = 0; let ktrP = 0;
+      for (const row of extraRaw.keuanganTransaksiRows) {
+        const iso = extractRowDateIso(row);
+        if (!iso) continue;
+        const isCur = iso >= start && iso <= end;
+        const isPrev = iso >= prevStart && iso <= prevEnd;
+        if (!isCur && !isPrev) continue;
+        const amt = extractNumericField(row, ['nominal', 'jumlah', 'total']);
+        const jenis = `${String(row.tipe || '')} ${String(row.jenis || '')}`.toLowerCase();
+        const isKeluar = /keluar|out|beban|biaya|pengeluaran/.test(jenis);
+        const metode = `${String(row.metode || '')} ${String(row.metode_pembayaran || '')} ${String(row.sumber_dana || '')} ${String(row.akun || '')} ${String(row.kas || '')}`.toLowerCase();
+        const isTransfer = /transfer|bank|rekening|qris|tf|bri|bca|bsi|mandiri/.test(metode);
+        if (isKeluar) {
+          if (isTransfer) { if (isCur) ktrC += amt; else ktrP += amt; }
+          else { if (isCur) ktC += amt; else ktP += amt; }
+        } else {
+          if (isTransfer) { if (isCur) mtrC += amt; else mtrP += amt; }
+          else { if (isCur) mtC += amt; else mtP += amt; }
+        }
+      }
+      if (!mTunai) mTunai = { cur: mtC, prev: mtP };
+      if (!mTrans) mTrans = { cur: mtrC, prev: mtrP };
+      if (!kTunai) kTunai = { cur: ktC, prev: ktP };
+      if (!kTrans) kTrans = { cur: ktrC, prev: ktrP };
+    }
+
+    const keuanganMetode = [
+      { label: 'Masuk Tunai', cur: mTunai?.cur ?? 0, prev: mTunai?.prev ?? 0 },
+      { label: 'Masuk Transfer', cur: mTrans?.cur ?? 0, prev: mTrans?.prev ?? 0 },
+      { label: 'Keluar Tunai', cur: kTunai?.cur ?? 0, prev: kTunai?.prev ?? 0 },
+      { label: 'Keluar Transfer', cur: kTrans?.cur ?? 0, prev: kTrans?.prev ?? 0 },
+    ];
+
+    // Kedisiplinan Dapur (%) - HANYA Masak Tepat Waktu & Hadir Petugas Dapur (tanpa Jamaah)
+    const masakM = pickMetric(curRec.dapur, ['persenTepatWaktu', 'tepatWaktu', 'masakTepatWaktu']) || { cur: 0, prev: 0 };
+    const petugasM = pickMetric(curRec.dapur, ['persenHadirPetugas', 'persenPetugas', 'hadirPetugas', 'petugasHadir', 'kehadiranPetugas', 'persenHadir']) || { cur: 0, prev: 0 };
+    const dapurKedisiplinan = [
+      { label: 'Masak Tepat Waktu', cur: Math.min(100, Math.round(masakM.cur)), prev: Math.min(100, Math.round(masakM.prev)) },
+      { label: 'Hadir Petugas Dapur', cur: Math.min(100, Math.round(petugasM.cur)), prev: Math.min(100, Math.round(petugasM.prev)) },
+    ];
+
+    // Tren 6 Pekan per Divisi
+    const mapWeekly = (
+      extractor: (wb: Record<string, unknown>) => number,
+      formatter: (v: number) => string
+    ) =>
+      wkBundles.map(({ win, b }) => {
+        const val = extractor(b as unknown as Record<string, unknown>);
+        return {
+          shortLabel: win.shortLabel,
+          value: val,
+          valueText: formatter(val),
+        };
+      });
+
+    return {
+      aktivitasDivisi,
+      keuanganMetode,
+      dapurKedisiplinan,
+      weekly: {
+        keuanganPemasukan: mapWeekly(
+          (wb) => pickMetric(wb.keuangan, ['masukTotal', 'totalMasuk', 'pemasukan'])?.cur ?? 0,
+          (v) => formatCompactRupiah(v)
+        ),
+        perizinan: mapWeekly(
+          (wb) => pickMetric(wb.perizinan, ['totalIzin', 'izin', 'total'])?.cur ?? 0,
+          (v) => `${v}`
+        ),
+        keamanan: mapWeekly(
+          (wb) => pickMetric(wb.keamanan, ['totalKasus', 'kasus', 'pelanggaran', 'total'])?.cur ?? 0,
+          (v) => `${v}`
+        ),
+        jamaah: mapWeekly(
+          (wb) => Math.min(100, Math.round(pickMetric(wb.jamaah, ['persenHadir', 'kehadiran', 'persen'])?.cur ?? 0)),
+          (v) => `${v}%`
+        ),
+        kesehatan: mapWeekly(
+          (wb) => pickMetric(wb.kesehatan, ['totalSakit', 'santriSakit', 'totalKasus', 'totalKunjungan', 'kunjungan', 'sakit', 'total'])?.cur ?? 0,
+          (v) => `${v}`
+        ),
+        dapur: mapWeekly(
+          (wb) => Math.min(100, Math.round(pickMetric(wb.dapur, ['persenTepatWaktu', 'tepatWaktu', 'masakTepatWaktu'])?.cur ?? 0)),
+          (v) => `${v}%`
+        ),
+        laundryPotong: mapWeekly(
+          (wb) => pickMetric(wb.laundry, ['totalPotong', 'potong', 'totalSetoran', 'total'])?.cur ?? 0,
+          (v) => `${v}`
+        ),
+        laundrySetoran: mapWeekly(
+          (wb) => pickMetric(wb.laundry, ['totalSetoran', 'jumlahSetoran', 'totalTransaksi', 'totalPotong', 'total'])?.cur ?? 0,
+          (v) => `${v}`
+        ),
+      },
+    };
+  }, [rawData, bundle, todayStr, activeRange, canViewBisyaroh, extraRaw.keuanganTransaksiRows]);
+
   useLayoutEffect(() => {
     const docRoot = docWrapperRef.current;
     const personaliaSource = personaliaSourceRef.current;
@@ -1752,7 +1925,7 @@ export default function PusatLaporanPage() {
       if (docRoot) {
         docRoot
           .querySelectorAll(
-            '[data-siap-personalia-clone="true"], [data-siap-approval-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-chart-clone="true"], [data-siap-std-chart="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"], [data-siap-tunggakan-clone="true"], [data-siap-cakupan-clone="true"]'
+            '[data-siap-personalia-clone="true"], [data-siap-approval-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-chart-clone="true"], [data-siap-std-chart="true"], [data-siap-dapur-trend-inject="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"], [data-siap-tunggakan-clone="true"], [data-siap-cakupan-clone="true"]'
           )
           .forEach((node) => node.remove());
         docRoot
@@ -1784,6 +1957,9 @@ export default function PusatLaporanPage() {
           .querySelectorAll('[data-siap-hidden-kegiatan-foto="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-kegiatan-foto'));
         docRoot
+          .querySelectorAll('[data-siap-hidden-dup="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-dup'));
+        docRoot
           .querySelectorAll('[data-siap-hidden-signature="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-signature'));
         docRoot
@@ -1798,6 +1974,12 @@ export default function PusatLaporanPage() {
         docRoot
           .querySelectorAll('[data-siap-exec-section="true"]')
           .forEach((node) => node.removeAttribute('data-siap-exec-section'));
+        docRoot
+          .querySelectorAll('[data-siap-kpi-grid="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-kpi-grid'));
+        docRoot
+          .querySelectorAll('[data-siap-kpi-card="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-kpi-card'));
         docRoot
           .querySelectorAll('[data-siap-std-6w="true"]')
           .forEach((node) => node.removeAttribute('data-siap-std-6w'));
@@ -1848,7 +2030,7 @@ export default function PusatLaporanPage() {
 
     const enforceReportFontFloor = (root: HTMLElement) => {
       root.querySelectorAll<HTMLElement>('[data-siap-xaxis-label="true"]').forEach((el) => {
-        el.style.fontSize = '8.5pt';
+        el.style.fontSize = '8pt';
         el.style.lineHeight = '1.25';
         el.style.whiteSpace = 'nowrap';
       });
@@ -1863,11 +2045,11 @@ export default function PusatLaporanPage() {
           svgTxt.hasAttribute('data-siap-xaxis-label') ||
           svgTxt.closest('[data-siap-xaxis-label="true"]')
         ) {
-          svgTxt.style.fontSize = '8.5pt';
+          svgTxt.style.fontSize = '8pt';
           svgTxt.style.whiteSpace = 'nowrap';
           return;
         }
-        svgTxt.style.fontSize = '8.5pt';
+        svgTxt.style.fontSize = '8pt';
       });
     };
 
@@ -1890,9 +2072,9 @@ export default function PusatLaporanPage() {
     while (walkedNode) {
       if (
         walkedNode.nodeValue &&
-        (/tiket\s+sarpras|\(\s*\d+\s*tiket\s*\)|\b\d+\s+tiket\b|\[IZIN_META:|tidak_menginap|sie\s+koprasi/i.test(
+        /tiket\s+sarpras|\(\s*\d+\s*tiket\s*\)|\b\d+\s+tiket\b|\[IZIN_META:|tidak_menginap|sie\s+koprasi/i.test(
           walkedNode.nodeValue
-        ))
+        )
       ) {
         textNodesToUpdate.push(walkedNode as Text);
       }
@@ -1938,7 +2120,7 @@ export default function PusatLaporanPage() {
     const approvalEl =
       outermostApprovalCandidates[outermostApprovalCandidates.length - 1] || null;
 
-    // Ganti / sinkronkan Lembar Pengesahan agar TTD & Stempel Digital tampil jelas & tidak terpotong di tepi kanan
+    // Ganti / sinkronkan Lembar Pengesahan agar TTD & Stempel Digital tampil proporsional & tidak terpotong
     if (approvalEl && approvalSource && showCoverAndApproval) {
       const approvalClone = document.createElement('div');
       approvalClone.setAttribute('data-siap-approval-clone', 'true');
@@ -2022,8 +2204,12 @@ export default function PusatLaporanPage() {
     const div2El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+II\b|^\s*II[.\s·:-]+).*(?:Keuangan)/i);
     const div3El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+III\b|^\s*III[.\s·:-]+).*(?:Kegiatan)/i);
     const div4El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+IV\b|^\s*IV[.\s·:-]+).*(?:Perizinan|Izin)/i);
+    const div5El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+V\b|^\s*V[.\s·:-]+).*(?:Keamanan|Pelanggaran)/i);
+    const div6El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+VI\b|^\s*VI[.\s·:-]+).*(?:Jamaah|Sholat)/i);
+    const div7El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+VII\b|^\s*VII[.\s·:-]+).*(?:Kesehatan|Poskestren)/i);
     const div8El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+VIII\b|^\s*VIII[.\s·:-]+).*(?:Dapur)/i);
     const div9El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+IX\b|^\s*IX[.\s·:-]+).*(?:Sarana|Prasarana|Sarpras)/i);
+    const div10El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+X\b|^\s*X[.\s·:-]+).*(?:Laundry)/i);
 
     if (div9El) {
       const d9Walker = document.createTreeWalker(div9El, NodeFilter.SHOW_TEXT);
@@ -2104,7 +2290,7 @@ export default function PusatLaporanPage() {
         const cakupanGrid = document.createElement('div');
         cakupanGrid.setAttribute('data-siap-cakupan-clone', 'true');
         cakupanGrid.className =
-          'grid grid-cols-2 sm:grid-cols-3 print:grid-cols-3 gap-x-4 gap-y-1 text-[9pt] leading-snug text-slate-700 mt-2';
+          'grid grid-cols-2 sm:grid-cols-3 print:grid-cols-3 gap-x-4 gap-y-1 text-[8.5pt] leading-snug text-slate-700 mt-2';
         activeCakupanItems.forEach((item) => {
           const itemEl = document.createElement('div');
           itemEl.className = 'font-medium text-slate-800';
@@ -2119,7 +2305,7 @@ export default function PusatLaporanPage() {
     const execCandidates = allSectionDivs.filter((el) => {
       if (el === searchContainer) return false;
       if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
-      if (outermostDivSections.some((d) => d === el || el.contains(d) || d.contains(el))) return false;
+      if (outermostDivSections.some((d) => el === d || el.contains(d) || d.contains(el))) return false;
       const heading = el.querySelector('h1, h2, h3, h4, p');
       const hTxt = (heading?.textContent || '').replace(/\s+/g, ' ').trim();
       const fullTxt = (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -2175,160 +2361,204 @@ export default function PusatLaporanPage() {
       });
     };
 
-    const formatChartXAxisLabels = (chartCard: HTMLElement) => {
-      // 1. SVG charts (custom SVG atau Recharts)
-      chartCard.querySelectorAll('svg').forEach((svg) => {
-        if (svg.classList.contains('lucide')) return;
-        const allTexts = Array.from(svg.querySelectorAll<SVGTextElement>('text'));
-        if (allTexts.length === 0) return;
+    const parseDisplayNumeric = (raw: string): number => {
+      const cleaned = (raw || '').replace(/\s+/g, ' ').trim();
+      if (!cleaned) return 0;
+      const jtMatch = cleaned.match(/([\d.,]+)\s*jt/i);
+      if (jtMatch) {
+        const num = parseFloat(jtMatch[1].replace(/\./g, '').replace(',', '.'));
+        return Number.isFinite(num) ? Math.round(num * 1_000_000) : 0;
+      }
+      const rbMatch = cleaned.match(/([\d.,]+)\s*(?:rb|k)\b/i);
+      if (rbMatch) {
+        const num = parseFloat(rbMatch[1].replace(/\./g, '').replace(',', '.'));
+        return Number.isFinite(num) ? Math.round(num * 1_000) : 0;
+      }
+      const digitsOnly = cleaned.replace(/[^\d.,-]/g, '');
+      if (!digitsOnly) return 0;
+      if (/^\d{1,3}(?:\.\d{3})+$/.test(digitsOnly)) {
+        return Number(digitsOnly.replace(/\./g, '')) || 0;
+      }
+      const parsed = parseFloat(digitsOnly.replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
 
-        let xAxisTexts: SVGTextElement[] = [];
-        const rechartsX = Array.from(
-          svg.querySelectorAll<SVGTextElement>('.recharts-xAxis text, .recharts-cartesian-axis-tick text')
-        );
-        if (rechartsX.length > 0) {
-          xAxisTexts = rechartsX.filter((t) => {
-            const val = (t.textContent || '').trim();
-            return !/^\d+(?:%|rb|jt)?$/i.test(val);
-          });
+    const createGuideLinesBackdrop = (): HTMLElement => {
+      const guides = document.createElement('div');
+      guides.className =
+        'pointer-events-none absolute inset-x-0 top-7 bottom-5 flex flex-col justify-between z-0';
+      for (let i = 0; i < 3; i += 1) {
+        const line = document.createElement('div');
+        line.className = 'border-t border-dashed border-slate-200/90 w-full';
+        guides.appendChild(line);
+      }
+      return guides;
+    };
+
+    type ChartScaleMode = 'count' | 'percent' | 'rupiah';
+
+    const buildSixWeekBarEl = (
+      points: Array<{ shortLabel: string; value: number; valueText: string; color?: string }>,
+      scaleMode: ChartScaleMode
+    ): HTMLElement => {
+      const values = points.map((p) => Math.max(0, p.value));
+      const maxScale =
+        scaleMode === 'percent'
+          ? 100
+          : scaleMode === 'count'
+          ? Math.max(5, ...values)
+          : Math.max(1, ...values);
+
+      const outerRel = document.createElement('div');
+      outerRel.setAttribute('data-siap-std-chart', 'true');
+      outerRel.className = 'relative pt-2';
+      outerRel.appendChild(createGuideLinesBackdrop());
+
+      const gridEl = document.createElement('div');
+      gridEl.className = 'relative z-10 grid grid-cols-6 gap-2.5 items-end';
+
+      points.forEach((pt) => {
+        const col = document.createElement('div');
+        col.className = 'flex flex-col items-center gap-1 min-w-0';
+
+        const valSpan = document.createElement('span');
+        valSpan.className =
+          'text-[8pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap';
+        valSpan.textContent = pt.valueText;
+
+        const plot = document.createElement('div');
+        plot.className =
+          'w-full h-24 border-b border-slate-300 flex items-end justify-center px-1.5';
+
+        const bar = document.createElement('div');
+        if (pt.value > 0) {
+          const pct =
+            scaleMode === 'percent'
+              ? Math.min(100, Math.max(4, Math.round(pt.value)))
+              : Math.max(8, Math.round((pt.value / maxScale) * 100));
+          bar.className = 'w-full max-w-[34px] rounded-t-md transition-all';
+          bar.style.height = `${pct}%`;
+          bar.style.backgroundColor = pt.color || '#059669';
+        } else {
+          bar.className = 'w-full max-w-[34px] h-[2px] rounded-full bg-slate-300';
         }
+        plot.appendChild(bar);
 
-        if (xAxisTexts.length === 0) {
-          const yCoords = allTexts
-            .map((t) => parseFloat(t.getAttribute('y') || '0'))
-            .filter((y) => !Number.isNaN(y) && y > 0);
-          const maxY = yCoords.length > 0 ? Math.max(...yCoords) : 0;
-          xAxisTexts = allTexts.filter((t) => {
-            const val = (t.textContent || '').replace(/\s+/g, ' ').trim();
-            if (!val) return false;
-            const yVal = parseFloat(t.getAttribute('y') || '0');
-            const isBottomBand = maxY > 0 && yVal >= maxY - 18;
-            const looksLikeXLabel =
-              /kini|pekan|minggu|prd|periode|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|masak|petugas|\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
-                val
-              );
-            return isBottomBand && (looksLikeXLabel || !/^\d+$/.test(val));
-          });
-        }
+        const xSpan = document.createElement('span');
+        xSpan.setAttribute('data-siap-xaxis-label', 'true');
+        xSpan.className =
+          'block text-[8pt] font-semibold text-slate-700 text-center leading-tight whitespace-nowrap';
+        xSpan.textContent = pt.shortLabel;
 
-        const isSixSeries = xAxisTexts.length === 6;
-        xAxisTexts.forEach((txtEl, idx) => {
-          const raw = (txtEl.textContent || '').replace(/\s+/g, ' ').trim();
-          const compacted = compactChartDateLabel(raw, isSixSeries && idx === xAxisTexts.length - 1);
-          const isWeeklyItem = compacted !== raw || /^kini$|^\d{1,2}\/\d{1,2}$/i.test(compacted);
-          if (compacted && compacted !== raw) {
-            const tspan = txtEl.querySelector('tspan');
-            if (tspan && txtEl.children.length === 1) {
-              tspan.textContent = compacted;
-            } else {
-              txtEl.textContent = compacted;
-            }
-          }
-          if (isWeeklyItem) {
-            txtEl.setAttribute('data-siap-xaxis-label', 'true');
-            txtEl.style.fontSize = '8.5pt';
-            txtEl.style.whiteSpace = 'nowrap';
-            txtEl.querySelectorAll<SVGElement>('tspan').forEach((sp) => {
-              sp.setAttribute('data-siap-xaxis-label', 'true');
-              sp.style.fontSize = '8.5pt';
-              sp.style.whiteSpace = 'nowrap';
-            });
+        col.appendChild(valSpan);
+        col.appendChild(plot);
+        col.appendChild(xSpan);
+        gridEl.appendChild(col);
+      });
+
+      outerRel.appendChild(gridEl);
+      return outerRel;
+    };
+
+    const buildPairedBarEl = (
+      cats: Array<{
+        label: string;
+        cur: number;
+        prev: number;
+        curText: string;
+        prevText: string;
+        curColor?: string;
+        prevColor?: string;
+      }>,
+      scaleMode: ChartScaleMode,
+      includeLegend: boolean
+    ): HTMLElement => {
+      const allVals = cats.flatMap((c) => [Math.max(0, c.cur), Math.max(0, c.prev)]);
+      const maxScale =
+        scaleMode === 'percent'
+          ? 100
+          : scaleMode === 'count'
+          ? Math.max(5, ...allVals)
+          : Math.max(1, ...allVals);
+
+      const wrap = document.createElement('div');
+      wrap.setAttribute('data-siap-std-chart', 'true');
+      wrap.className = 'space-y-2 pt-1';
+
+      if (includeLegend) {
+        const legendRow = document.createElement('div');
+        legendRow.className =
+          'flex items-center justify-end gap-3 text-[8pt] leading-tight font-semibold text-slate-600';
+        legendRow.innerHTML = `<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color:${cats[0]?.curColor || '#059669'}"></span>Periode Ini</span><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color:${cats[0]?.prevColor || '#94a3b8'}"></span>Periode Lalu</span>`;
+        wrap.appendChild(legendRow);
+      }
+
+      const outerRel = document.createElement('div');
+      outerRel.className = 'relative pt-2';
+      outerRel.appendChild(createGuideLinesBackdrop());
+
+      const gridEl = document.createElement('div');
+      gridEl.className = 'relative z-10 grid gap-2.5 items-end';
+      gridEl.style.gridTemplateColumns = `repeat(${Math.max(1, cats.length)}, minmax(0, 1fr))`;
+
+      cats.forEach((cat) => {
+        const col = document.createElement('div');
+        col.className = 'flex flex-col items-center gap-1 min-w-0';
+
+        const valRow = document.createElement('div');
+        valRow.className = 'grid grid-cols-2 gap-1.5 w-full';
+
+        const v1 = document.createElement('span');
+        v1.className =
+          'text-[8pt] font-bold text-center tabular-nums leading-tight text-slate-900 whitespace-nowrap';
+        v1.textContent = cat.curText;
+
+        const v2 = document.createElement('span');
+        v2.className =
+          'text-[8pt] font-bold text-center tabular-nums leading-tight text-slate-500 whitespace-nowrap';
+        v2.textContent = cat.prevText;
+
+        valRow.appendChild(v1);
+        valRow.appendChild(v2);
+
+        const plot = document.createElement('div');
+        plot.className =
+          'w-full h-24 border-b border-slate-300 grid grid-cols-2 gap-1.5 items-end px-1.5';
+
+        const makeBar = (val: number, color: string) => {
+          const bar = document.createElement('div');
+          if (val > 0) {
+            const pct =
+              scaleMode === 'percent'
+                ? Math.min(100, Math.max(4, Math.round(val)))
+                : Math.max(8, Math.round((val / maxScale) * 100));
+            bar.className = 'w-full rounded-t-md transition-all';
+            bar.style.height = `${pct}%`;
+            bar.style.backgroundColor = color;
           } else {
-            txtEl.setAttribute('data-siap-cat-label', 'true');
-            txtEl.style.fontSize = '8pt';
+            bar.className = 'w-full h-[2px] rounded-full bg-slate-300';
           }
-        });
+          return bar;
+        };
+
+        plot.appendChild(makeBar(cat.cur, cat.curColor || '#059669'));
+        plot.appendChild(makeBar(cat.prev, cat.prevColor || '#94a3b8'));
+
+        const lbl = document.createElement('span');
+        lbl.setAttribute('data-siap-cat-label', 'true');
+        lbl.className =
+          'block w-full text-[8pt] leading-tight text-center break-words px-1 font-semibold text-slate-700';
+        lbl.textContent = cat.label;
+
+        col.appendChild(valRow);
+        col.appendChild(plot);
+        col.appendChild(lbl);
+        gridEl.appendChild(col);
       });
 
-      // 2. HTML bar / flex / grid charts
-      const htmlLabelRows = Array.from(
-        chartCard.querySelectorAll<HTMLElement>('[class*="grid-cols-"], [class*="flex"]')
-      ).filter((row) => {
-        if (row.closest('svg')) return false;
-        const kids = Array.from(row.children) as HTMLElement[];
-        if (kids.length < 2 || kids.length > 8) return false;
-        const hasNestedBarOrHeading = kids.some((k) => Boolean(k.querySelector('h3, h4, h5, svg')));
-        if (hasNestedBarOrHeading) return false;
-        const texts = kids.map((k) => (k.textContent || '').replace(/\s+/g, ' ').trim());
-        return texts.some((t) =>
-          /kini|pekan|minggu|prd|periode|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|masak|petugas|\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
-            t
-          )
-        );
-      });
-
-      htmlLabelRows.forEach((row) => {
-        const kids = Array.from(row.children) as HTMLElement[];
-        const isSixSeries = kids.length === 6;
-        kids.forEach((kid, idx) => {
-          const leafTarget =
-            kid.children.length === 1 && kid.firstElementChild instanceof HTMLElement
-              ? (kid.firstElementChild as HTMLElement)
-              : kid;
-          const raw = (leafTarget.textContent || '').replace(/\s+/g, ' ').trim();
-          const compacted = compactChartDateLabel(raw, isSixSeries && idx === kids.length - 1);
-          const isWeeklyItem = compacted !== raw || /^kini$|^\d{1,2}\/\d{1,2}$/i.test(compacted);
-          if (compacted && compacted !== raw && leafTarget.children.length === 0) {
-            leafTarget.textContent = compacted;
-          }
-          if (isWeeklyItem) {
-            leafTarget.setAttribute('data-siap-xaxis-label', 'true');
-            leafTarget.classList.add('whitespace-nowrap');
-            leafTarget.style.fontSize = '8.5pt';
-            leafTarget.style.whiteSpace = 'nowrap';
-          } else {
-            leafTarget.setAttribute('data-siap-cat-label', 'true');
-            leafTarget.classList.remove('whitespace-nowrap');
-            leafTarget.classList.add('text-center', 'break-words', 'px-1', 'leading-tight');
-            leafTarget.style.fontSize = '8pt';
-            leafTarget.style.whiteSpace = 'normal';
-          }
-        });
-      });
-
-      // 3. Per-column HTML bar cards
-      const colGrids = Array.from(
-        chartCard.querySelectorAll<HTMLElement>('[class*="grid-cols-6"], [class*="grid-cols-5"], [class*="grid-cols-4"]')
-      );
-      colGrids.forEach((grid) => {
-        const cols = Array.from(grid.children) as HTMLElement[];
-        if (cols.length < 4) return;
-        const isSixSeries = cols.length === 6;
-        cols.forEach((col, idx) => {
-          const spans = Array.from(col.querySelectorAll<HTMLElement>('span, p, div')).filter(
-            (el) =>
-              el.children.length === 0 &&
-              (el.textContent || '').trim().length > 0 &&
-              !el.getAttribute('style')?.includes('height')
-          );
-          const bottomLabel = spans[spans.length - 1];
-          if (!bottomLabel) return;
-          const raw = (bottomLabel.textContent || '').replace(/\s+/g, ' ').trim();
-          if (
-            /kini|pekan|minggu|prd|periode|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
-              raw
-            )
-          ) {
-            const compacted = compactChartDateLabel(raw, isSixSeries && idx === cols.length - 1);
-            const isWeeklyItem = compacted !== raw || /^kini$|^\d{1,2}\/\d{1,2}$/i.test(compacted);
-            if (compacted && compacted !== raw) {
-              bottomLabel.textContent = compacted;
-            }
-            if (isWeeklyItem) {
-              bottomLabel.setAttribute('data-siap-xaxis-label', 'true');
-              bottomLabel.classList.add('whitespace-nowrap');
-              bottomLabel.style.fontSize = '8.5pt';
-              bottomLabel.style.whiteSpace = 'nowrap';
-            } else {
-              bottomLabel.setAttribute('data-siap-cat-label', 'true');
-              bottomLabel.classList.remove('whitespace-nowrap');
-              bottomLabel.classList.add('text-center', 'break-words', 'px-1', 'leading-tight');
-              bottomLabel.style.fontSize = '8pt';
-              bottomLabel.style.whiteSpace = 'normal';
-            }
-          }
-        });
-      });
+      outerRel.appendChild(gridEl);
+      wrap.appendChild(outerRel);
+      return wrap;
     };
 
     const getSvgOffset = (el: Element, svgRoot: Element): { dx: number; dy: number } => {
@@ -2395,7 +2625,19 @@ export default function PusatLaporanPage() {
       return { el: txt, x, y, text };
     };
 
-    const standardizeChartCard = (card: HTMLElement) => {
+    const detectChartDivHint = (card: HTMLElement): string | undefined => {
+      if (div2El?.contains(card)) return 'keuangan';
+      if (div4El?.contains(card)) return 'perizinan';
+      if (div5El?.contains(card)) return 'keamanan';
+      if (div6El?.contains(card)) return 'jamaah';
+      if (div7El?.contains(card)) return 'kesehatan';
+      if (div8El?.contains(card)) return 'dapur';
+      if (div10El?.contains(card)) return 'laundry';
+      if (execSectionEl?.contains(card)) return 'aktivitas';
+      return undefined;
+    };
+
+    const standardizeChartCard = (card: HTMLElement, explicitHint?: string) => {
       if (
         card.hasAttribute('data-siap-hidden-chart') ||
         card.hasAttribute('data-siap-std-6w') ||
@@ -2403,9 +2645,12 @@ export default function PusatLaporanPage() {
       ) {
         return;
       }
+      const divHint = explicitHint || detectChartDivHint(card);
       const fullTxt = (card.textContent || '').replace(/\s+/g, ' ').trim();
       const isSixWeekCard =
-        /tren\s*6\s*(?:pekan|minggu)|6\s*(?:pekan|minggu)\s*terakhir|-5\s*prd/i.test(fullTxt);
+        /tren\s*6\s*(?:pekan|minggu)|6\s*(?:pekan|minggu)\s*terakhir|tren\s+ketepatan\s+masak|-5\s*prd/i.test(
+          fullTxt
+        );
       const isPairedCard =
         !isSixWeekCard &&
         ((/periode\s+ini/i.test(fullTxt) && /periode\s+lalu/i.test(fullTxt)) ||
@@ -2417,16 +2662,51 @@ export default function PusatLaporanPage() {
         (s) => !s.classList.contains('lucide')
       );
 
-      // 1. STANDARISASI GRAFIK TREN 6 PEKAN
-      if (isSixWeekCard) {
-        let extracted6w: Array<{
-          shortLabel: string;
-          valueText: string;
-          pct: number;
-          color: string;
-        }> | null = null;
+      const hideVizTarget = (targetEl: Element) => {
+        if (targetEl instanceof HTMLElement) {
+          targetEl.setAttribute('data-siap-hidden-orig-chart', 'true');
+          targetEl.style.display = 'none';
+        } else {
+          (targetEl as SVGElement).setAttribute('data-siap-hidden-orig-chart', 'true');
+          (targetEl as SVGElement).style.display = 'none';
+        }
+      };
 
-        if (svg) {
+      // 1. STANDARISASI GRAFIK TREN 6 PEKAN (Valid dari database + batang bersih tanpa kotak border)
+      if (isSixWeekCard) {
+        let validWeekly: Array<{ shortLabel: string; value: number; valueText: string }> | null = null;
+        let scaleMode: ChartScaleMode = 'count';
+
+        if (validChartData) {
+          if (divHint === 'keuangan' || /pemasukan|keuangan/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.keuanganPemasukan;
+            scaleMode = 'rupiah';
+          } else if (divHint === 'perizinan' || /izin|perizinan/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.perizinan;
+            scaleMode = 'count';
+          } else if (divHint === 'keamanan' || /pelanggaran|keamanan|kasus/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.keamanan;
+            scaleMode = 'count';
+          } else if (divHint === 'jamaah' || /jamaah|sholat/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.jamaah;
+            scaleMode = 'percent';
+          } else if (divHint === 'kesehatan' || /sakit|kesehatan|poskestren/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.kesehatan;
+            scaleMode = 'count';
+          } else if (divHint === 'dapur' || /dapur|masak/i.test(fullTxt)) {
+            validWeekly = validChartData.weekly.dapur;
+            scaleMode = 'percent';
+          } else if (divHint === 'laundry' || /laundry/i.test(fullTxt)) {
+            validWeekly =
+              /setoran/i.test(fullTxt) && !/potong|pcs/i.test(fullTxt)
+                ? validChartData.weekly.laundrySetoran
+                : validChartData.weekly.laundryPotong;
+            scaleMode = 'count';
+          }
+        }
+
+        // Fallback baca SVG jika bukan salah satu divisi di atas
+        if (!validWeekly && svg) {
           const allSvgTexts = Array.from(svg.querySelectorAll<SVGTextElement>('text'))
             .map((t) => getSvgTextPos(t, svg))
             .filter((t) => t.text.length > 0);
@@ -2449,6 +2729,145 @@ export default function PusatLaporanPage() {
 
           if (xTicks.length === 6) {
             const minXTickY = Math.min(...xTicks.map((t) => t.y));
+            const step = xTicks.length > 1 ? Math.abs(xTicks[1].x - xTicks[0].x) : 60;
+            const valueCandidates = allSvgTexts.filter(
+              (t) =>
+                t.y < minXTickY - 4 &&
+                !xTicks.includes(t) &&
+                t.x >= xTicks[0].x - step * 0.6
+            );
+            const matched = xTicks.map((tick, idx) => {
+              let bestValTxt = '0';
+              let bestDist = step * 0.6;
+              for (const vt of valueCandidates) {
+                const dist = Math.abs(vt.x - tick.x);
+                if (dist < bestDist) {
+                  bestDist = dist;
+                  bestValTxt = vt.text;
+                }
+              }
+              return {
+                shortLabel: compactChartDateLabel(tick.text, idx === 5),
+                value: parseDisplayNumeric(bestValTxt),
+                valueText: bestValTxt,
+              };
+            });
+            const hasPct = matched.some((m) => m.valueText.includes('%'));
+            const hasRp = matched.some((m) => /rp|jt|rb/i.test(m.valueText));
+            scaleMode = hasPct ? 'percent' : hasRp ? 'rupiah' : 'count';
+            validWeekly = matched;
+          }
+        }
+
+        if (validWeekly && validWeekly.length === 6) {
+          const vizTarget = svg
+            ? svg.closest('.recharts-responsive-container') || svg.parentElement || svg
+            : Array.from(card.querySelectorAll<HTMLElement>('div')).find(
+                (el) => el.children.length === 6
+              ) || null;
+          if (vizTarget && vizTarget.parentElement) {
+            hideVizTarget(vizTarget);
+            const chartEl = buildSixWeekBarEl(
+              validWeekly.map((w) => ({ ...w, color: '#059669' })),
+              scaleMode
+            );
+            vizTarget.parentElement.insertBefore(chartEl, vizTarget);
+            card.setAttribute('data-siap-std-6w', 'true');
+            return;
+          }
+        }
+      }
+
+      // 2. STANDARISASI GRAFIK PERBANDINGAN 2 BATANG (Periode Ini vs Periode Lalu)
+      if (isPairedCard) {
+        let validPaired: Array<{
+          label: string;
+          cur: number;
+          prev: number;
+          curText: string;
+          prevText: string;
+          curColor?: string;
+          prevColor?: string;
+        }> | null = null;
+        let scaleMode: ChartScaleMode = 'count';
+
+        if (validChartData) {
+          if (divHint === 'aktivitas' || /aktivitas\s+divisi/i.test(fullTxt)) {
+            validPaired = validChartData.aktivitasDivisi.map((item) => ({
+              label: item.label,
+              cur: item.cur,
+              prev: item.prev,
+              curText: String(item.cur),
+              prevText: String(item.prev),
+            }));
+            scaleMode = 'count';
+          } else if (
+            divHint === 'dapur' ||
+            /kedisiplinan\s+operasional\s+dapur|masak\s+tepat\s+waktu|petugas\s+dapur/i.test(
+              fullTxt
+            )
+          ) {
+            validPaired = validChartData.dapurKedisiplinan.map((item) => ({
+              label: item.label,
+              cur: item.cur,
+              prev: item.prev,
+              curText: `${item.cur}%`,
+              prevText: `${item.prev}%`,
+            }));
+            scaleMode = 'percent';
+          } else if (
+            divHint === 'keuangan' ||
+            /perbandingan\s+keuangan|tunai\s*(?:&|dan)\s*transfer/i.test(fullTxt)
+          ) {
+            const hasAnyFin = validChartData.keuanganMetode.some(
+              (m) => m.cur > 0 || m.prev > 0
+            );
+            if (hasAnyFin) {
+              validPaired = validChartData.keuanganMetode.map((item) => ({
+                label: item.label,
+                cur: item.cur,
+                prev: item.prev,
+                curText: formatCompactRupiah(item.cur),
+                prevText: formatCompactRupiah(item.prev),
+              }));
+              scaleMode = 'rupiah';
+            }
+          }
+        }
+
+        // Parse SVG jika belum terpenuhi oleh validChartData (mis. Keuangan Tunai/Transfer dari pembayaran_santri_detail)
+        if (!validPaired && svg) {
+          const allSvgTexts = Array.from(svg.querySelectorAll<SVGTextElement>('text'))
+            .map((t) => getSvgTextPos(t, svg))
+            .filter((t) => t.text.length > 0);
+          const maxY = allSvgTexts.length > 0 ? Math.max(...allSvgTexts.map((t) => t.y)) : 0;
+
+          const bottomRaw = allSvgTexts
+            .filter(
+              (t) =>
+                t.y >= maxY - 26 &&
+                !/^periode\s+(?:ini|lalu)$/i.test(t.text) &&
+                !/^\d+(?:%|rb|jt)?$/i.test(t.text)
+            )
+            .sort((a, b) => a.x - b.x || a.y - b.y);
+
+          const groupedCatLabels: Array<{ x: number; y: number; text: string }> = [];
+          for (const item of bottomRaw) {
+            const existing = groupedCatLabels.find((g) => Math.abs(g.x - item.x) < 14);
+            if (existing) {
+              existing.text = `${existing.text} ${item.text}`.replace(/\s+/g, ' ').trim();
+              existing.y = Math.min(existing.y, item.y);
+            } else {
+              groupedCatLabels.push({ x: item.x, y: item.y, text: item.text });
+            }
+          }
+
+          if (groupedCatLabels.length >= 2 && groupedCatLabels.length <= 8) {
+            const minCatY = Math.min(...groupedCatLabels.map((g) => g.y));
+            const step =
+              groupedCatLabels.length > 1
+                ? Math.abs(groupedCatLabels[1].x - groupedCatLabels[0].x)
+                : 80;
             const rawShapes = Array.from(
               svg.querySelectorAll('.recharts-bar-rectangle rect, .recharts-bar-rectangle path, rect')
             );
@@ -2459,399 +2878,90 @@ export default function PusatLaporanPage() {
                   Boolean(b) &&
                   !/#f8fafc|#f1f5f9|#e2e8f0|#cbd5e1|rgb\(248|rgb\(241|rgb\(226/i.test(b!.fill)
               );
-
-            const step = xTicks.length > 1 ? Math.abs(xTicks[1].x - xTicks[0].x) : 60;
-            const valueCandidates = allSvgTexts.filter(
+            const valueTexts = allSvgTexts.filter(
               (t) =>
-                t.y < minXTickY - 4 &&
-                !xTicks.includes(t) &&
-                t.x >= xTicks[0].x - step * 0.6
+                t.y < minCatY - 4 &&
+                !/^periode\s+(?:ini|lalu)$/i.test(t.text) &&
+                t.x >= groupedCatLabels[0].x - step * 0.55
             );
 
-            const matchedBars = xTicks.map((tick) => {
-              let bestBar: (typeof barBoxes)[number] | null = null;
-              let bestDist = step * 0.6;
-              for (const b of barBoxes) {
-                const dist = Math.abs(b.cx - tick.x);
-                if (dist < bestDist) {
-                  bestDist = dist;
-                  bestBar = b;
+            const parsedCats = groupedCatLabels
+              .filter((cat) => {
+                if (divHint === 'dapur' && /\bjamaah\b|\bsholat\b/i.test(cat.text)) return false;
+                return true;
+              })
+              .map((cat) => {
+                const nearBars = barBoxes
+                  .filter((b) => Math.abs(b.cx - cat.x) <= step * 0.48)
+                  .sort((a, b) => a.cx - b.cx);
+                const nearVals = valueTexts
+                  .filter((v) => Math.abs(v.x - cat.x) <= step * 0.48)
+                  .sort((a, b) => a.x - b.x);
+                let curText = '0';
+                let prevText = '0';
+                if (nearVals.length >= 2) {
+                  curText = nearVals[0].text;
+                  prevText = nearVals[1].text;
+                } else if (nearVals.length === 1) {
+                  const splitPair = nearVals[0].text.split(/\s+/);
+                  if (splitPair.length === 2) {
+                    curText = splitPair[0];
+                    prevText = splitPair[1];
+                  } else {
+                    curText = nearVals[0].text;
+                  }
                 }
-              }
-              let bestValTxt = '';
-              let bestValDist = step * 0.6;
-              for (const vt of valueCandidates) {
-                const dist = Math.abs(vt.x - tick.x);
-                if (dist < bestValDist) {
-                  bestValDist = dist;
-                  bestValTxt = vt.text;
-                }
-              }
-              return {
-                shortLabel: compactChartDateLabel(tick.text, false),
-                rawLabel: tick.text,
-                valueText: bestValTxt || '0',
-                barH: bestBar ? bestBar.h : 0,
-                color: bestBar?.fill || '#059669',
-              };
-            });
+                return {
+                  label: cat.text,
+                  cur: parseDisplayNumeric(curText),
+                  prev: parseDisplayNumeric(prevText),
+                  curText,
+                  prevText,
+                  curColor: nearBars[0]?.fill || '#059669',
+                  prevColor: nearBars[1]?.fill || '#94a3b8',
+                };
+              });
 
-            const hasMeaningfulValues = matchedBars.some(
-              (m) => m.valueText !== '0' || m.barH > 2
-            );
-            const maxBarH = Math.max(1, ...matchedBars.map((m) => m.barH));
-            if (matchedBars.length === 6 && (hasMeaningfulValues || valueCandidates.length >= 6)) {
-              extracted6w = matchedBars.map((m, idx) => ({
-                shortLabel: compactChartDateLabel(m.rawLabel, idx === 5),
-                valueText: m.valueText,
-                pct: m.barH > 1.5 ? Math.max(10, Math.round((m.barH / maxBarH) * 100)) : 0,
-                color: m.color,
-              }));
-            }
-          }
-        } else {
-          // HTML 6-col trend chart
-          const sixGrid = Array.from(card.querySelectorAll<HTMLElement>('div')).find(
-            (el) => el.children.length === 6
-          );
-          if (sixGrid) {
-            const cols = Array.from(sixGrid.children) as HTMLElement[];
-            const pts = cols.map((col, idx) => {
-              const leafTexts = Array.from(col.querySelectorAll<HTMLElement>('span, p, div')).filter(
-                (el) =>
-                  el.children.length === 0 &&
-                  (el.textContent || '').trim().length > 0 &&
-                  !el.getAttribute('style')?.includes('height')
+            if (parsedCats.length >= 2) {
+              const hasPct = parsedCats.some(
+                (c) => c.curText.includes('%') || c.prevText.includes('%')
               );
-              const rawLbl = (leafTexts[leafTexts.length - 1]?.textContent || '').trim();
-              const valTxt =
-                leafTexts.length >= 2 ? (leafTexts[0]?.textContent || '0').trim() : '0';
-              const barEl = col.querySelector<HTMLElement>('[style*="height"]');
-              const hMatch = (barEl?.getAttribute('style') || '').match(/height\s*:\s*([\d.]+)%/);
-              const pct = hMatch ? Math.round(parseFloat(hMatch[1])) : 0;
-              const bg = barEl ? window.getComputedStyle(barEl).backgroundColor : '';
-              return {
-                shortLabel: compactChartDateLabel(rawLbl, idx === 5),
-                valueText: valTxt,
-                pct,
-                color: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#059669',
-              };
-            });
-            if (pts.every((p) => p.shortLabel.length > 0)) {
-              extracted6w = pts;
+              const hasRp = parsedCats.some(
+                (c) => /rp|jt|rb/i.test(c.curText) || /rp|jt|rb/i.test(c.prevText)
+              );
+              scaleMode = hasPct ? 'percent' : hasRp ? 'rupiah' : 'count';
+              validPaired = parsedCats;
             }
           }
         }
 
-        if (extracted6w && extracted6w.length === 6 && svg) {
-          const vizTarget =
-            svg.closest('.recharts-responsive-container') || svg.parentElement || svg;
-          if (vizTarget instanceof HTMLElement) {
-            vizTarget.setAttribute('data-siap-hidden-orig-chart', 'true');
-            vizTarget.style.display = 'none';
-          } else {
-            svg.setAttribute('data-siap-hidden-orig-chart', 'true');
-            svg.style.display = 'none';
-          }
-
-          const gridEl = document.createElement('div');
-          gridEl.setAttribute('data-siap-std-chart', 'true');
-          gridEl.className = 'grid grid-cols-6 gap-2 items-end pt-2';
-
-          extracted6w.forEach((pt) => {
-            const col = document.createElement('div');
-            col.className = 'flex flex-col items-center gap-1 min-w-0';
-
-            const valSpan = document.createElement('span');
-            valSpan.className =
-              'text-[8.5pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap';
-            valSpan.textContent = pt.valueText;
-
-            const box = document.createElement('div');
-            box.className =
-              'w-full h-24 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1 overflow-hidden';
-
-            const bar = document.createElement('div');
-            if (pt.pct > 0) {
-              bar.className = 'w-full rounded-lg transition-all';
-              bar.style.height = `${pt.pct}%`;
-              bar.style.backgroundColor = pt.color || '#059669';
-            } else {
-              bar.className = 'w-full h-1 rounded-full bg-slate-200';
-            }
-            box.appendChild(bar);
-
-            const xSpan = document.createElement('span');
-            xSpan.setAttribute('data-siap-xaxis-label', 'true');
-            xSpan.className =
-              'block text-[8.5pt] font-semibold text-slate-700 text-center leading-tight whitespace-nowrap';
-            xSpan.textContent = pt.shortLabel;
-
-            col.appendChild(valSpan);
-            col.appendChild(box);
-            col.appendChild(xSpan);
-            gridEl.appendChild(col);
-          });
-
-          vizTarget.parentElement?.insertBefore(gridEl, vizTarget);
-          card.setAttribute('data-siap-std-6w', 'true');
-          return;
-        } else if (!svg && extracted6w) {
-          // Rapikan HTML grid 6 kolom yang sudah ada
-          const sixGrid = Array.from(card.querySelectorAll<HTMLElement>('div')).find(
-            (el) => el.children.length === 6
-          );
-          if (sixGrid) {
-            sixGrid.className = 'grid grid-cols-6 gap-2 items-end pt-2';
-            Array.from(sixGrid.children).forEach((col, idx) => {
-              if (!(col instanceof HTMLElement)) return;
-              const barBox = col.querySelector<HTMLElement>('[class*="h-"]');
-              if (barBox && /h-(?:14|16|20|24|28|32|36)/.test(barBox.className)) {
-                barBox.className =
-                  'w-full h-24 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1 overflow-hidden';
-              }
-              const leafTexts = Array.from(col.querySelectorAll<HTMLElement>('span, p, div')).filter(
-                (el) =>
-                  el.children.length === 0 &&
-                  (el.textContent || '').trim().length > 0 &&
-                  !el.getAttribute('style')?.includes('height')
-              );
-              if (leafTexts.length >= 2) {
-                const topVal = leafTexts[0];
-                topVal.className =
-                  'text-[8.5pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap';
-              }
-              const bottomLbl = leafTexts[leafTexts.length - 1];
-              if (bottomLbl) {
-                bottomLbl.textContent = compactChartDateLabel(
-                  bottomLbl.textContent || '',
-                  idx === 5
+        if (validPaired && validPaired.length >= 2) {
+          const vizTarget = svg
+            ? svg.closest('.recharts-responsive-container') || svg.parentElement || svg
+            : Array.from(card.querySelectorAll<HTMLElement>('div')).find((el) => {
+                const kids = Array.from(el.children);
+                return (
+                  kids.length >= 2 &&
+                  kids.length <= 6 &&
+                  el.querySelectorAll('[style*="height"]').length >= 2
                 );
-                bottomLbl.setAttribute('data-siap-xaxis-label', 'true');
-                bottomLbl.className =
-                  'block text-[8.5pt] font-semibold text-slate-700 text-center leading-tight whitespace-nowrap';
-              }
-            });
-            card.setAttribute('data-siap-std-6w', 'true');
+              }) || null;
+
+          if (vizTarget && vizTarget.parentElement) {
+            hideVizTarget(vizTarget);
+            const hasExternalLegend = Array.from(card.querySelectorAll('span, p, div')).some(
+              (el) =>
+                !vizTarget.contains(el) &&
+                el.children.length === 0 &&
+                /^periode\s+(?:ini|lalu)$/i.test((el.textContent || '').trim())
+            );
+            const pairedEl = buildPairedBarEl(validPaired, scaleMode, !hasExternalLegend);
+            vizTarget.parentElement.insertBefore(pairedEl, vizTarget);
+            card.setAttribute('data-siap-std-paired', 'true');
             return;
           }
         }
       }
-
-      // 2. STANDARISASI GRAFIK PERBANDINGAN 2 BATANG (Periode Ini vs Periode Lalu)
-      if (isPairedCard && svg) {
-        const allSvgTexts = Array.from(svg.querySelectorAll<SVGTextElement>('text'))
-          .map((t) => getSvgTextPos(t, svg))
-          .filter((t) => t.text.length > 0);
-        const maxY = allSvgTexts.length > 0 ? Math.max(...allSvgTexts.map((t) => t.y)) : 0;
-
-        // Gabungkan label sumbu-X yang terpecah menjadi 2 baris di X yang sama
-        const bottomRaw = allSvgTexts
-          .filter(
-            (t) =>
-              t.y >= maxY - 26 &&
-              !/^periode\s+(?:ini|lalu)$/i.test(t.text) &&
-              !/^\d+(?:%|rb|jt)?$/i.test(t.text)
-          )
-          .sort((a, b) => a.x - b.x || a.y - b.y);
-
-        const groupedCatLabels: Array<{ x: number; y: number; text: string }> = [];
-        for (const item of bottomRaw) {
-          const existing = groupedCatLabels.find((g) => Math.abs(g.x - item.x) < 14);
-          if (existing) {
-            existing.text = `${existing.text} ${item.text}`.replace(/\s+/g, ' ').trim();
-            existing.y = Math.min(existing.y, item.y);
-          } else {
-            groupedCatLabels.push({ x: item.x, y: item.y, text: item.text });
-          }
-        }
-
-        if (groupedCatLabels.length >= 2 && groupedCatLabels.length <= 8) {
-          const minCatY = Math.min(...groupedCatLabels.map((g) => g.y));
-          const step =
-            groupedCatLabels.length > 1
-              ? Math.abs(groupedCatLabels[1].x - groupedCatLabels[0].x)
-              : 80;
-
-          const rawShapes = Array.from(
-            svg.querySelectorAll('.recharts-bar-rectangle rect, .recharts-bar-rectangle path, rect')
-          );
-          const barBoxes = rawShapes
-            .map((sh) => getSvgRectBox(sh, svg))
-            .filter(
-              (b): b is NonNullable<typeof b> =>
-                Boolean(b) &&
-                !/#f8fafc|#f1f5f9|#e2e8f0|#cbd5e1|rgb\(248|rgb\(241|rgb\(226/i.test(b!.fill)
-            );
-
-          const valueTexts = allSvgTexts.filter(
-            (t) =>
-              t.y < minCatY - 4 &&
-              !/^periode\s+(?:ini|lalu)$/i.test(t.text) &&
-              t.x >= groupedCatLabels[0].x - step * 0.55
-          );
-
-          const categories = groupedCatLabels.map((cat) => {
-            const nearBars = barBoxes
-              .filter((b) => Math.abs(b.cx - cat.x) <= step * 0.48)
-              .sort((a, b) => a.cx - b.cx);
-            const leftBar = nearBars[0] || null;
-            const rightBar = nearBars[1] || null;
-
-            const nearVals = valueTexts
-              .filter((v) => Math.abs(v.x - cat.x) <= step * 0.48)
-              .sort((a, b) => a.x - b.x);
-
-            let curVal = '0';
-            let prevVal = '0';
-            if (nearVals.length >= 2) {
-              curVal = nearVals[0].text;
-              prevVal = nearVals[1].text;
-            } else if (nearVals.length === 1) {
-              const splitPair = nearVals[0].text.split(/\s+/);
-              if (splitPair.length === 2) {
-                curVal = splitPair[0];
-                prevVal = splitPair[1];
-              } else {
-                curVal = nearVals[0].text;
-              }
-            }
-
-            return {
-              label: cat.text,
-              curVal,
-              prevVal,
-              curH: leftBar ? leftBar.h : 0,
-              prevH: rightBar ? rightBar.h : 0,
-              curColor: leftBar?.fill || '#059669',
-              prevColor: rightBar?.fill || '#94a3b8',
-            };
-          });
-
-          const maxPairH = Math.max(
-            1,
-            ...categories.map((c) => Math.max(c.curH, c.prevH))
-          );
-
-          const vizTarget =
-            svg.closest('.recharts-responsive-container') || svg.parentElement || svg;
-          if (vizTarget instanceof HTMLElement) {
-            vizTarget.setAttribute('data-siap-hidden-orig-chart', 'true');
-            vizTarget.style.display = 'none';
-          } else {
-            svg.setAttribute('data-siap-hidden-orig-chart', 'true');
-            svg.style.display = 'none';
-          }
-
-          const wrap = document.createElement('div');
-          wrap.setAttribute('data-siap-std-chart', 'true');
-          wrap.className = 'space-y-2 pt-1';
-
-          const hasExternalLegend = Array.from(card.querySelectorAll('span, p, div')).some(
-            (el) =>
-              !vizTarget.contains(el) &&
-              el.children.length === 0 &&
-              /^periode\s+(?:ini|lalu)$/i.test((el.textContent || '').trim())
-          );
-          if (!hasExternalLegend) {
-            const legendRow = document.createElement('div');
-            legendRow.className =
-              'flex items-center justify-end gap-3 text-[8.5pt] leading-tight font-semibold text-slate-600';
-            legendRow.innerHTML = `<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color:${categories[0]?.curColor || '#059669'}"></span>Periode Ini</span><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color:${categories[0]?.prevColor || '#94a3b8'}"></span>Periode Lalu</span>`;
-            wrap.appendChild(legendRow);
-          }
-
-          const gridEl = document.createElement('div');
-          gridEl.className = 'grid gap-2 items-end';
-          gridEl.style.gridTemplateColumns = `repeat(${categories.length}, minmax(0, 1fr))`;
-
-          categories.forEach((cat) => {
-            const col = document.createElement('div');
-            col.className = 'flex flex-col items-center gap-1 min-w-0';
-
-            const valRow = document.createElement('div');
-            valRow.className = 'grid grid-cols-2 gap-1.5 w-full';
-
-            const v1 = document.createElement('span');
-            v1.className =
-              'text-[8pt] font-bold text-center tabular-nums leading-tight text-slate-900';
-            v1.textContent = cat.curVal;
-
-            const v2 = document.createElement('span');
-            v2.className =
-              'text-[8pt] font-bold text-center tabular-nums leading-tight text-slate-500';
-            v2.textContent = cat.prevVal;
-
-            valRow.appendChild(v1);
-            valRow.appendChild(v2);
-
-            const box = document.createElement('div');
-            box.className =
-              'w-full h-24 rounded-xl bg-white border border-slate-200 grid grid-cols-2 gap-1.5 items-end p-1.5 overflow-hidden';
-
-            const b1 = document.createElement('div');
-            const pct1 = cat.curH > 1.5 ? Math.max(10, Math.round((cat.curH / maxPairH) * 100)) : 0;
-            if (pct1 > 0) {
-              b1.className = 'w-full rounded-md transition-all';
-              b1.style.height = `${pct1}%`;
-              b1.style.backgroundColor = cat.curColor || '#059669';
-            } else {
-              b1.className = 'w-full h-1 rounded-full bg-slate-200';
-            }
-
-            const b2 = document.createElement('div');
-            const pct2 = cat.prevH > 1.5 ? Math.max(10, Math.round((cat.prevH / maxPairH) * 100)) : 0;
-            if (pct2 > 0) {
-              b2.className = 'w-full rounded-md transition-all';
-              b2.style.height = `${pct2}%`;
-              b2.style.backgroundColor = cat.prevColor || '#94a3b8';
-            } else {
-              b2.className = 'w-full h-1 rounded-full bg-slate-200';
-            }
-
-            box.appendChild(b1);
-            box.appendChild(b2);
-
-            const lbl = document.createElement('span');
-            lbl.setAttribute('data-siap-cat-label', 'true');
-            lbl.className =
-              'block w-full text-[8pt] leading-tight text-center break-words px-1 font-semibold text-slate-700';
-            lbl.textContent = cat.label;
-
-            col.appendChild(valRow);
-            col.appendChild(box);
-            col.appendChild(lbl);
-            gridEl.appendChild(col);
-          });
-
-          wrap.appendChild(gridEl);
-          vizTarget.parentElement?.insertBefore(wrap, vizTarget);
-          card.setAttribute('data-siap-std-paired', 'true');
-          return;
-        }
-      }
-
-      if (isPairedCard && !svg) {
-        // HTML paired bar chart: paksa gap-1.5, nilai terpisah text-[8pt] font-bold text-center, label break-words px-1
-        card.querySelectorAll<HTMLElement>('[class*="flex"], [class*="grid"]').forEach((box) => {
-          const kids = Array.from(box.children) as HTMLElement[];
-          if (kids.length === 2 && kids.every((k) => k.children.length <= 1)) {
-            const texts = kids.map((k) => (k.textContent || '').trim());
-            const looksLikeTwoNums = texts.every((t) => /^[\d.,]+(?:\s*(?:%|rb|jt|org))?$|^Rp/i.test(t));
-            if (looksLikeTwoNums) {
-              box.classList.add('gap-1.5');
-              kids.forEach((k) => {
-                k.classList.add('text-[8pt]', 'font-bold', 'text-center');
-              });
-            } else if (kids.every((k) => (k.getAttribute('style') || '').includes('height'))) {
-              box.classList.add('gap-1.5');
-            }
-          }
-        });
-        card.setAttribute('data-siap-std-paired', 'true');
-      }
-
-      formatChartXAxisLabels(card);
     };
 
     const insertAfterHeaderOrSummary = (sectionEl: HTMLElement, blockEl: HTMLElement) => {
@@ -2929,7 +3039,6 @@ export default function PusatLaporanPage() {
         }
       }
 
-      // Fallback scan bila ada kartu grafik lain di execSectionEl
       if (execSectionEl) {
         const rawChartEls = Array.from(
           execSectionEl.querySelectorAll<HTMLElement>('div, section')
@@ -3024,65 +3133,153 @@ export default function PusatLaporanPage() {
             clone.setAttribute('data-siap-chart-card', 'true');
             clone.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
             normalizeSvgForClone(clone);
-            standardizeChartCard(clone);
+            standardizeChartCard(clone, 'keuangan');
             finWrap.appendChild(clone);
           });
           insertAfterHeaderOrSummary(div2El, finWrap);
         }
+      } else if (div2El && validChartData) {
+        const div2Headings = Array.from(div2El.querySelectorAll('h3, h4, h5, p')).map((el) =>
+          (el.textContent || '').trim()
+        );
+        const hasDiv2MethodChart = div2Headings.some((t) =>
+          /perbandingan\s+keuangan|tunai\s*(?:&|dan)\s*transfer/i.test(t)
+        );
+        const hasDiv2TrendChart = div2Headings.some((t) =>
+          /tren\s*6\s*(?:pekan|minggu)/i.test(t)
+        );
+        if (!hasDiv2MethodChart || !hasDiv2TrendChart) {
+          const finWrap = document.createElement('div');
+          finWrap.setAttribute('data-siap-chart-clone', 'true');
+          finWrap.className = 'my-4 grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-4 break-inside-avoid';
+
+          if (!hasDiv2MethodChart) {
+            const methodCard = document.createElement('div');
+            methodCard.setAttribute('data-siap-card-styled', 'true');
+            methodCard.setAttribute('data-siap-chart-card', 'true');
+            methodCard.setAttribute('data-siap-std-paired', 'true');
+            methodCard.className = 'rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2 break-inside-avoid';
+            const hdr = document.createElement('h4');
+            hdr.className = 'text-[9.5pt] font-bold text-slate-900 leading-tight';
+            hdr.textContent = 'Perbandingan Keuangan (Tunai & Transfer)';
+            methodCard.appendChild(hdr);
+            methodCard.appendChild(
+              buildPairedBarEl(
+                validChartData.keuanganMetode.map((item) => ({
+                  label: item.label,
+                  cur: item.cur,
+                  prev: item.prev,
+                  curText: formatCompactRupiah(item.cur),
+                  prevText: formatCompactRupiah(item.prev),
+                })),
+                'rupiah',
+                true
+              )
+            );
+            finWrap.appendChild(methodCard);
+          }
+
+          if (!hasDiv2TrendChart) {
+            const trendCard = document.createElement('div');
+            trendCard.setAttribute('data-siap-card-styled', 'true');
+            trendCard.setAttribute('data-siap-chart-card', 'true');
+            trendCard.setAttribute('data-siap-std-6w', 'true');
+            trendCard.className = 'rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2 break-inside-avoid';
+            const hdr = document.createElement('h4');
+            hdr.className = 'text-[9.5pt] font-bold text-slate-900 leading-tight';
+            hdr.textContent = 'Tren 6 Pekan Terakhir — Pemasukan';
+            trendCard.appendChild(hdr);
+            trendCard.appendChild(
+              buildSixWeekBarEl(
+                validChartData.weekly.keuanganPemasukan.map((w) => ({ ...w, color: '#059669' })),
+                'rupiah'
+              )
+            );
+            finWrap.appendChild(trendCard);
+          }
+
+          if (finWrap.children.length > 0) {
+            insertAfterHeaderOrSummary(div2El, finWrap);
+          }
+        }
       }
 
-      // 0b-2. Sembunyikan grafik kedisiplinan campuran di Ringkasan Eksekutif & kloning versi khusus Dapur ke Bab VIII. Dapur Umum & Konsumsi Santri
+      // 0b-2. Sembunyikan grafik kedisiplinan campuran di Ringkasan Eksekutif & tampilkan khusus Dapur di Bab VIII
       if (disciplineCards.length > 0) {
         disciplineCards.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
-        if (div8El) {
-          const dapurWrap = document.createElement('div');
-          dapurWrap.setAttribute('data-siap-chart-clone', 'true');
-          dapurWrap.className = `my-4 grid grid-cols-1 ${
-            disciplineCards.length > 1 ? 'md:grid-cols-2 print:grid-cols-2' : ''
-          } gap-4 break-inside-avoid`;
+      }
+      if (div8El && validChartData) {
+        const dapurWrap = document.createElement('div');
+        dapurWrap.setAttribute('data-siap-chart-clone', 'true');
+        dapurWrap.className = 'my-4 grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-4 break-inside-avoid';
 
+        if (disciplineCards.length > 0) {
           disciplineCards.forEach((orig) => {
             const clone = orig.cloneNode(true) as HTMLElement;
             clone.removeAttribute('data-siap-hidden-chart');
             clone.setAttribute('data-siap-card-styled', 'true');
             clone.setAttribute('data-siap-chart-card', 'true');
             clone.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
-
-            const rowsToStrip = Array.from(clone.querySelectorAll<HTMLElement>('div, li, tr')).filter(
-              (item) => {
-                if (item === clone) return false;
-                const t = (item.textContent || '').replace(/\s+/g, ' ').trim();
-                const hasJamaah = /\bjamaah\b|\bsholat\b/i.test(t);
-                const hasDapur = /\bdapur\b|\bmasak\b|\bpetugas\b/i.test(t);
-                return hasJamaah && !hasDapur && t.length < 180;
-              }
-            );
-            const outermostStrips = rowsToStrip.filter(
-              (cand) => !rowsToStrip.some((other) => other !== cand && other.contains(cand))
-            );
-            outermostStrips.forEach((r) => r.remove());
-
-            clone.querySelectorAll('svg g').forEach((gEl) => {
-              const gt = (gEl.textContent || '').replace(/\s+/g, ' ').trim();
-              if (/\bjamaah\b|\bsholat\b/i.test(gt) && !/\bdapur\b|\bmasak\b|\bpetugas\b/i.test(gt) && gt.length < 120) {
-                gEl.remove();
-              }
-            });
-
             clone.querySelectorAll('h3, h4, h5, p').forEach((hdr) => {
               const ht = (hdr.textContent || '').trim();
-              if (/kedisiplinan/i.test(ht) && (/jamaah/i.test(ht) || /persentase/i.test(ht))) {
-                hdr.textContent = 'Kedisiplinan Operasional Dapur (Masak & Petugas)';
-              } else if (/jamaah/i.test(ht) && /dapur/i.test(ht)) {
-                hdr.textContent = ht.replace(/jamaah\s*(?:&|dan)?\s*/gi, '').trim();
+              if (/kedisiplinan/i.test(ht) && (/jamaah/i.test(ht) || /persentase/i.test(ht) || /dapur/i.test(ht))) {
+                hdr.textContent = 'Perbandingan Kedisiplinan Dapur (%)';
               }
             });
-
             normalizeSvgForClone(clone);
-            standardizeChartCard(clone);
+            standardizeChartCard(clone, 'dapur');
             dapurWrap.appendChild(clone);
           });
+        } else {
+          const discCard = document.createElement('div');
+          discCard.setAttribute('data-siap-card-styled', 'true');
+          discCard.setAttribute('data-siap-chart-card', 'true');
+          discCard.setAttribute('data-siap-std-paired', 'true');
+          discCard.className = 'rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2 break-inside-avoid';
+          const hdr = document.createElement('h4');
+          hdr.className = 'text-[9.5pt] font-bold text-slate-900 leading-tight';
+          hdr.textContent = 'Perbandingan Kedisiplinan Dapur (%)';
+          discCard.appendChild(hdr);
+          discCard.appendChild(
+            buildPairedBarEl(
+              validChartData.dapurKedisiplinan.map((item) => ({
+                label: item.label,
+                cur: item.cur,
+                prev: item.prev,
+                curText: `${item.cur}%`,
+                prevText: `${item.prev}%`,
+              })),
+              'percent',
+              true
+            )
+          );
+          dapurWrap.appendChild(discCard);
+        }
 
+        const alreadyHasDapur6w = Array.from(div8El.querySelectorAll('h3, h4, h5, p')).some((el) =>
+          /tren\s+(?:ketepatan\s+masak|6\s*(?:pekan|minggu))/i.test((el.textContent || '').trim())
+        );
+        if (!alreadyHasDapur6w) {
+          const trendCard = document.createElement('div');
+          trendCard.setAttribute('data-siap-dapur-trend-inject', 'true');
+          trendCard.setAttribute('data-siap-card-styled', 'true');
+          trendCard.setAttribute('data-siap-chart-card', 'true');
+          trendCard.setAttribute('data-siap-std-6w', 'true');
+          trendCard.className = 'rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2 break-inside-avoid';
+          const hdr = document.createElement('h4');
+          hdr.className = 'text-[9.5pt] font-bold text-slate-900 leading-tight';
+          hdr.textContent = 'Tren Ketepatan Masak Dapur (6 Pekan Terakhir)';
+          trendCard.appendChild(hdr);
+          trendCard.appendChild(
+            buildSixWeekBarEl(
+              validChartData.weekly.dapur.map((w) => ({ ...w, color: '#059669' })),
+              'percent'
+            )
+          );
+          dapurWrap.appendChild(trendCard);
+        }
+
+        if (dapurWrap.children.length > 0) {
           insertAfterHeaderOrSummary(div8El, dapurWrap);
         }
       }
@@ -3090,7 +3287,6 @@ export default function PusatLaporanPage() {
       // Sembunyikan juga grafik sisa di Ringkasan Eksekutif agar tersisa HANYA 1 grafik "Perbandingan Aktivitas Divisi"
       otherExtraExecCharts.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
 
-      // Sembunyikan grid pembungkus jika seluruh anaknya tersembunyi
       [...financeCards, ...disciplineCards, ...otherExtraExecCharts].forEach((hiddenCard) => {
         const p = hiddenCard.parentElement;
         if (!p || p === execSectionEl || p === searchContainer) return;
@@ -3107,7 +3303,7 @@ export default function PusatLaporanPage() {
         actCard.setAttribute('data-siap-full-span', 'true');
         actCard.setAttribute('data-siap-card-styled', 'true');
         actCard.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
-        standardizeChartCard(actCard);
+        standardizeChartCard(actCard, 'aktivitas');
       });
     }
 
@@ -3136,7 +3332,7 @@ export default function PusatLaporanPage() {
       });
     });
 
-    // Rapikan label sumbu X pada grafik lain di seluruh dokumen (termasuk grafik Koperasi & PSB)
+    // Pastikan grafik lain yang ditandai ikut distandarisasi
     searchContainer
       .querySelectorAll<HTMLElement>('[data-siap-chart-card="true"]')
       .forEach((card) => {
@@ -3145,7 +3341,68 @@ export default function PusatLaporanPage() {
         }
       });
 
-    // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku & hapus struktur lama ganda
+    // 0c. Seragamkan seluruh 4 kartu ringkasan KPI atas di Ringkasan Eksekutif dan Bab I..X
+    const normalizeKpiGridsInSection = (sectionEl: HTMLElement | null) => {
+      if (!sectionEl) return;
+      const grids = Array.from(sectionEl.querySelectorAll<HTMLElement>('div')).filter((el) => {
+        if (el === sectionEl) return false;
+        if (el.closest('[data-siap-hidden-chart="true"]')) return false;
+        if (el.closest('[data-siap-hidden-personalia="true"]')) return false;
+        if (el.closest('[data-siap-kamar-grid="true"]')) return false;
+        if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+        if (el.closest('[data-siap-chart-card="true"]')) return false;
+        if (el.closest('[data-siap-approval="true"]')) return false;
+        if (el.closest('[data-siap-cakupan-clone="true"]')) return false;
+        if (el.querySelector('table') || hasChartVisual(el)) return false;
+        const kids = Array.from(el.children) as HTMLElement[];
+        if (kids.length !== 4) return false;
+        const cls = typeof el.className === 'string' ? el.className : '';
+        if (!/\bgrid\b/.test(cls)) return false;
+        return kids.every((k) => {
+          const kc = typeof k.className === 'string' ? k.className : '';
+          return /\bborder\b/.test(kc) || /\bbg-/.test(kc);
+        });
+      });
+
+      const outermostGrids = grids.filter(
+        (cand) => !grids.some((other) => other !== cand && cand.contains(other))
+      );
+
+      outermostGrids.forEach((gridEl) => {
+        gridEl.setAttribute('data-siap-kpi-grid', 'true');
+        gridEl.classList.remove(
+          'grid-cols-1',
+          'grid-cols-2',
+          'sm:grid-cols-2',
+          'sm:grid-cols-4',
+          'md:grid-cols-2',
+          'md:grid-cols-4',
+          'gap-2',
+          'gap-3',
+          'gap-4'
+        );
+        gridEl.classList.add('grid', 'grid-cols-4', 'gap-2.5', 'items-stretch');
+        Array.from(gridEl.children).forEach((kid) => {
+          if (!(kid instanceof HTMLElement)) return;
+          kid.setAttribute('data-siap-kpi-card', 'true');
+          kid.classList.remove('p-2', 'p-4', 'px-2.5', 'py-2', 'px-3', 'py-2.5');
+          kid.classList.add(
+            'flex',
+            'flex-col',
+            'justify-between',
+            'min-h-[82px]',
+            'p-3',
+            'rounded-xl',
+            'overflow-hidden',
+            'h-full'
+          );
+        });
+      });
+    };
+    normalizeKpiGridsInSection(execSectionEl);
+    outermostDivSections.forEach((divEl) => normalizeKpiGridsInSection(divEl));
+
+    // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku & sapu bersih struktur lama ganda
     const administrasiVisible =
       !isExtraKey(scope) &&
       (scope === 'gabungan'
@@ -3155,7 +3412,21 @@ export default function PusatLaporanPage() {
     if (administrasiVisible) {
       const adminScopeEl = div1ScopeEl || searchContainer;
 
-      // 1a. Sinkronkan angka kartu Pengurus Aktif (18 orang: Kepala Pondok ke bawah, kecuali Pengasuh, Dewan Pengasuh/Dzurriyah, Direktur Pendidikan)
+      // Hitung santri ndalem dari DOM atau extraRaw.santriRows agar Total Penghuni Pondok & Total Keseluruhan sinkron (134 + 0 + 18 = 152)
+      let detectedNdalemCount = 0;
+      const ndalemCard = Array.from((adminScopeEl || searchContainer).querySelectorAll<HTMLElement>('div')).find(
+        (d) => {
+          if (d.closest('[data-siap-personalia-clone="true"]')) return false;
+          const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
+          return /^Santri\s+Ndalem\b/i.test(t) && t.length < 120;
+        }
+      );
+      if (ndalemCard) {
+        const m = (ndalemCard.textContent || '').match(/\b(\d+)\b/);
+        if (m) detectedNdalemCount = Number(m[1]) || 0;
+      }
+
+      // 1a. Sinkronkan angka kartu Pengurus Aktif (18 orang) & Total Penghuni Pondok / Total Keseluruhan (152 orang)
       if (pengurusRows.length > 0) {
         const updatePengurusCardInScope = (rootEl: HTMLElement | null) => {
           if (!rootEl) return;
@@ -3189,13 +3460,12 @@ export default function PusatLaporanPage() {
         updatePengurusCardInScope(adminScopeEl);
         updatePengurusCardInScope(execSectionEl);
 
-        // Sinkronkan kartu Total Penghuni Pondok di Ringkasan Eksekutif (134 santri + 0 ndalem + 18 pengurus = 152 orang)
         const syncTotalPenghuniCard = (rootEl: HTMLElement | null) => {
           if (!rootEl) return;
           const cards = Array.from(rootEl.querySelectorAll<HTMLElement>('div')).filter((d) => {
             if (d.closest('[data-siap-personalia-clone="true"]')) return false;
             const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
-            return /Total\s+Penghuni\s+Pondok/i.test(t) && t.length < 240;
+            return /Total\s+(?:Penghuni\s+Pondok|Keseluruhan)/i.test(t) && t.length < 240;
           });
           const innerCards = cards.filter(
             (cand) => !cards.some((other) => other !== cand && cand.contains(other))
@@ -3203,7 +3473,7 @@ export default function PusatLaporanPage() {
           innerCards.forEach((card) => {
             const fullCardText = (card.textContent || '').replace(/\s+/g, ' ').trim();
             const ndalemMatch = fullCardText.match(/(\d+)\s*ndalem/i);
-            const ndalemCount = ndalemMatch ? Number(ndalemMatch[1]) : 0;
+            const ndalemCount = ndalemMatch ? Number(ndalemMatch[1]) : detectedNdalemCount;
             const santriCount = bundle?.administrasi?.totalSantriAktif ?? 0;
             const totalPenghuni = santriCount + ndalemCount + pengurusAktifCount;
 
@@ -3310,11 +3580,15 @@ export default function PusatLaporanPage() {
           }
         }
 
-        // Sapu bersih blok struktur lama ganda
-        const postScanEls = Array.from(adminScopeEl.querySelectorAll('div, section, table')) as HTMLElement[];
+        // Sapu bersih seluruh blok teks/tabel struktur personalia lama berformat titik dua (termasuk II. PLENO, H. Dewan Pengasuh (Dzurriyah), L. Pengasuh Pondok)
+        const postScanEls = Array.from(
+          adminScopeEl.querySelectorAll('div, section, table, ul, ol, p, h3, h4, h5, h6')
+        ) as HTMLElement[];
         const duplicateOldBlocks = postScanEls.filter((el) => {
           if (el === adminScopeEl || el === searchContainer) return false;
           if (el.closest('[data-siap-personalia-clone="true"]')) return false;
+          if (el.closest('[data-siap-kamar-grid="true"]')) return false;
+          if (el.closest('[data-siap-kpi-grid="true"]')) return false;
           if (cloneWrap && (el === cloneWrap || el.contains(cloneWrap))) return false;
           if (el.closest('[data-siap-hidden-personalia="true"]')) return false;
           if (approvalEl && (el === approvalEl || el.contains(approvalEl) || approvalEl.contains(el))) {
@@ -3332,7 +3606,10 @@ export default function PusatLaporanPage() {
           return (
             /\bI\.\s*DEWAN\s*HARIAN\b/i.test(txt) ||
             /\bII\.\s*PLENO\b/i.test(txt) ||
-            /Dewan\s+Pengasuh\s*\(Dzurriyah\)|Direktur\s+Pendidikan|Pengasuh\s+Pondok/i.test(txt) ||
+            /Dewan\s+Pengasuh\s*\(Dzurriyah\)|Direktur\s+Pendidikan|\bPengasuh\s+Pondok\b/i.test(txt) ||
+            /\b[A-L]\.\s*(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Sie\s+Kegiatan|Sie\s+Keamanan|Sie\s+Kesehatan|Sie\s+Kebersihan|Sie\s+Sarpras|Sie\s+Dapur|Sie\s+Koperasi|Sie\s+Koprasi|Sie\s+Laundry|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\b/i.test(
+              txt
+            ) ||
             (/Kepala\s+Pondok/i.test(txt) && /Sekretaris/i.test(txt) && /Bendahara/i.test(txt))
           );
         });
@@ -3341,8 +3618,7 @@ export default function PusatLaporanPage() {
         }
       }
 
-      // 1b. Susun daftar 21 kamar ke dalam 2 tabel terpisah yang simetris:
-      // Tabel Kiri: 1-11 (Kamar A1-A10 dan C1) | Tabel Kanan: 12-21 (Kamar C2-C6, Tahfidz, Al-Fachriyah 1-4 VIP)
+      // 1b. Susun daftar 21 kamar ke dalam 2 tabel terpisah yang simetris
       const kamarTables = Array.from(adminScopeEl.querySelectorAll('table')).filter((tbl) => {
         if (tbl.closest('[data-siap-personalia-clone="true"]')) return false;
         if (tbl.closest('[data-siap-hidden-personalia="true"]')) return false;
@@ -3554,91 +3830,149 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 1c. Bab II (Laporan Keuangan Pesantren): Sinkronkan kartu & rincian Tunggakan Syahriyah (aktif saja, cutoff tgl 25, bebas bulan lunas)
-    if (div2El && extraRaw.santriRows.length > 0) {
-      const syncTunggakanCard = (scopeEl: HTMLElement | null) => {
-        if (!scopeEl) return;
-        const cardEls = Array.from(scopeEl.querySelectorAll<HTMLElement>('div')).filter((d) => {
-          if (d.closest('[data-siap-tunggakan-clone="true"]')) return false;
-          const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
-          return /Tunggakan\s*Syahriyah|Estimasi\s*Tunggakan/i.test(t) && t.length < 220;
-        });
-        const innerCards = cardEls.filter(
-          (cand) => !cardEls.some((other) => other !== cand && cand.contains(other))
-        );
-        innerCards.forEach((card) => {
-          const leafNodes = Array.from(
-            card.querySelectorAll<HTMLElement>('strong, b, p, span, div')
-          ).filter((n) => n.children.length === 0);
-          leafNodes.forEach((n) => {
-            const nt = (n.textContent || '').replace(/\s+/g, ' ').trim();
-            if (/^Rp[\s\d.,]+$/i.test(nt)) {
-              if (!n.hasAttribute('data-siap-orig-text')) {
-                n.setAttribute('data-siap-orig-text', n.textContent || '');
-              }
-              n.textContent = formatRupiah(syahriyahTunggakan.totalNominal);
-            } else if (/^\d+\s*santri(?:\s*\(\s*\d+\s*bulan\s*\))?$/i.test(nt)) {
-              if (!n.hasAttribute('data-siap-orig-text')) {
-                n.setAttribute('data-siap-orig-text', n.textContent || '');
-              }
-              n.textContent = /\bbulan\b/i.test(nt)
-                ? `${syahriyahTunggakan.totalSantriMenunggak} santri (${syahriyahTunggakan.totalBulanMenunggak} bulan)`
-                : `${syahriyahTunggakan.totalSantriMenunggak} santri`;
-            } else if (/\d+\s*santri/i.test(nt) && nt.length < 90) {
-              if (!n.hasAttribute('data-siap-orig-text')) {
-                n.setAttribute('data-siap-orig-text', n.textContent || '');
-              }
-              n.textContent = nt
-                .replace(/\d+\s*santri/gi, `${syahriyahTunggakan.totalSantriMenunggak} santri`)
-                .replace(/\d+\s*bulan/gi, `${syahriyahTunggakan.totalBulanMenunggak} bulan`);
-            }
+    // 1c. Bab II (Laporan Keuangan Pesantren): Sinkronkan Tunggakan Syahriyah, hapus duplikat Rekap Tunggakan & Buku Kas Tunai, serta pastikan nominal & tanggal nowrap
+    if (div2El) {
+      if (extraRaw.santriRows.length > 0) {
+        const syncTunggakanCard = (scopeEl: HTMLElement | null) => {
+          if (!scopeEl) return;
+          const cardEls = Array.from(scopeEl.querySelectorAll<HTMLElement>('div')).filter((d) => {
+            if (d.closest('[data-siap-tunggakan-clone="true"]')) return false;
+            const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
+            return /Tunggakan\s*Syahriyah|Estimasi\s*Tunggakan/i.test(t) && t.length < 220;
           });
-        });
-      };
-
-      syncTunggakanCard(div2El);
-      syncTunggakanCard(execSectionEl);
-
-      if (tunggakanTableSource) {
-        const tunggakanTables = Array.from(div2El.querySelectorAll('table')).filter((tbl) => {
-          const headTxt = (tbl.querySelector('thead')?.textContent || '').toLowerCase();
-          const prevTxt = (tbl.previousElementSibling?.textContent || '').toLowerCase();
-          return (
-            headTxt.includes('tunggakan') ||
-            headTxt.includes('menunggak') ||
-            (headTxt.includes('syahriyah') && headTxt.includes('santri')) ||
-            prevTxt.includes('tunggakan')
+          const innerCards = cardEls.filter(
+            (cand) => !cardEls.some((other) => other !== cand && cand.contains(other))
           );
-        });
-
-        const tunggakanClone = document.createElement('div');
-        tunggakanClone.setAttribute('data-siap-tunggakan-clone', 'true');
-        tunggakanClone.className = 'mt-3';
-        tunggakanClone.innerHTML = tunggakanTableSource.innerHTML;
-
-        if (tunggakanTables.length > 0) {
-          tunggakanTables.forEach((tbl, idx) => {
-            const pWrap = tbl.parentElement;
-            const isSingleWrap =
-              pWrap &&
-              pWrap !== div2El &&
-              pWrap.children.length === 1 &&
-              /overflow|rounded|border/i.test(pWrap.className || '');
-            if (idx === 0) {
-              if (isSingleWrap && pWrap.parentElement) {
-                pWrap.parentElement.insertBefore(tunggakanClone, pWrap);
-              } else if (pWrap) {
-                pWrap.insertBefore(tunggakanClone, tbl);
+          innerCards.forEach((card) => {
+            const leafNodes = Array.from(
+              card.querySelectorAll<HTMLElement>('strong, b, p, span, div')
+            ).filter((n) => n.children.length === 0);
+            leafNodes.forEach((n) => {
+              const nt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+              if (/^Rp[\s\d.,]+$/i.test(nt)) {
+                if (!n.hasAttribute('data-siap-orig-text')) {
+                  n.setAttribute('data-siap-orig-text', n.textContent || '');
+                }
+                n.textContent = formatRupiah(syahriyahTunggakan.totalNominal);
+              } else if (/^\d+\s*santri(?:\s*\(\s*\d+\s*bulan\s*\))?$/i.test(nt)) {
+                if (!n.hasAttribute('data-siap-orig-text')) {
+                  n.setAttribute('data-siap-orig-text', n.textContent || '');
+                }
+                n.textContent = /\bbulan\b/i.test(nt)
+                  ? `${syahriyahTunggakan.totalSantriMenunggak} santri (${syahriyahTunggakan.totalBulanMenunggak} bulan)`
+                  : `${syahriyahTunggakan.totalSantriMenunggak} santri`;
+              } else if (/\d+\s*santri/i.test(nt) && nt.length < 90) {
+                if (!n.hasAttribute('data-siap-orig-text')) {
+                  n.setAttribute('data-siap-orig-text', n.textContent || '');
+                }
+                n.textContent = nt
+                  .replace(/\d+\s*santri/gi, `${syahriyahTunggakan.totalSantriMenunggak} santri`)
+                  .replace(/\d+\s*bulan/gi, `${syahriyahTunggakan.totalBulanMenunggak} bulan`);
               }
-            }
-            if (isSingleWrap) {
-              pWrap.setAttribute('data-siap-hidden-tunggakan', 'true');
-            } else {
-              tbl.setAttribute('data-siap-hidden-tunggakan', 'true');
-            }
+            });
           });
+        };
+
+        syncTunggakanCard(div2El);
+        syncTunggakanCard(execSectionEl);
+
+        if (tunggakanTableSource) {
+          const tunggakanTables = Array.from(div2El.querySelectorAll('table')).filter((tbl) => {
+            const headTxt = (tbl.querySelector('thead')?.textContent || '').toLowerCase();
+            const prevTxt = (tbl.previousElementSibling?.textContent || '').toLowerCase();
+            return (
+              headTxt.includes('tunggakan') ||
+              headTxt.includes('menunggak') ||
+              (headTxt.includes('syahriyah') && headTxt.includes('santri')) ||
+              prevTxt.includes('tunggakan')
+            );
+          });
+
+          const tunggakanClone = document.createElement('div');
+          tunggakanClone.setAttribute('data-siap-tunggakan-clone', 'true');
+          tunggakanClone.className = 'mt-3';
+          tunggakanClone.innerHTML = tunggakanTableSource.innerHTML;
+
+          if (tunggakanTables.length > 0) {
+            tunggakanTables.forEach((tbl, idx) => {
+              const pWrap = tbl.parentElement;
+              const isSingleWrap =
+                pWrap &&
+                pWrap !== div2El &&
+                pWrap.children.length === 1 &&
+                /overflow|rounded|border/i.test(pWrap.className || '');
+              if (idx === 0) {
+                if (isSingleWrap && pWrap.parentElement) {
+                  pWrap.parentElement.insertBefore(tunggakanClone, pWrap);
+                } else if (pWrap) {
+                  pWrap.insertBefore(tunggakanClone, tbl);
+                }
+              }
+              if (isSingleWrap) {
+                pWrap.setAttribute('data-siap-hidden-tunggakan', 'true');
+              } else {
+                tbl.setAttribute('data-siap-hidden-tunggakan', 'true');
+              }
+            });
+          }
         }
       }
+
+      // Hapus blok duplikat pada Rekap Kelompok Tunggakan Syahriah dan Buku Kas Tunai di Bab II
+      const deduplicateDiv2Subsections = (headingRx: RegExp) => {
+        const headingNodes = Array.from(
+          div2El.querySelectorAll<HTMLElement>('h3, h4, h5, p, div, span')
+        ).filter((el) => {
+          if (el.closest('[data-siap-hidden-tunggakan="true"]')) return false;
+          if (el.closest('[data-siap-hidden-dup="true"]')) return false;
+          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!t || t.length > 140) return false;
+          const childMatch = Array.from(el.children).some((ch) =>
+            headingRx.test((ch.textContent || '').replace(/\s+/g, ' ').trim())
+          );
+          return !childMatch && headingRx.test(t);
+        });
+
+        const resolvedBlocks: HTMLElement[] = [];
+        for (const hEl of headingNodes) {
+          let cur: HTMLElement | null = hEl.parentElement;
+          let bestBlk: HTMLElement = hEl;
+          while (cur && cur !== div2El) {
+            const contained = headingNodes.filter((n) => cur!.contains(n));
+            if (contained.length > 1) break;
+            const t = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+            if (t.length > 25000 || /\b(?:Divisi|Bab)\s+II\b/i.test(t.slice(0, 120))) break;
+            bestBlk = cur;
+            cur = cur.parentElement;
+          }
+          if (bestBlk !== div2El && !resolvedBlocks.includes(bestBlk)) {
+            resolvedBlocks.push(bestBlk);
+          }
+        }
+        const outermostBlocks = resolvedBlocks.filter(
+          (cand) => !resolvedBlocks.some((other) => other !== cand && other.contains(cand))
+        );
+        if (outermostBlocks.length > 1) {
+          outermostBlocks.slice(1).forEach((dupBlk) => {
+            dupBlk.setAttribute('data-siap-hidden-dup', 'true');
+          });
+        }
+      };
+
+      deduplicateDiv2Subsections(/rekap\s+kelompok\s+tunggakan/i);
+      deduplicateDiv2Subsections(/buku\s+kas\s+tunai/i);
+
+      // Pastikan seluruh angka Rupiah dan tanggal di tabel Bab II memakai whitespace-nowrap agar tidak patah baris
+      div2El.querySelectorAll<HTMLElement>('table td, table th').forEach((cell) => {
+        const txt = (cell.textContent || '').replace(/\s+/g, ' ').trim();
+        if (
+          /^[-+]?\s*Rp[\s\d.,]+$/i.test(txt) ||
+          /^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(txt) ||
+          /^\d{4}-\d{2}-\d{2}$/.test(txt)
+        ) {
+          cell.classList.add('whitespace-nowrap', 'tabular-nums');
+        }
+      });
     }
 
     // 2. Bab III (Kegiatan Pondok): Tampilkan "LAMPIRAN DOKUMENTASI FOTO KEGIATAN" cukup 1 kali saja (hapus duplikasi)
@@ -3648,15 +3982,15 @@ export default function PusatLaporanPage() {
       ).filter((el) => {
         if (el.closest('[data-siap-kegiatan-foto-clone="true"]')) return false;
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!txt || txt.length > 100) return false;
+        if (!txt || txt.length > 120) return false;
         const hasChildMatch = Array.from(el.children).some((ch) =>
-          /lampiran\s+dokumentasi\s+foto\s+kegiatan|dokumentasi\s+foto\s+kegiatan/i.test(
+          /lampiran\s+dokumentasi\s+foto|dokumentasi\s+foto\s+kegiatan/i.test(
             (ch.textContent || '').replace(/\s+/g, ' ').trim()
           )
         );
         return (
           !hasChildMatch &&
-          /^(?:lampiran\s+)?dokumentasi\s+foto\s+kegiatan\b/i.test(txt)
+          /(?:lampiran\s+)?dokumentasi\s+foto(?:\s+kegiatan)?\b/i.test(txt)
         );
       });
 
@@ -3682,7 +4016,6 @@ export default function PusatLaporanPage() {
         if (bestBlock !== div3El && !existingFotoBlocks.includes(bestBlock)) {
           existingFotoBlocks.push(bestBlock);
         }
-        // Jika bestBlock hanya berisi heading judul saja, ikut sembunyikan sibling foto di bawahnya
         if (bestBlock.querySelectorAll('img').length === 0) {
           let sib = bestBlock.nextElementSibling as HTMLElement | null;
           while (sib) {
@@ -3707,7 +4040,6 @@ export default function PusatLaporanPage() {
       );
 
       if (kegiatanFotoSource && kegiatanLampiranFoto.length > 0) {
-        // Sembunyikan seluruh blok duplikat bawaan dokumen utama agar hanya tampil 1x dari sumber lengkap
         outermostFotoBlocks.forEach((blk) => {
           blk.setAttribute('data-siap-hidden-kegiatan-foto', 'true');
         });
@@ -3784,7 +4116,7 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 2c. Bab VIII (Dapur Umum & Konsumsi Santri): Pastikan kolom Menu Ringkas tampil sebagai teks biasa (tanpa $ atau ~ / format rumus matematika)
+    // 2c. Bab VIII (Dapur Umum & Konsumsi Santri): Pastikan kolom Menu Ringkas tampil sebagai teks biasa (tanpa $ atau ~)
     if (div8El) {
       div8El.querySelectorAll('table').forEach((tbl) => {
         const heads = Array.from(tbl.querySelectorAll('thead th, thead td')).map((h) =>
@@ -3812,10 +4144,7 @@ export default function PusatLaporanPage() {
               cell.textContent = rawMenu || '-';
             } else {
               const rawCellTxt = (cell.textContent || '').trim();
-              if (
-                rawCellTxt.includes('$') ||
-                rawCellTxt.includes('~')
-              ) {
+              if (rawCellTxt.includes('$') || rawCellTxt.includes('~')) {
                 const cleanedMenu = rawCellTxt
                   .replace(/\$/g, '')
                   .replace(/~/g, ' ')
@@ -3893,6 +4222,7 @@ export default function PusatLaporanPage() {
       if (tbl.closest('[data-siap-hidden-kamar="true"]')) return;
       if (tbl.closest('[data-siap-hidden-tunggakan="true"]')) return;
       if (tbl.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-dup="true"]')) return;
       if (tbl.closest('[data-siap-hidden-chart="true"]')) return;
       if (tbl.closest('.siap-table-card')) return;
       tbl.setAttribute('data-siap-table-styled', 'true');
@@ -3916,6 +4246,7 @@ export default function PusatLaporanPage() {
       if (el.closest('[data-siap-hidden-kamar="true"]')) return;
       if (el.closest('[data-siap-hidden-tunggakan="true"]')) return;
       if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
+      if (el.closest('[data-siap-hidden-dup="true"]')) return;
       if (el.closest('[data-siap-hidden-chart="true"]')) return;
       const cls = el.className || '';
       if (
@@ -3929,7 +4260,7 @@ export default function PusatLaporanPage() {
       }
     });
 
-    // 5. Pastikan tidak ada teks laporan di bawah 11pt (14.67px), kecuali label sumbu X grafik (9pt)
+    // 5. Pastikan hierarki font A4 rapi (chart labels 8pt, table 8.5pt, narasi 9.5pt, heading 11.5pt)
     enforceReportFontFloor(searchContainer);
 
     return cleanupDomPatches;
@@ -3953,6 +4284,7 @@ export default function PusatLaporanPage() {
     extraReports,
     perizinanReportRows,
     kegiatanLampiranFoto,
+    validChartData,
   ]);
 
   const handleRefresh = () => {
@@ -4052,61 +4384,63 @@ export default function PusatLaporanPage() {
           (scope === 'gabungan' && extraSelectedDivisions.includes('kebersihan'))) && (
           <section
             data-siap-page-start={hasBeforeXi ? 'true' : undefined}
-            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-5 sm:p-6 space-y-4 print:border-slate-300 ${
               hasBeforeXi ? 'print:break-before-page' : ''
             }`}
           >
             <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-2.5">
               <div>
-                <h3 className="text-[12pt] font-bold text-slate-900">
+                <h3 className="text-[11.5pt] font-bold text-slate-900 leading-tight">
                   XI. Kebersihan &amp; Piket
                 </h3>
-                <p className="text-[10pt] leading-relaxed text-slate-600 mt-0.5">
+                <p className="text-[9.5pt] leading-snug text-slate-600 mt-0.5">
                   Penanggung Jawab: <strong className="text-slate-800">{pjKebersihan}</strong>
                 </p>
               </div>
-              <span className="text-[10pt] text-slate-600 font-medium">
+              <span className="text-[9.5pt] text-slate-600 font-medium">
                 {periodWindow?.label}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[10pt] leading-relaxed">
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Total Jadwal / Tugas</span>
-                <strong className="text-[12pt] font-bold text-slate-900 tabular-nums">
-                  {extraReports.kebersihan.totalTugas}
-                </strong>
-                <span className="text-[9pt] text-slate-500 block">
-                  Periode lalu: {extraReports.kebersihan.prevTotalTugas}
-                </span>
+            <div data-siap-kpi-grid="true" className="grid grid-cols-4 gap-2.5 items-stretch text-[9.5pt] leading-snug">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Total Jadwal / Tugas</span>
+                <div>
+                  <strong className="text-[11.5pt] font-bold text-slate-900 tabular-nums block leading-tight">
+                    {extraReports.kebersihan.totalTugas}
+                  </strong>
+                  <span className="text-[8pt] text-slate-500 block leading-tight mt-0.5">
+                    Periode lalu: {extraReports.kebersihan.prevTotalTugas}
+                  </span>
+                </div>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200">
-                <span className="text-emerald-800 block">Selesai / Bersih</span>
-                <strong className="text-[12pt] font-bold text-emerald-950 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-emerald-800 block text-[8.5pt] leading-tight">Selesai / Bersih</span>
+                <strong className="text-[11.5pt] font-bold text-emerald-950 tabular-nums block leading-tight">
                   {extraReports.kebersihan.selesai}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-amber-50 border border-amber-200">
-                <span className="text-amber-800 block">Belum / Evaluasi</span>
-                <strong className="text-[12pt] font-bold text-amber-950 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-amber-50 border border-amber-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-amber-800 block text-[8.5pt] leading-tight">Belum / Evaluasi</span>
+                <strong className="text-[11.5pt] font-bold text-amber-950 tabular-nums block leading-tight">
                   {extraReports.kebersihan.belum}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Tingkat Kepatuhan</span>
-                <strong className="text-[12pt] font-bold text-slate-900 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Tingkat Kepatuhan</span>
+                <strong className="text-[11.5pt] font-bold text-slate-900 tabular-nums block leading-tight">
                   {extraReports.kebersihan.persenBersih}%
                 </strong>
               </div>
             </div>
 
             {extraReports.kebersihan.detail.length === 0 ? (
-              <p className="text-[10pt] leading-relaxed text-slate-600 italic py-2">
+              <p className="text-[9.5pt] leading-snug text-slate-600 italic py-2">
                 Belum ada catatan piket atau tugas kebersihan tercatat pada periode ini.
               </p>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                <table className="w-full text-[9pt] leading-snug border-collapse">
+                <table className="w-full text-[8.5pt] leading-tight border-collapse">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 text-left">
                       <th className="px-2 py-1.5 border border-slate-200">Tanggal</th>
@@ -4141,49 +4475,51 @@ export default function PusatLaporanPage() {
           (scope === 'gabungan' && extraSelectedDivisions.includes('koperasi'))) && (
           <section
             data-siap-page-start={hasBeforeXii ? 'true' : undefined}
-            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-5 sm:p-6 space-y-4 print:border-slate-300 ${
               hasBeforeXii ? 'print:break-before-page' : ''
             }`}
           >
             <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-2.5">
               <div>
-                <h3 className="text-[12pt] font-bold text-slate-900">
+                <h3 className="text-[11.5pt] font-bold text-slate-900 leading-tight">
                   XII. Koperasi Pondok
                 </h3>
-                <p className="text-[10pt] leading-relaxed text-slate-600 mt-0.5">
+                <p className="text-[9.5pt] leading-snug text-slate-600 mt-0.5">
                   Penanggung Jawab: <strong className="text-slate-800">{pjKoperasi}</strong>
                 </p>
               </div>
-              <span className="text-[10pt] text-slate-600 font-medium">
+              <span className="text-[9.5pt] text-slate-600 font-medium">
                 {periodWindow?.label}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[10pt] leading-relaxed">
-              <div className="p-3 rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200">
-                <span className="text-emerald-800 block">Pemasukan / Penjualan</span>
-                <strong className="text-[11pt] font-bold text-emerald-950 tabular-nums">
-                  {formatRupiah(extraReports.koperasi.pemasukan)}
-                </strong>
-                <span className="text-[9pt] text-emerald-700 block">
-                  Lalu: {formatRupiah(extraReports.koperasi.prevPemasukan)}
-                </span>
+            <div data-siap-kpi-grid="true" className="grid grid-cols-4 gap-2.5 items-stretch text-[9.5pt] leading-snug">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-emerald-800 block text-[8.5pt] leading-tight">Pemasukan / Penjualan</span>
+                <div>
+                  <strong className="text-[11pt] font-bold text-emerald-950 tabular-nums block leading-tight whitespace-nowrap">
+                    {formatRupiah(extraReports.koperasi.pemasukan)}
+                  </strong>
+                  <span className="text-[8pt] text-emerald-700 block leading-tight mt-0.5 whitespace-nowrap">
+                    Lalu: {formatRupiah(extraReports.koperasi.prevPemasukan)}
+                  </span>
+                </div>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-rose-50 border border-rose-200">
-                <span className="text-rose-800 block">Pengeluaran / Kulaan</span>
-                <strong className="text-[11pt] font-bold text-rose-950 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-rose-50 border border-rose-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-rose-800 block text-[8.5pt] leading-tight">Pengeluaran / Kulaan</span>
+                <strong className="text-[11pt] font-bold text-rose-950 tabular-nums block leading-tight whitespace-nowrap">
                   {formatRupiah(extraReports.koperasi.pengeluaran)}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Surplus Periode</span>
-                <strong className="text-[11pt] font-bold text-slate-900 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Surplus Periode</span>
+                <strong className="text-[11pt] font-bold text-slate-900 tabular-nums block leading-tight whitespace-nowrap">
                   {formatRupiah(extraReports.koperasi.surplus)}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Transaksi &amp; Produk</span>
-                <strong className="text-[11pt] font-bold text-slate-900 tabular-nums">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Transaksi &amp; Produk</span>
+                <strong className="text-[10.5pt] font-bold text-slate-900 tabular-nums block leading-tight">
                   {extraReports.koperasi.totalTransaksi} Trx · {extraReports.koperasi.totalProduk} Item
                 </strong>
               </div>
@@ -4193,62 +4529,69 @@ export default function PusatLaporanPage() {
             <div
               data-siap-chart-card="true"
               data-siap-std-6w="true"
-              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/60 p-4 space-y-2.5 break-inside-avoid"
+              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2.5 break-inside-avoid"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-[10.5pt] font-bold text-slate-900 leading-tight">
+                  <h4 className="text-[9.5pt] font-bold text-slate-900 leading-tight">
                     Tren Omset Koperasi (6 Pekan Terakhir)
                   </h4>
-                  <p className="text-[8.5pt] leading-tight text-slate-600 mt-0.5">
+                  <p className="text-[8pt] leading-tight text-slate-600 mt-0.5">
                     Total omset 6 pekan: <strong className="text-slate-900 tabular-nums">{formatRupiah(extraReports.koperasi.totalOmset6Pekan)}</strong>
                   </p>
                 </div>
-                <span className="text-[8.5pt] leading-tight font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-1 tabular-nums">
+                <span className="text-[8pt] leading-tight font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-1 tabular-nums">
                   Rata-rata: {formatCompactRupiah(Math.round(extraReports.koperasi.totalOmset6Pekan / 6))}/pekan
                 </span>
               </div>
 
-              <div className="grid grid-cols-6 gap-2 items-end pt-2">
-                {extraReports.koperasi.weeklyOmset.map((wk) => {
-                  const pct =
-                    wk.omset > 0
-                      ? Math.max(10, Math.round((wk.omset / extraReports.koperasi.maxOmset6Pekan) * 100))
-                      : 0;
-                  return (
-                    <div key={wk.label} className="flex flex-col items-center gap-1 min-w-0">
-                      <span className="text-[8.5pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap">
-                        {formatCompactRupiah(wk.omset)}
-                      </span>
-                      <div className="w-full h-24 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1 overflow-hidden">
-                        {wk.omset > 0 ? (
-                          <div
-                            className="w-full rounded-lg bg-emerald-600 transition-all"
-                            style={{ height: `${pct}%` }}
-                          />
-                        ) : (
-                          <div className="w-full h-1 rounded-full bg-slate-200" />
-                        )}
+              <div className="relative pt-2">
+                <div className="pointer-events-none absolute inset-x-0 top-7 bottom-5 flex flex-col justify-between z-0">
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                </div>
+                <div className="relative z-10 grid grid-cols-6 gap-2.5 items-end">
+                  {extraReports.koperasi.weeklyOmset.map((wk) => {
+                    const pct =
+                      wk.omset > 0
+                        ? Math.max(8, Math.round((wk.omset / extraReports.koperasi.maxOmset6Pekan) * 100))
+                        : 0;
+                    return (
+                      <div key={wk.label} className="flex flex-col items-center gap-1 min-w-0">
+                        <span className="text-[8pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap">
+                          {formatCompactRupiah(wk.omset)}
+                        </span>
+                        <div className="w-full h-24 border-b border-slate-300 flex items-end justify-center px-1.5">
+                          {wk.omset > 0 ? (
+                            <div
+                              className="w-full max-w-[34px] rounded-t-md bg-emerald-600 transition-all"
+                              style={{ height: `${pct}%` }}
+                            />
+                          ) : (
+                            <div className="w-full max-w-[34px] h-[2px] rounded-full bg-slate-300" />
+                          )}
+                        </div>
+                        <span
+                          data-siap-xaxis-label="true"
+                          className="block text-[8pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
+                        >
+                          {wk.shortLabel}
+                        </span>
                       </div>
-                      <span
-                        data-siap-xaxis-label="true"
-                        className="block text-[8.5pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
-                      >
-                        {wk.shortLabel}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
             {extraReports.koperasi.detail.length === 0 ? (
-              <p className="text-[10pt] leading-relaxed text-slate-600 italic py-2">
+              <p className="text-[9.5pt] leading-snug text-slate-600 italic py-2">
                 Belum ada transaksi koperasi tercatat pada periode ini.
               </p>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                <table className="w-full text-[9pt] leading-snug border-collapse">
+                <table className="w-full text-[8.5pt] leading-tight border-collapse">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 text-left">
                       <th className="px-2 py-1.5 border border-slate-200">Tanggal</th>
@@ -4268,7 +4611,7 @@ export default function PusatLaporanPage() {
                         </td>
                         <td className="px-2 py-1.5 border border-slate-200 text-slate-700">{row.jenis}</td>
                         <td
-                          className={`px-2 py-1.5 border border-slate-200 text-right font-mono font-bold tabular-nums ${
+                          className={`px-2 py-1.5 border border-slate-200 text-right font-mono font-bold tabular-nums whitespace-nowrap ${
                             row.isKeluar ? 'text-rose-700' : 'text-emerald-800'
                           }`}
                         >
@@ -4288,49 +4631,51 @@ export default function PusatLaporanPage() {
           (scope === 'gabungan' && extraSelectedDivisions.includes('psb'))) && (
           <section
             data-siap-page-start={hasBeforeXiii ? 'true' : undefined}
-            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-4 sm:p-5 space-y-2.5 print:border-slate-300 print:space-y-2 ${
+            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-5 sm:p-6 space-y-3 print:border-slate-300 ${
               hasBeforeXiii ? 'print:break-before-page' : ''
             }`}
           >
             <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-2">
               <div>
-                <h3 className="text-[12pt] font-bold text-slate-900 leading-tight">
+                <h3 className="text-[11.5pt] font-bold text-slate-900 leading-tight">
                   XIII. Pendaftaran Santri Baru (PSB)
                 </h3>
-                <p className="text-[10pt] leading-relaxed text-slate-600 mt-0.5">
+                <p className="text-[9.5pt] leading-snug text-slate-600 mt-0.5">
                   Penanggung Jawab: <strong className="text-slate-800">{pjPsb}</strong>
                 </p>
               </div>
-              <span className="text-[10pt] text-slate-600 font-medium">
+              <span className="text-[9.5pt] text-slate-600 font-medium">
                 {periodWindow?.label}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10pt] leading-relaxed">
-              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block leading-tight">Pendaftar Periode Ini</span>
-                <strong className="text-[11.5pt] font-bold text-slate-900 tabular-nums leading-tight">
-                  {extraReports.psb.pendaftarPeriode}
-                </strong>
-                <span className="text-[9pt] text-slate-500 block leading-tight">
-                  Total: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
-                </span>
+            <div data-siap-kpi-grid="true" className="grid grid-cols-4 gap-2.5 items-stretch text-[9.5pt] leading-snug">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Pendaftar Periode Ini</span>
+                <div>
+                  <strong className="text-[11.5pt] font-bold text-slate-900 tabular-nums block leading-tight">
+                    {extraReports.psb.pendaftarPeriode}
+                  </strong>
+                  <span className="text-[8pt] text-slate-500 block leading-tight mt-0.5">
+                    Total: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
+                  </span>
+                </div>
               </div>
-              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200">
-                <span className="text-emerald-800 block leading-tight">Terverifikasi / Diterima</span>
-                <strong className="text-[11.5pt] font-bold text-emerald-950 tabular-nums leading-tight">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-emerald-800 block text-[8.5pt] leading-tight">Terverifikasi / Diterima</span>
+                <strong className="text-[11.5pt] font-bold text-emerald-950 tabular-nums block leading-tight">
                   {extraReports.psb.terverifikasi}
                 </strong>
               </div>
-              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-amber-50 border border-amber-200">
-                <span className="text-amber-800 block leading-tight">Menunggu / Proses</span>
-                <strong className="text-[11.5pt] font-bold text-amber-950 tabular-nums leading-tight">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-amber-50 border border-amber-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-amber-800 block text-[8.5pt] leading-tight">Menunggu / Proses</span>
+                <strong className="text-[11.5pt] font-bold text-amber-950 tabular-nums block leading-tight">
                   {extraReports.psb.menunggu}
                 </strong>
               </div>
-              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block leading-tight">Pembayaran Masuk PSB</span>
-                <strong className="text-[11pt] font-bold text-slate-900 tabular-nums leading-tight">
+              <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[82px] p-3">
+                <span className="text-slate-600 block text-[8.5pt] leading-tight">Pembayaran Masuk PSB</span>
+                <strong className="text-[11pt] font-bold text-slate-900 tabular-nums block leading-tight whitespace-nowrap">
                   {formatRupiah(extraReports.psb.totalBayar)}
                 </strong>
               </div>
@@ -4340,17 +4685,17 @@ export default function PusatLaporanPage() {
             <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50/70 px-3 py-2 space-y-1.5 break-inside-avoid">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-[10pt] font-bold text-emerald-950 leading-snug">
+                  <h4 className="text-[9.5pt] font-bold text-emerald-950 leading-snug">
                     Sisa Kuota Diskon Pangkal (dari {extraReports.psb.kuotaMaks} Kuota Pertama)
                   </h4>
-                  <p className="text-[10pt] text-emerald-900 leading-relaxed">
+                  <p className="text-[9.5pt] text-emerald-900 leading-snug">
                     Terpakai: <strong className="tabular-nums">{extraReports.psb.kuotaTerpakai}</strong> dari{' '}
                     <strong className="tabular-nums">{extraReports.psb.kuotaMaks}</strong> terverifikasi / aktif ({extraReports.psb.persenKuota}%)
                   </p>
                 </div>
                 <div className="rounded-xl overflow-hidden border border-emerald-300 bg-white px-3 py-1 text-right">
-                  <span className="block text-[9pt] text-emerald-700 font-semibold leading-tight">Sisa Kuota</span>
-                  <strong className="text-[11.5pt] font-bold text-emerald-900 tabular-nums leading-tight">
+                  <span className="block text-[8pt] text-emerald-700 font-semibold leading-tight">Sisa Kuota</span>
+                  <strong className="text-[11pt] font-bold text-emerald-900 tabular-nums leading-tight">
                     {extraReports.psb.sisaKuota} Kuota
                   </strong>
                 </div>
@@ -4367,65 +4712,72 @@ export default function PusatLaporanPage() {
             <div
               data-siap-chart-card="true"
               data-siap-std-6w="true"
-              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/60 p-3 space-y-2 break-inside-avoid"
+              className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/50 p-4 space-y-2.5 break-inside-avoid"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-[10.5pt] font-bold text-slate-900 leading-tight">
+                  <h4 className="text-[9.5pt] font-bold text-slate-900 leading-tight">
                     Tren Pendaftaran Santri Baru (6 Pekan Terakhir)
                   </h4>
-                  <p className="text-[8.5pt] text-slate-600 leading-tight mt-0.5">
+                  <p className="text-[8pt] text-slate-600 leading-tight mt-0.5">
                     Total 6 pekan terakhir:{' '}
                     <strong className="text-slate-900 tabular-nums">
                       {extraReports.psb.weeklyTrend.reduce((acc, w) => acc + w.total, 0)} Santri
                     </strong>
                   </p>
                 </div>
-                <span className="text-[8.5pt] leading-tight font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-0.5 tabular-nums">
+                <span className="text-[8pt] leading-tight font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-0.5 tabular-nums">
                   Terverifikasi: {extraReports.psb.weeklyTrend.reduce((acc, w) => acc + w.verif, 0)}
                 </span>
               </div>
 
-              <div className="grid grid-cols-6 gap-2 items-end pt-2">
-                {extraReports.psb.weeklyTrend.map((wk) => {
-                  const pct =
-                    wk.total > 0
-                      ? Math.max(10, Math.round((wk.total / extraReports.psb.maxTrend) * 100))
-                      : 0;
-                  return (
-                    <div key={wk.label} className="flex flex-col items-center gap-1 min-w-0">
-                      <span className="text-[8.5pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap">
-                        {wk.total} Org
-                      </span>
-                      <div className="w-full h-24 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1 overflow-hidden">
-                        {wk.total > 0 ? (
-                          <div
-                            className="w-full rounded-lg bg-emerald-600 transition-all"
-                            style={{ height: `${pct}%` }}
-                          />
-                        ) : (
-                          <div className="w-full h-1 rounded-full bg-slate-200" />
-                        )}
+              <div className="relative pt-2">
+                <div className="pointer-events-none absolute inset-x-0 top-7 bottom-5 flex flex-col justify-between z-0">
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                  <div className="border-t border-dashed border-slate-200/90 w-full" />
+                </div>
+                <div className="relative z-10 grid grid-cols-6 gap-2.5 items-end">
+                  {extraReports.psb.weeklyTrend.map((wk) => {
+                    const pct =
+                      wk.total > 0
+                        ? Math.max(8, Math.round((wk.total / extraReports.psb.maxTrend) * 100))
+                        : 0;
+                    return (
+                      <div key={wk.label} className="flex flex-col items-center gap-1 min-w-0">
+                        <span className="text-[8pt] font-bold text-slate-800 tabular-nums text-center leading-tight whitespace-nowrap">
+                          {wk.total} Org
+                        </span>
+                        <div className="w-full h-24 border-b border-slate-300 flex items-end justify-center px-1.5">
+                          {wk.total > 0 ? (
+                            <div
+                              className="w-full max-w-[34px] rounded-t-md bg-emerald-600 transition-all"
+                              style={{ height: `${pct}%` }}
+                            />
+                          ) : (
+                            <div className="w-full max-w-[34px] h-[2px] rounded-full bg-slate-300" />
+                          )}
+                        </div>
+                        <span
+                          data-siap-xaxis-label="true"
+                          className="block text-[8pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
+                        >
+                          {wk.shortLabel}
+                        </span>
                       </div>
-                      <span
-                        data-siap-xaxis-label="true"
-                        className="block text-[8.5pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
-                      >
-                        {wk.shortLabel}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
             {extraReports.psb.detail.length === 0 ? (
-              <p className="text-[10pt] leading-relaxed text-slate-600 italic py-2">
+              <p className="text-[9.5pt] leading-snug text-slate-600 italic py-2">
                 Belum ada pendaftaran santri baru tercatat pada periode ini.
               </p>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                <table className="w-full text-[9pt] leading-snug border-collapse" data-siap-compact-table="true">
+                <table className="w-full text-[8.5pt] leading-tight border-collapse" data-siap-compact-table="true">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 text-left">
                       <th className="px-2 py-1.5 border border-slate-200">Tanggal</th>
@@ -4484,6 +4836,7 @@ export default function PusatLaporanPage() {
         [data-siap-hidden-perizinan="true"],
         [data-siap-hidden-tunggakan="true"],
         [data-siap-hidden-kegiatan-foto="true"],
+        [data-siap-hidden-dup="true"],
         [data-siap-hidden-chart="true"] {
           display: none !important;
         }
@@ -4495,24 +4848,40 @@ export default function PusatLaporanPage() {
           grid-column: 1 / -1 !important;
           width: 100% !important;
         }
+        #pusat-laporan-dokumen [data-siap-kpi-grid="true"],
+        [data-siap-laporan-doc="true"] [data-siap-kpi-grid="true"] {
+          display: grid !important;
+          grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+          gap: 0.625rem !important;
+          align-items: stretch !important;
+        }
+        #pusat-laporan-dokumen [data-siap-kpi-card="true"],
+        [data-siap-laporan-doc="true"] [data-siap-kpi-card="true"] {
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: space-between !important;
+          min-height: 82px !important;
+          padding: 0.75rem !important;
+          height: 100% !important;
+        }
         #pusat-laporan-dokumen,
         [data-siap-laporan-doc="true"] {
-          font-size: 10pt !important;
-          line-height: 1.625 !important;
+          font-size: 9.5pt !important;
+          line-height: 1.375 !important;
         }
         #pusat-laporan-dokumen h2,
         #pusat-laporan-dokumen h3,
         [data-siap-laporan-doc="true"] h2,
         [data-siap-laporan-doc="true"] h3 {
-          font-size: 12pt !important;
+          font-size: 11.5pt !important;
           font-weight: 700 !important;
-          line-height: 1.35 !important;
+          line-height: 1.3 !important;
         }
         #pusat-laporan-dokumen [data-siap-chart-card="true"] h3,
         #pusat-laporan-dokumen [data-siap-chart-card="true"] h4,
         [data-siap-laporan-doc="true"] [data-siap-chart-card="true"] h3,
         [data-siap-laporan-doc="true"] [data-siap-chart-card="true"] h4 {
-          font-size: 10pt !important;
+          font-size: 9.5pt !important;
           font-weight: 700 !important;
           line-height: 1.3 !important;
         }
@@ -4521,8 +4890,8 @@ export default function PusatLaporanPage() {
         #pusat-laporan-dokumen blockquote,
         [data-siap-laporan-doc="true"] p,
         [data-siap-laporan-doc="true"] li {
-          font-size: 10pt !important;
-          line-height: 1.625 !important;
+          font-size: 9.5pt !important;
+          line-height: 1.375 !important;
         }
         #pusat-laporan-dokumen [data-siap-approval="true"],
         #pusat-laporan-dokumen [data-siap-approval="true"] *,
@@ -4538,17 +4907,26 @@ export default function PusatLaporanPage() {
         [data-siap-laporan-doc="true"] [data-siap-approval="true"] p,
         [data-siap-laporan-doc="true"] [data-siap-approval="true"] div,
         [data-siap-laporan-doc="true"] [data-siap-approval="true"] span {
-          font-size: 10pt !important;
-          line-height: 1.625 !important;
+          font-size: 9.5pt !important;
+          line-height: 1.375 !important;
+        }
+        #pusat-laporan-dokumen [data-siap-approval="true"] h3,
+        [data-siap-laporan-doc="true"] [data-siap-approval="true"] h3 {
+          font-size: 11.5pt !important;
+          font-weight: 700 !important;
         }
         #pusat-laporan-dokumen [data-siap-personalia-clone="true"] p,
-        #pusat-laporan-dokumen [data-siap-personalia-clone="true"] span,
-        #pusat-laporan-dokumen [data-siap-personalia-clone="true"] div {
-          font-size: 9pt !important;
-          line-height: 1.3 !important;
+        #pusat-laporan-dokumen [data-siap-personalia-clone="true"] h5 {
+          font-size: 9.5pt !important;
+          line-height: 1.375 !important;
+        }
+        #pusat-laporan-dokumen [data-siap-personalia-clone="true"] [data-siap-musyrif-item="true"],
+        #pusat-laporan-dokumen [data-siap-personalia-clone="true"] [data-siap-musyrif-item="true"] span {
+          font-size: 8.5pt !important;
+          line-height: 1.25 !important;
         }
         #pusat-laporan-dokumen [data-siap-personalia-clone="true"] h4 {
-          font-size: 12pt !important;
+          font-size: 11.5pt !important;
           font-weight: 700 !important;
         }
         #pusat-laporan-dokumen table,
@@ -4557,21 +4935,21 @@ export default function PusatLaporanPage() {
         [data-siap-laporan-doc="true"] table,
         [data-siap-laporan-doc="true"] table th,
         [data-siap-laporan-doc="true"] table td {
-          font-size: 9pt !important;
-          line-height: 1.375 !important;
+          font-size: 8.5pt !important;
+          line-height: 1.25 !important;
         }
         #pusat-laporan-dokumen table th,
         #pusat-laporan-dokumen table td,
         [data-siap-laporan-doc="true"] table th,
         [data-siap-laporan-doc="true"] table td {
-          padding: 6px 8px !important;
+          padding: 5px 7px !important;
         }
         #pusat-laporan-dokumen [data-siap-personalia-clone="true"] table,
         #pusat-laporan-dokumen [data-siap-personalia-clone="true"] table th,
         #pusat-laporan-dokumen [data-siap-personalia-clone="true"] table td {
           font-size: 8.5pt !important;
           line-height: 1.25 !important;
-          padding: 2px 6px !important;
+          padding: 3px 6px !important;
         }
         #pusat-laporan-dokumen table[data-siap-tunggakan-table="true"],
         #pusat-laporan-dokumen table[data-siap-tunggakan-table="true"] th,
@@ -4581,7 +4959,7 @@ export default function PusatLaporanPage() {
         [data-siap-laporan-doc="true"] table[data-siap-tunggakan-table="true"] td {
           font-size: 8.5pt !important;
           line-height: 1.25 !important;
-          padding: 3px 6px !important;
+          padding: 4px 6px !important;
         }
         #pusat-laporan-dokumen table[data-siap-izin-table="true"],
         [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] {
@@ -4593,7 +4971,7 @@ export default function PusatLaporanPage() {
         [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] th,
         [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] td {
           font-size: 8.5pt !important;
-          line-height: 1.3 !important;
+          line-height: 1.25 !important;
           padding: 5px 7px !important;
           overflow-wrap: anywhere;
         }
@@ -4601,7 +4979,7 @@ export default function PusatLaporanPage() {
         #pusat-laporan-dokumen [data-siap-chart-card="true"] span,
         [data-siap-laporan-doc="true"] [data-siap-chart-card="true"] p,
         [data-siap-laporan-doc="true"] [data-siap-chart-card="true"] span {
-          font-size: 8.5pt !important;
+          font-size: 8pt !important;
           line-height: 1.25 !important;
         }
         #pusat-laporan-dokumen [data-siap-chart-card="true"] [data-siap-std-paired="true"] span,
@@ -4614,12 +4992,12 @@ export default function PusatLaporanPage() {
         #pusat-laporan-dokumen svg tspan:not([data-siap-cat-label="true"]),
         [data-siap-laporan-doc="true"] svg text:not([data-siap-cat-label="true"]),
         [data-siap-laporan-doc="true"] svg tspan:not([data-siap-cat-label="true"]) {
-          font-size: 8.5pt !important;
+          font-size: 8pt !important;
         }
         [data-siap-xaxis-label="true"],
         #pusat-laporan-dokumen [data-siap-xaxis-label="true"],
         [data-siap-laporan-doc="true"] [data-siap-xaxis-label="true"] {
-          font-size: 8.5pt !important;
+          font-size: 8pt !important;
           line-height: 1.25 !important;
           white-space: nowrap !important;
         }
@@ -5162,21 +5540,21 @@ export default function PusatLaporanPage() {
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
                 <div>
-                  <h4 className="text-[12pt] font-bold uppercase tracking-wider text-slate-900">
+                  <h4 className="text-[11.5pt] font-bold uppercase tracking-wider text-slate-900">
                     A. Struktur Personalia Pengurus Aktif
                   </h4>
-                  <p className="text-[9pt] leading-tight text-slate-600">
+                  <p className="text-[9.5pt] leading-snug text-slate-600">
                     Susunan Dewan Harian &amp; Pleno Divisi (tidak termasuk Pengasuh, Dewan Pengasuh/Dzurriyah, dan Direktur Pendidikan)
                   </p>
                 </div>
-                <span className="text-[9pt] leading-tight font-semibold text-slate-600">
+                <span className="text-[9.5pt] leading-snug font-semibold text-slate-600">
                   Total {strukturPersonalia.totalOperationalAssignments} Penugasan
                 </span>
               </div>
 
               {/* BAGIAN I: DEWAN HARIAN */}
               <div className="space-y-1">
-                <h5 className="text-[9pt] font-bold uppercase tracking-wider text-emerald-800">
+                <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
                   Bagian I · Dewan Harian
                 </h5>
                 <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
@@ -5191,13 +5569,13 @@ export default function PusatLaporanPage() {
                     <tbody>
                       {strukturPersonalia.dewanHarianSlots.map((slot) => (
                         <tr key={slot.nomor}>
-                          <td className="px-2 py-0.5 border border-slate-200 text-center font-mono tabular-nums">
+                          <td className="px-2 py-1 border border-slate-200 text-center font-mono tabular-nums">
                             {slot.nomor}
                           </td>
-                          <td className="px-2 py-0.5 border border-slate-200 font-semibold text-slate-800">
+                          <td className="px-2 py-1 border border-slate-200 font-semibold text-slate-800">
                             {slot.jabatan}
                           </td>
-                          <td className="px-2 py-0.5 border border-slate-200 text-slate-900">
+                          <td className="px-2 py-1 border border-slate-200 text-slate-900">
                             {slot.names.length > 0 ? slot.names.join(', ') : '-'}
                           </td>
                         </tr>
@@ -5209,10 +5587,10 @@ export default function PusatLaporanPage() {
 
               {/* BAGIAN II: PLENO / DIVISI (A - K) */}
               <div className="space-y-1.5">
-                <h5 className="text-[9pt] font-bold uppercase tracking-wider text-emerald-800">
+                <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
                   Bagian II · Pleno / Divisi
                 </h5>
-                <div className="grid grid-cols-2 gap-3 text-[9pt] leading-snug">
+                <div className="grid grid-cols-2 gap-3 text-[9.5pt] leading-snug">
                   {strukturPersonalia.plenoSections.map((sec) => {
                     const isMusyrif = sec.letter === 'K';
                     const mid = Math.ceil(sec.members.length / 2);
@@ -5228,10 +5606,10 @@ export default function PusatLaporanPage() {
                         }`}
                       >
                         <div className="bg-slate-100 px-2.5 py-1 border-b border-slate-200 flex items-center justify-between gap-2">
-                          <span className="text-[9pt] font-bold text-slate-900 leading-snug">
+                          <span className="text-[9.5pt] font-bold text-slate-900 leading-snug">
                             {sec.letter}. {sec.label}
                           </span>
-                          <span className="text-[8.5pt] font-semibold text-slate-600 tabular-nums leading-snug">
+                          <span className="text-[8.5pt] font-semibold text-slate-600 tabular-nums leading-tight">
                             {sec.members.length} Org
                           </span>
                         </div>
@@ -5249,21 +5627,22 @@ export default function PusatLaporanPage() {
                                   className="border border-slate-200 rounded-lg overflow-hidden bg-white divide-y divide-slate-100"
                                 >
                                   {half.length === 0 ? (
-                                    <div className="px-2 py-0.5 text-[8.5pt] italic text-slate-400">-</div>
+                                    <div className="px-2 py-1 text-[8.5pt] italic text-slate-400">-</div>
                                   ) : (
                                     half.map((m, idx) => (
                                       <div
                                         key={`K-${offset + idx}`}
-                                        className="px-2 py-0.5 flex items-center justify-between gap-2 text-[8.5pt] leading-tight"
+                                        data-siap-musyrif-item="true"
+                                        className="px-2.5 py-1 flex flex-col text-[8.5pt] leading-tight"
                                       >
-                                        <span className="font-semibold text-slate-900 truncate">
+                                        <span className="font-semibold text-slate-900">
                                           <span className="text-slate-500 font-mono tabular-nums mr-1">
                                             {offset + idx + 1}.
                                           </span>
                                           {m.nama}
                                         </span>
-                                        <span className="text-slate-600 whitespace-nowrap shrink-0">
-                                          {m.peran.replace(/^Musyrif\s+Kamar\s+/i, 'Kmr ')}
+                                        <span className="text-slate-600 pl-3.5">
+                                          {m.peran}
                                         </span>
                                       </div>
                                     ))
@@ -5421,13 +5800,13 @@ export default function PusatLaporanPage() {
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
                 <table className="table-fixed w-full text-[8.5pt] leading-tight border-collapse" data-siap-izin-table="true">
                   <colgroup>
-                    <col className="w-[4.5%]" />
+                    <col className="w-[4%]" />
                     <col className="w-[16%]" />
-                    <col className="w-[9.5%]" />
-                    <col className="w-[13%]" />
+                    <col className="w-[9%]" />
                     <col className="w-[13.5%]" />
-                    <col className="w-[13%]" />
-                    <col className="w-[17.5%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[13.5%]" />
+                    <col className="w-[17%]" />
                     <col className="w-[13%]" />
                   </colgroup>
                   <thead>
@@ -5435,9 +5814,9 @@ export default function PusatLaporanPage() {
                       <th className="px-2 py-1.5 border border-slate-200 text-center">No</th>
                       <th className="px-2 py-1.5 border border-slate-200">Nama Santri</th>
                       <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Kamar</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Pulang</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">Rencana Kembali</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Kembali</th>
+                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Pulang</th>
+                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Rencana Kembali</th>
+                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Kembali</th>
                       <th className="px-2 py-1.5 border border-slate-200">Keperluan</th>
                       <th className="px-2 py-1.5 border border-slate-200">Keterangan</th>
                     </tr>
@@ -5454,13 +5833,13 @@ export default function PusatLaporanPage() {
                         <td className="px-2 py-1.5 border border-slate-200 text-center text-slate-700 break-words align-top">
                           {row.kamar}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.tglPulang}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.rencanaKembali}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.tglKembali}
                         </td>
                         <td className="px-2 py-1.5 border border-slate-200 text-slate-700 break-words align-top">
@@ -5490,55 +5869,33 @@ export default function PusatLaporanPage() {
             <section
               data-siap-page-start="true"
               data-siap-approval="true"
-              className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible"
+              className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible space-y-6"
             >
-              <div className="text-center border-b border-slate-200 pb-3 mb-6">
-                <h3 className="text-[12pt] font-bold uppercase tracking-wider text-slate-900">
+              <div className="text-center border-b border-slate-200 pb-3">
+                <h3 className="text-[11.5pt] font-bold uppercase tracking-wider text-slate-900">
                   Lembar Pengesahan
                 </h3>
-                <p className="text-[10pt] leading-relaxed text-slate-600 mt-0.5">
+                <p className="text-[9.5pt] leading-snug text-slate-600 mt-0.5">
                   {pengaturanApproval.kota_surat}, {formatTanggalSuratIndo(todayStr)}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 px-2 text-center text-[10pt] leading-relaxed overflow-visible">
-                <div className="space-y-2 min-w-0 overflow-visible">
-                  <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
-                  <div className="h-24 w-full max-w-[190px] mx-auto flex items-center justify-center relative overflow-visible">
-                    {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={pengaturanApproval.ttd_sekretaris_url}
-                        alt="TTD Sekretaris"
-                        referrerPolicy="no-referrer"
-                        className="h-20 w-auto max-w-full object-contain"
-                      />
-                    )}
-                  </div>
-                  <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
-                    {pengaturanApproval.nama_sekretaris}
-                  </p>
-                </div>
+              <p className="text-[9.5pt] leading-snug text-slate-700 text-justify">
+                Demikian laporan pertanggungjawaban operasional dan administrasi {pengaturanApproval.nama_pesantren} periode{' '}
+                <strong className="text-slate-900">{periodWindow?.label || '-'}</strong> ini disusun dengan sebenar-benarnya berdasarkan data riil sistem informasi pesantren untuk dipergunakan sebagaimana mestinya.
+              </p>
 
+              <div className="grid grid-cols-2 gap-8 px-2 text-center text-[9.5pt] leading-snug overflow-visible pt-1">
                 <div className="space-y-2 min-w-0 overflow-visible">
-                  <p className="font-semibold text-slate-700">Kepala Pondok</p>
+                  <p className="font-semibold text-slate-700">Ketua Pondok</p>
                   <div className="h-24 w-full max-w-[200px] mx-auto flex items-center justify-center relative overflow-visible">
-                    {useDigitalSignature && pengaturanApproval.stempel_url && (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={pengaturanApproval.stempel_url}
-                        alt="Stempel Pondok"
-                        referrerPolicy="no-referrer"
-                        className="h-20 w-auto max-w-[110px] object-contain opacity-85 absolute left-1/2 -translate-x-1/2 pointer-events-none"
-                      />
-                    )}
                     {useDigitalSignature && pengaturanApproval.ttd_kepala_pondok_url && (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
                         src={pengaturanApproval.ttd_kepala_pondok_url}
-                        alt="TTD Kepala Pondok"
+                        alt="TTD Ketua Pondok"
                         referrerPolicy="no-referrer"
-                        className="h-20 w-auto max-w-full object-contain relative z-10"
+                        className="h-20 w-auto max-w-full object-contain"
                       />
                     )}
                   </div>
@@ -5548,17 +5905,48 @@ export default function PusatLaporanPage() {
                 </div>
 
                 <div className="space-y-2 min-w-0 overflow-visible">
-                  <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
-                  <div className="h-24 w-full max-w-[190px] mx-auto flex items-center justify-center relative overflow-visible">
-                    {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                  <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
+                  <div className="h-24 w-full max-w-[200px] mx-auto flex items-center justify-center relative overflow-visible">
+                    {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
-                        src={pengaturanApproval.ttd_pengasuh_url}
-                        alt="TTD Pengasuh"
+                        src={pengaturanApproval.ttd_sekretaris_url}
+                        alt="TTD Sekretaris Pondok"
                         referrerPolicy="no-referrer"
                         className="h-20 w-auto max-w-full object-contain"
                       />
                     )}
+                  </div>
+                  <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
+                    {pengaturanApproval.nama_sekretaris}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-center overflow-visible">
+                <div className="w-full max-w-[300px] text-center space-y-2 text-[9.5pt] leading-snug overflow-visible">
+                  <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
+                  <div className="h-28 w-full flex items-center justify-center relative overflow-visible">
+                    <div className="relative inline-flex items-center justify-center overflow-visible min-w-[180px] min-h-[84px]">
+                      {useDigitalSignature && pengaturanApproval.stempel_url && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={pengaturanApproval.stempel_url}
+                          alt="Stempel Pondok"
+                          referrerPolicy="no-referrer"
+                          className="h-24 w-auto max-w-[115px] object-contain opacity-90 -mr-7 relative z-0 pointer-events-none"
+                        />
+                      )}
+                      {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={pengaturanApproval.ttd_pengasuh_url}
+                          alt="TTD Pengasuh Pondok"
+                          referrerPolicy="no-referrer"
+                          className="h-24 w-auto max-w-[180px] object-contain relative z-10"
+                        />
+                      )}
+                    </div>
                   </div>
                   <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
                     {pengaturanApproval.nama_pengasuh}
@@ -5616,55 +6004,33 @@ export default function PusatLaporanPage() {
                   <section
                     data-siap-page-start="true"
                     data-siap-approval="true"
-                    className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible"
+                    className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible space-y-6"
                   >
-                    <div className="text-center border-b border-slate-200 pb-3 mb-6">
-                      <h3 className="text-[12pt] font-bold uppercase tracking-wider text-slate-900">
+                    <div className="text-center border-b border-slate-200 pb-3">
+                      <h3 className="text-[11.5pt] font-bold uppercase tracking-wider text-slate-900">
                         Lembar Pengesahan
                       </h3>
-                      <p className="text-[10pt] leading-relaxed text-slate-600 mt-0.5">
+                      <p className="text-[9.5pt] leading-snug text-slate-600 mt-0.5">
                         {pengaturanApproval.kota_surat}, {formatTanggalSuratIndo(todayStr)}
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 px-2 text-center text-[10pt] leading-relaxed overflow-visible">
-                      <div className="space-y-2 min-w-0 overflow-visible">
-                        <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
-                        <div className="h-24 w-full max-w-[190px] mx-auto flex items-center justify-center relative overflow-visible">
-                          {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={pengaturanApproval.ttd_sekretaris_url}
-                              alt="TTD Sekretaris"
-                              referrerPolicy="no-referrer"
-                              className="h-20 w-auto max-w-full object-contain"
-                            />
-                          )}
-                        </div>
-                        <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
-                          {pengaturanApproval.nama_sekretaris}
-                        </p>
-                      </div>
+                    <p className="text-[9.5pt] leading-snug text-slate-700 text-justify">
+                      Demikian laporan pertanggungjawaban operasional dan administrasi {pengaturanApproval.nama_pesantren} periode{' '}
+                      <strong className="text-slate-900">{periodWindow?.label || '-'}</strong> ini disusun dengan sebenar-benarnya berdasarkan data riil sistem informasi pesantren untuk dipergunakan sebagaimana mestinya.
+                    </p>
 
+                    <div className="grid grid-cols-2 gap-8 px-2 text-center text-[9.5pt] leading-snug overflow-visible pt-1">
                       <div className="space-y-2 min-w-0 overflow-visible">
-                        <p className="font-semibold text-slate-700">Kepala Pondok</p>
+                        <p className="font-semibold text-slate-700">Ketua Pondok</p>
                         <div className="h-24 w-full max-w-[200px] mx-auto flex items-center justify-center relative overflow-visible">
-                          {useDigitalSignature && pengaturanApproval.stempel_url && (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={pengaturanApproval.stempel_url}
-                              alt="Stempel Pondok"
-                              referrerPolicy="no-referrer"
-                              className="h-20 w-auto max-w-[110px] object-contain opacity-85 absolute left-1/2 -translate-x-1/2 pointer-events-none"
-                            />
-                          )}
                           {useDigitalSignature && pengaturanApproval.ttd_kepala_pondok_url && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_kepala_pondok_url}
-                              alt="TTD Kepala Pondok"
+                              alt="TTD Ketua Pondok"
                               referrerPolicy="no-referrer"
-                              className="h-20 w-auto max-w-full object-contain relative z-10"
+                              className="h-20 w-auto max-w-full object-contain"
                             />
                           )}
                         </div>
@@ -5674,17 +6040,48 @@ export default function PusatLaporanPage() {
                       </div>
 
                       <div className="space-y-2 min-w-0 overflow-visible">
-                        <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
-                        <div className="h-24 w-full max-w-[190px] mx-auto flex items-center justify-center relative overflow-visible">
-                          {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                        <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
+                        <div className="h-24 w-full max-w-[200px] mx-auto flex items-center justify-center relative overflow-visible">
+                          {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
-                              src={pengaturanApproval.ttd_pengasuh_url}
-                              alt="TTD Pengasuh"
+                              src={pengaturanApproval.ttd_sekretaris_url}
+                              alt="TTD Sekretaris Pondok"
                               referrerPolicy="no-referrer"
                               className="h-20 w-auto max-w-full object-contain"
                             />
                           )}
+                        </div>
+                        <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
+                          {pengaturanApproval.nama_sekretaris}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex justify-center overflow-visible">
+                      <div className="w-full max-w-[300px] text-center space-y-2 text-[9.5pt] leading-snug overflow-visible">
+                        <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
+                        <div className="h-28 w-full flex items-center justify-center relative overflow-visible">
+                          <div className="relative inline-flex items-center justify-center overflow-visible min-w-[180px] min-h-[84px]">
+                            {useDigitalSignature && pengaturanApproval.stempel_url && (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={pengaturanApproval.stempel_url}
+                                alt="Stempel Pondok"
+                                referrerPolicy="no-referrer"
+                                className="h-24 w-auto max-w-[115px] object-contain opacity-90 -mr-7 relative z-0 pointer-events-none"
+                              />
+                            )}
+                            {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={pengaturanApproval.ttd_pengasuh_url}
+                                alt="TTD Pengasuh Pondok"
+                                referrerPolicy="no-referrer"
+                                className="h-24 w-auto max-w-[180px] object-contain relative z-10"
+                              />
+                            )}
+                          </div>
                         </div>
                         <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
                           {pengaturanApproval.nama_pengasuh}
