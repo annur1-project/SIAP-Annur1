@@ -110,6 +110,13 @@ interface PengurusRow {
   jabatan?: string | null;
   divisi?: string | null;
   status?: string | null;
+  masa_khidmat?: string | null;
+}
+
+interface PengurusJabatanRow {
+  pengurus_id?: string | null;
+  divisi?: string | null;
+  nama_jabatan?: string | null;
 }
 
 interface TransaksiRow {
@@ -295,22 +302,33 @@ function calcDiffDaysIso(startIso?: string | null, endIso?: string | null): numb
   return Math.max(0, Math.floor((endUtc - startUtc) / 86400000));
 }
 
-function isExcludedTopPengurus(p: PengurusRow): boolean {
-  const jab = String(p.jabatan || '').toLowerCase().trim();
-  const div = String(p.divisi || '').toLowerCase().trim();
+function normalizeDivisiPengurus(divisi: string): string {
+  const clean = String(divisi || '').trim();
+  if (clean === 'Pimpinan & Harian') return 'Dewan Harian';
+  if (clean === 'Pengasuh') return 'Pengasuh Pondok';
+  return clean;
+}
+
+function isExcludedTopDivisiPengurus(label: string): boolean {
+  const norm = normalizeDivisiPengurus(label).toLowerCase();
+  if (!norm) return false;
   if (
-    jab.includes('dewan pengasuh') ||
-    jab.includes('dzurriyah') ||
-    jab.includes('direktur pendidikan') ||
-    div.includes('dewan pengasuh') ||
-    div.includes('dzurriyah') ||
-    div.includes('direktur pendidikan')
+    norm === 'pengasuh pondok' ||
+    norm === 'pengasuh' ||
+    norm.startsWith('dewan pengasuh') ||
+    norm.includes('dzurriyah') ||
+    norm === 'direktur pendidikan'
   ) {
     return true;
   }
-  if (jab === 'pengasuh' || jab === 'pengasuh pondok') return true;
-  if (jab.includes('pengasuh') && !jab.includes('kepala pondok')) return true;
+  if (norm.includes('pengasuh') && !norm.includes('kepala pondok')) return true;
   return false;
+}
+
+function isExcludedTopPengurus(p: PengurusRow): boolean {
+  const jab = String(p.jabatan || '').trim();
+  const div = String(p.divisi || '').trim();
+  return isExcludedTopDivisiPengurus(jab) || isExcludedTopDivisiPengurus(div);
 }
 
 const MONTH_NAME_TO_NUM: Record<string, string> = {
@@ -578,6 +596,7 @@ export default function DashboardPage() {
     const [
       santriRes,
       pengurusRes,
+      pengurusJabatanRes,
       transaksiRes,
       pengaturanRes,
       jamaahRes,
@@ -601,6 +620,7 @@ export default function DashboardPage() {
         .from('santri')
         .select('id, nama_lengkap, nis, status, kamar, tgl_masuk, tarif_syahriyah, ktl_nominal, no_wa_ayah, no_wa_ibu, no_wa_wali'),
       supabase.from('pengurus').select('*'),
+      supabase.from('pengurus_jabatan').select('pengurus_id, divisi, nama_jabatan'),
       supabase.from('keuangan_transaksi').select('id, dompet, tipe, nominal, tgl_transaksi, metode_pembayaran, kategori, keterangan'),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
       supabase
@@ -641,10 +661,32 @@ export default function DashboardPage() {
 
     const santriList = (santriRes.data || []) as SantriRow[];
     const pengurusList = (pengurusRes.error ? [] : pengurusRes.data || []) as PengurusRow[];
+    const jabatanRows = (pengurusJabatanRes.error ? [] : pengurusJabatanRes.data || []) as PengurusJabatanRow[];
+    const jabatanMap = new Map<string, PengurusJabatanRow[]>();
+    for (const j of jabatanRows) {
+      if (!j.pengurus_id) continue;
+      const list = jabatanMap.get(j.pengurus_id) || [];
+      list.push(j);
+      jabatanMap.set(j.pengurus_id, list);
+    }
+
     const pengurusAktif = pengurusList.filter((p) => {
+      const mk = String(p.masa_khidmat || activeTa).trim();
+      if (mk !== activeTa) return false;
       const st = String(p.status || 'aktif').toLowerCase().trim();
-      const isAktif = !['nonaktif', 'tidak_aktif', 'tidak aktif', 'keluar', 'alumni', 'pensiun', 'berhenti'].includes(st);
-      return isAktif && !isExcludedTopPengurus(p);
+      if (st !== 'aktif') return false;
+      const jabs = jabatanMap.get(p.id) || [];
+      if (jabs.length > 0) {
+        return jabs.some(
+          (j) =>
+            !isExcludedTopDivisiPengurus(String(j.divisi || '')) &&
+            !isExcludedTopDivisiPengurus(String(j.nama_jabatan || ''))
+        );
+      }
+      if (p.jabatan || p.divisi) {
+        return !isExcludedTopPengurus(p);
+      }
+      return false;
     }).length;
 
     const allTransaksiList = ((transaksiRes.data || []) as TransaksiRow[]).map((tx) => ({
@@ -1632,7 +1674,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 2 KARTU PRIORITAS HARIAN: SANTRI PULANG & TERLAMBAT + SANTRI MENUNGGAK SYAHRIYAH */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
         {/* Kartu 1: Santri Pulang & Terlambat */}
         <section className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
@@ -1827,7 +1869,7 @@ export default function DashboardPage() {
       )}
 
       {/* RINGKASAN DIVISI RINGKAS & INFORMATIF */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {/* 1. KEUANGAN 4 DOMPET */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
@@ -1953,8 +1995,8 @@ export default function DashboardPage() {
               </span>
             </div>
             <div className="p-2.5 rounded-xl bg-rose-50/60 border border-rose-200">
-              <span className="text-[10.5px] text-rose-800 block flex items-center gap-1">
-                <HeartPulse className="w-3 h-3" /> Rawat UKS / Rujuk
+              <span className="text-[10.5px] text-rose-800 flex items-center gap-1">
+                <HeartPulse className="w-3 h-3 shrink-0" /> Rawat UKS / Rujuk
               </span>
               <strong className="text-base font-bold text-rose-900 tabular-nums">
                 {loading ? '...' : kesehatanStats.totalAktif}
@@ -2014,7 +2056,7 @@ export default function DashboardPage() {
               </strong>
             </div>
           </div>
-          <p className="text-[11px] text-slate-500 truncate">
+          <p className="text-[11px] text-slate-500 leading-snug break-words">
             {keamananStats.topPoinList.length > 0
               ? `Poin tertinggi: ${keamananStats.topPoinList[0].nama} (${keamananStats.topPoinList[0].totalPoin} poin)`
               : `${keamananStats.kasusBulanIni} kasus tercatat bulan ini`}
@@ -2039,12 +2081,12 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+            <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 min-w-0">
               <span className="text-[10.5px] font-semibold text-amber-900 block">Dapur Hari Ini</span>
-              <strong className="text-xs font-bold text-amber-950 block mt-0.5 truncate">
+              <strong className="text-xs font-bold text-amber-950 block mt-0.5 leading-snug break-words">
                 Pagi: {loading ? '...' : dapurStats.pagiLabel}
               </strong>
-              <span className="text-[10px] text-amber-800 block truncate">
+              <span className="text-[10px] text-amber-800 block mt-0.5 leading-snug break-words">
                 Sore: {loading ? '...' : dapurStats.soreLabel}
               </span>
             </div>
@@ -2086,13 +2128,13 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="text-[10.5px] text-slate-600 block">Tiket Sarpras</span>
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 min-w-0">
+              <span className="text-[10.5px] text-slate-600 block">Laporan Sarpras</span>
               <strong className="text-sm font-bold text-slate-900 tabular-nums block">
                 {loading ? '...' : sarprasStats.menunggu + sarprasStats.diproses} aktif
               </strong>
               <span
-                className={`text-[10px] block ${
+                className={`text-[10px] block leading-snug break-words ${
                   sarprasStats.daruratAktif > 0 ? 'text-rose-700 font-bold' : 'text-slate-500'
                 }`}
               >
@@ -2101,14 +2143,14 @@ export default function DashboardPage() {
                   : `${sarprasStats.asetRusak} aset perlu perbaikan`}
               </span>
             </div>
-            <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200">
+            <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 min-w-0">
               <span className="text-[10.5px] text-purple-900 flex items-center gap-1">
-                <Calendar className="w-3 h-3" /> Agenda Aktif
+                <Calendar className="w-3 h-3 shrink-0" /> Agenda Aktif
               </span>
               <strong className="text-sm font-bold text-purple-950 tabular-nums block">
                 {loading ? '...' : kegiatanStats.pekanIni} pekan ini
               </strong>
-              <span className="text-[10px] text-purple-800 block truncate">
+              <span className="text-[10px] text-purple-800 block leading-snug break-words">
                 {kegiatanStats.upcomingList[0]
                   ? `${formatHariTanggalIndo(kegiatanStats.upcomingList[0].tanggal)}: ${kegiatanStats.upcomingList[0].judul}`
                   : 'Belum ada agenda dekat'}
