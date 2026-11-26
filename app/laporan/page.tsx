@@ -72,6 +72,10 @@ interface ExtraRawData {
   kegiatanRows: Array<Record<string, unknown>>;
   perizinanRows: Array<Record<string, unknown>>;
   santriRows: Array<Record<string, unknown>>;
+  pembayaranDetailRows: Array<Record<string, unknown>>;
+  masterPembayaranRows: Array<Record<string, unknown>>;
+  masterRiwayatRows: Array<Record<string, unknown>>;
+  keuanganTransaksiRows: Array<Record<string, unknown>>;
 }
 
 interface KegiatanLampiranItem {
@@ -172,14 +176,13 @@ function normalizeDivisiName(raw: string): string {
 function isExcludedTopLeadership(divisi: string, namaJabatan: string): boolean {
   const d = normalizeDivisiName(divisi).toLowerCase();
   const j = (namaJabatan || '').trim().toLowerCase();
-  const excluded = [
-    'pengasuh pondok',
-    'pengasuh',
-    'dewan pengasuh (dzurriyah)',
-    'dewan pengasuh',
-    'direktur pendidikan',
-  ];
-  return excluded.includes(d) || excluded.includes(j);
+  const matchesExcluded = (val: string) =>
+    val === 'pengasuh pondok' ||
+    val === 'pengasuh' ||
+    val.startsWith('dewan pengasuh') ||
+    val.includes('dzurriyah') ||
+    val === 'direktur pendidikan';
+  return matchesExcluded(d) || matchesExcluded(j);
 }
 
 function getRoleRank(namaJabatan: string, urutanStruktur: number): number {
@@ -226,6 +229,58 @@ function formatTanggalSuratIndo(iso: string): string {
   const [y, m, d] = iso.split('-');
   const mIdx = Math.max(0, Math.min(11, Number(m) - 1));
   return `${Number(d)} ${bulan[mIdx]} ${y}`;
+}
+
+function parseCleanKeperluan(raw: string): string {
+  const txt = (raw || '').trim();
+  if (!txt || txt === '-') return '-';
+  const stripped = txt.replace(/\[IZIN_META:[\s\S]*?\]/gi, '').replace(/\s+/g, ' ').trim();
+  if (stripped) return stripped;
+  const metaMatch = txt.match(/\[IZIN_META:(\{[\s\S]*?\})\]/i);
+  if (metaMatch && metaMatch[1]) {
+    try {
+      const parsed = JSON.parse(metaMatch[1]) as Record<string, unknown>;
+      for (const k of ['keperluan', 'alasan', 'tujuan', 'keterangan', 'jenis_izin']) {
+        const val = parsed[k];
+        if (typeof val === 'string' && val.trim()) {
+          const innerClean = val.replace(/\[IZIN_META:[\s\S]*?\]/gi, '').trim();
+          if (innerClean) return innerClean;
+        }
+      }
+    } catch {
+      // ignore invalid meta JSON
+    }
+  }
+  return '-';
+}
+
+function formatPsbStatusLabel(raw: string): string {
+  const cleaned = (raw || '').trim();
+  if (!cleaned) return 'Terdaftar';
+  const key = cleaned.toLowerCase().replace(/[\s-]+/g, '_');
+  const map: Record<string, string> = {
+    dp_terverifikasi: 'DP Terverifikasi',
+    menunggu_verifikasi: 'Menunggu Verifikasi',
+    menunggu_dp: 'Menunggu DP',
+    diterima_aktif: 'Diterima Aktif',
+    ditolak: 'Ditolak',
+    terverifikasi: 'Terverifikasi',
+    lunas: 'Lunas',
+    terdaftar: 'Terdaftar',
+    aktif: 'Aktif',
+    batal: 'Dibatalkan',
+    dibatalkan: 'Dibatalkan',
+  };
+  if (map[key]) return map[key];
+  if (cleaned.includes('_')) {
+    const acronyms = new Set(['dp', 'psb', 'vip', 'wa']);
+    return key
+      .split('_')
+      .filter(Boolean)
+      .map((w) => (acronyms.has(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+      .join(' ');
+  }
+  return cleaned;
 }
 
 function isExtraKey(key: string): key is ExtraDivisionKey {
@@ -394,11 +449,74 @@ function extractIsoFromFields(row: Record<string, unknown>, fields: string[]): s
   return '';
 }
 
-function formatShortIdDate(iso: string): string {
+function formatDdMmDate(iso: string): string {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || '-';
-  const bulanShort = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const [, m, d] = iso.split('-');
-  return `${Number(d)} ${bulanShort[Math.max(0, Math.min(11, Number(m) - 1))]}`;
+  return `${d.padStart(2, '0')}/${m.padStart(2, '0')}`;
+}
+
+const SHORT_ID_MONTH_MAP: Record<string, string> = {
+  jan: '01',
+  januari: '01',
+  feb: '02',
+  februari: '02',
+  mar: '03',
+  maret: '03',
+  apr: '04',
+  april: '04',
+  mei: '05',
+  jun: '06',
+  juni: '06',
+  jul: '07',
+  juli: '07',
+  agu: '08',
+  ags: '08',
+  agustus: '08',
+  sep: '09',
+  sept: '09',
+  september: '09',
+  okt: '10',
+  oktober: '10',
+  nov: '11',
+  november: '11',
+  des: '12',
+  desember: '12',
+};
+
+function compactChartDateLabel(raw: string, isLastInSixSeries: boolean): string {
+  const txt = (raw || '').replace(/\s+/g, ' ').trim();
+  if (!txt) return txt;
+  if (/^kini$/i.test(txt)) return 'Kini';
+
+  const ddMmMatches = Array.from(txt.matchAll(/\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/g));
+  const idMonthMatches = Array.from(
+    txt.toLowerCase().matchAll(
+      /\b(\d{1,2})\s+(jan|januari|feb|februari|mar|maret|apr|april|mei|jun|juni|jul|juli|agu|ags|agustus|sep|sept|september|okt|oktober|nov|november|des|desember)\b/g
+    )
+  );
+  const isWeeklyToken =
+    ddMmMatches.length > 0 ||
+    idMonthMatches.length > 0 ||
+    /\b(pekan|minggu)\b/i.test(txt);
+
+  if (isLastInSixSeries && isWeeklyToken) {
+    return 'Kini';
+  }
+
+  if (ddMmMatches.length >= 2) {
+    const last = ddMmMatches[ddMmMatches.length - 1];
+    return `${last[1].padStart(2, '0')}/${last[2].padStart(2, '0')}`;
+  }
+  if (ddMmMatches.length === 1) {
+    const only = ddMmMatches[0];
+    return `${only[1].padStart(2, '0')}/${only[2].padStart(2, '0')}`;
+  }
+  if (idMonthMatches.length > 0) {
+    const last = idMonthMatches[idMonthMatches.length - 1];
+    const mm = SHORT_ID_MONTH_MAP[last[2]] || '01';
+    return `${last[1].padStart(2, '0')}/${mm}`;
+  }
+  return txt;
 }
 
 function buildSixWeekWindows(anchorEndIso: string): Array<{
@@ -415,7 +533,7 @@ function buildSixWeekWindows(anchorEndIso: string): Array<{
     const wStart = addDaysIso(wEnd, -6);
     buckets.push({
       label: `Pekan ${6 - i}`,
-      shortLabel: `${formatShortIdDate(wStart)}–${formatShortIdDate(wEnd)}`,
+      shortLabel: i === 0 ? 'Kini' : formatDdMmDate(wEnd),
       start: wStart,
       end: wEnd,
     });
@@ -460,6 +578,10 @@ export default function PusatLaporanPage() {
     kegiatanRows: [],
     perizinanRows: [],
     santriRows: [],
+    pembayaranDetailRows: [],
+    masterPembayaranRows: [],
+    masterRiwayatRows: [],
+    keuanganTransaksiRows: [],
   });
   const [pengurusRows, setPengurusRows] = useState<RawPengurusPersonalia[]>([]);
   const [kamarOrder, setKamarOrder] = useState<string[]>(DEFAULT_KAMAR_ORDER);
@@ -481,6 +603,8 @@ export default function PusatLaporanPage() {
 
   const docWrapperRef = useRef<HTMLDivElement>(null);
   const personaliaSourceRef = useRef<HTMLDivElement>(null);
+  const approvalSourceRef = useRef<HTMLDivElement>(null);
+  const tunggakanTableSourceRef = useRef<HTMLDivElement>(null);
   const perizinanTableSourceRef = useRef<HTMLDivElement>(null);
   const kegiatanFotoSourceRef = useRef<HTMLDivElement>(null);
   const extraSourceRef = useRef<HTMLDivElement>(null);
@@ -512,6 +636,10 @@ export default function PusatLaporanPage() {
         perizinan1,
         perizinan2,
         perizinan3,
+        pembayaranDetailRows,
+        masterPembayaranRows,
+        masterRiwayatRows,
+        keuanganTransaksiRows,
       ] = await Promise.all([
         fetchAllLaporanRawData({ canViewBisyaroh }),
         fetchSafeTable('kebersihan_log'),
@@ -536,6 +664,10 @@ export default function PusatLaporanPage() {
         fetchSafeTable('perizinan'),
         fetchSafeTable('perizinan_pulang'),
         fetchSafeTable('izin_pulang'),
+        fetchSafeTable('pembayaran_santri_detail'),
+        fetchSafeTable('master_pembayaran'),
+        fetchSafeTable('master_pembayaran_riwayat'),
+        fetchSafeTable('keuangan_transaksi'),
       ]);
       setRawData(data);
       setExtraRaw({
@@ -564,6 +696,10 @@ export default function PusatLaporanPage() {
           ['perizinan', 'izin_pulang']
         ),
         santriRows: santriKamarRows,
+        pembayaranDetailRows,
+        masterPembayaranRows,
+        masterRiwayatRows,
+        keuanganTransaksiRows,
       });
 
       const settingRow =
@@ -576,10 +712,17 @@ export default function PusatLaporanPage() {
           nama_pengasuh: String(settingRow.nama_pengasuh || prev.nama_pengasuh),
           nama_kepala_pondok: String(settingRow.nama_kepala_pondok || prev.nama_kepala_pondok),
           nama_sekretaris: String(settingRow.nama_sekretaris || prev.nama_sekretaris),
-          ttd_pengasuh_url: (settingRow.ttd_pengasuh_url as string | null) || null,
-          ttd_kepala_pondok_url: (settingRow.ttd_kepala_pondok_url as string | null) || null,
-          ttd_sekretaris_url: (settingRow.ttd_sekretaris_url as string | null) || null,
-          stempel_url: (settingRow.stempel_url as string | null) || null,
+          ttd_pengasuh_url:
+            ((settingRow.ttd_pengasuh_url || settingRow.ttd_pengasuh) as string | null) || null,
+          ttd_kepala_pondok_url:
+            ((settingRow.ttd_kepala_pondok_url || settingRow.ttd_kepala_pondok) as string | null) ||
+            null,
+          ttd_sekretaris_url:
+            ((settingRow.ttd_sekretaris_url || settingRow.ttd_sekretaris) as string | null) || null,
+          stempel_url:
+            ((settingRow.stempel_url ||
+              settingRow.stempel_pondok_url ||
+              settingRow.url_stempel) as string | null) || null,
         }));
       }
 
@@ -847,7 +990,9 @@ export default function PusatLaporanPage() {
         nama: extractTextField(row, ['nama_lengkap', 'nama_santri', 'nama', 'no_registrasi']),
         noReg: extractTextField(row, ['no_registrasi', 'kode_psb', 'kode'], '-'),
         program: extractTextField(row, ['program', 'jenjang', 'paket', 'kamar_tujuan', 'asal_daerah']),
-        status: extractTextField(row, ['status', 'status_pendaftaran'], 'Terdaftar'),
+        status: formatPsbStatusLabel(
+          extractTextField(row, ['status', 'status_pendaftaran'], 'Terdaftar')
+        ),
       }));
 
     return {
@@ -1014,11 +1159,17 @@ export default function PusatLaporanPage() {
         santriInfo?.kamar ||
         (nestedSantri ? extractTextField(nestedSantri, ['kamar', 'nama_kamar'], '') : '') ||
         extractTextField(row, ['kamar', 'kamar_santri', 'nama_kamar'], '-');
-      const keperluan = extractTextField(
-        row,
-        ['keperluan', 'alasan', 'tujuan', 'keterangan', 'jenis_izin'],
-        '-'
-      );
+      let keperluan = '-';
+      for (const fieldName of ['keperluan', 'alasan', 'tujuan', 'keterangan', 'jenis_izin']) {
+        const rawVal = row[fieldName];
+        if (typeof rawVal === 'string' && rawVal.trim()) {
+          const parsedVal = parseCleanKeperluan(rawVal);
+          if (parsedVal !== '-') {
+            keperluan = parsedVal;
+            break;
+          }
+        }
+      }
 
       let keterangan: PerizinanDetailRow['keterangan'];
       if (resolvedTglKembaliIso) {
@@ -1192,9 +1343,315 @@ export default function PusatLaporanPage() {
     };
   }, [pengurusRows, kamarOrder, pengaturanApproval.tahun_ajaran_aktif, todayStr]);
 
+  const pengurusAktifCount = useMemo(() => {
+    const activeTa =
+      pengaturanApproval.tahun_ajaran_aktif ||
+      (todayStr ? getTahunAjaranForDate(todayStr) : '');
+    const aktifAll = pengurusRows.filter((p) => p.status === 'aktif');
+    const matchedTa = activeTa ? aktifAll.filter((p) => p.masa_khidmat === activeTa) : [];
+    const sourcePeople = matchedTa.length > 0 ? matchedTa : aktifAll;
+    return sourcePeople.filter((person) => {
+      if (!Array.isArray(person.jabatan_list) || person.jabatan_list.length === 0) {
+        return false;
+      }
+      return person.jabatan_list.some(
+        (jab) => !isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)
+      );
+    }).length;
+  }, [pengurusRows, pengaturanApproval.tahun_ajaran_aktif, todayStr]);
+
+  const syahriyahTunggakan = useMemo(() => {
+    if (!todayStr) {
+      return {
+        totalNominal: 0,
+        totalSantriMenunggak: 0,
+        totalBulanMenunggak: 0,
+        detail: [] as Array<{
+          id: string;
+          namaSantri: string;
+          kamar: string;
+          tglMasuk: string;
+          bulanMenunggak: string;
+          jumlahBulan: number;
+          totalTunggakan: number;
+        }>,
+      };
+    }
+
+    const BULAN_SHORT = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'Mei',
+      'Jun',
+      'Jul',
+      'Agu',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Des',
+    ];
+    const formatYmShort = (ym: string) => {
+      const [y, m] = ym.split('-');
+      const idx = Math.max(0, Math.min(11, Number(m) - 1));
+      return `${BULAN_SHORT[idx]} ${y.slice(-2)}`;
+    };
+
+    const [nowY, nowM, nowD] = todayStr.split('-').map(Number);
+    const activeTa = pengaturanApproval.tahun_ajaran_aktif || getTahunAjaranForDate(todayStr);
+    const taMatch = activeTa.match(/(\d{4})/);
+    const taStartYear = taMatch ? Number(taMatch[1]) : nowM >= 7 ? nowY : nowY - 1;
+
+    // Bulan tagihan Syahriyah berjalan dalam Tahun Ajaran (Juli s/d bulan jatuh tempo, tgl > 10 termasuk bulan berjalan)
+    let cutoffY = nowY;
+    let cutoffM = nowM;
+    if (nowD <= 10) {
+      if (nowM === 1) {
+        cutoffY = nowY - 1;
+        cutoffM = 12;
+      } else {
+        cutoffM = nowM - 1;
+      }
+    }
+    const cutoffYm = `${cutoffY}-${String(cutoffM).padStart(2, '0')}`;
+
+    const taMonths: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const mTotal = 7 + i;
+      const y = mTotal > 12 ? taStartYear + 1 : taStartYear;
+      const m = mTotal > 12 ? mTotal - 12 : mTotal;
+      const ym = `${y}-${String(m).padStart(2, '0')}`;
+      if (ym <= cutoffYm) {
+        taMonths.push(ym);
+      }
+    }
+
+    // Ambil daftar santri dari extraRaw.santriRows atau fallback rawData
+    let santriList = extraRaw.santriRows;
+    if (santriList.length === 0 && rawData) {
+      const rawRec = rawData as unknown as Record<string, unknown>;
+      for (const val of Object.values(rawRec)) {
+        if (
+          Array.isArray(val) &&
+          val.length > 0 &&
+          val[0] &&
+          typeof val[0] === 'object' &&
+          'nama_lengkap' in (val[0] as Record<string, unknown>) &&
+          'kamar' in (val[0] as Record<string, unknown>)
+        ) {
+          santriList = val as Array<Record<string, unknown>>;
+          break;
+        }
+      }
+    }
+
+    // Cari master item Syahriyah & nominal default
+    const masterSyah = extraRaw.masterPembayaranRows.find((r) => {
+      const kode = String(r.kode || r.kode_item || '').toLowerCase();
+      const nama = String(r.nama || r.nama_item || r.judul || '').toLowerCase();
+      return kode.includes('syahriyah') || nama.includes('syahriyah');
+    });
+    const syahKode = String(masterSyah?.kode || masterSyah?.kode_item || 'SYAHRIYAH').toLowerCase();
+    let defaultTarif = extractNumericField(masterSyah || {}, ['nominal', 'tarif', 'jumlah', 'biaya']);
+
+    if (defaultTarif <= 0) {
+      for (const s of santriList) {
+        const t = extractNumericField(s, ['tarif_syahriyah', 'nominal_syahriyah', 'syahriyah']);
+        if (t > 0) {
+          defaultTarif = t;
+          break;
+        }
+      }
+    }
+
+    const riwayatTarifForMonth = (ym: string): number => {
+      const matched = extraRaw.masterRiwayatRows
+        .filter((rw) => {
+          const kode = String(rw.kode_item || rw.kode || '').toLowerCase();
+          const nama = String(rw.nama_item || rw.nama || '').toLowerCase();
+          if (kode && kode !== syahKode && !kode.includes('syahriyah') && !nama.includes('syahriyah')) {
+            return false;
+          }
+          const mulai = String(rw.berlaku_mulai || rw.periode || '').slice(0, 7);
+          return !mulai || mulai <= ym;
+        })
+        .sort((a, b) =>
+          String(b.berlaku_mulai || b.periode || '').localeCompare(
+            String(a.berlaku_mulai || a.periode || '')
+          )
+        );
+      if (matched.length > 0) {
+        const n = extractNumericField(matched[0], ['nominal', 'tarif', 'jumlah']);
+        if (n > 0) return n;
+      }
+      return defaultTarif;
+    };
+
+    const normalizePeriodYm = (rawVal: unknown): string[] => {
+      if (typeof rawVal !== 'string') return [];
+      const matches = rawVal.match(/\b20\d{2}[-/](?:0?[1-9]|1[0-2])\b/g) || [];
+      return matches.map((tok) => {
+        const [yy, mm] = tok.split(/[-/]/);
+        return `${yy}-${String(Number(mm)).padStart(2, '0')}`;
+      });
+    };
+
+    const paidMonthsBySantri = new Map<string, Set<string>>();
+    const addPaidMonth = (sid: string, ym: string) => {
+      if (!sid || !/^\d{4}-\d{2}$/.test(ym)) return;
+      const set = paidMonthsBySantri.get(sid) || new Set<string>();
+      set.add(ym);
+      paidMonthsBySantri.set(sid, set);
+    };
+
+    for (const d of extraRaw.pembayaranDetailRows) {
+      const statusLower = String(d.status || '').toLowerCase();
+      if (statusLower === 'batal' || statusLower === 'dibatalkan') continue;
+      const sid = String(d.santri_id || '');
+      if (!sid) continue;
+      const kode = String(d.kode_item || d.kode || d.jenis_pembayaran || '').toLowerCase();
+      const nama = String(d.nama_item || d.nama || d.keterangan || '').toLowerCase();
+      const isSyahriyah =
+        !kode ||
+        kode === syahKode ||
+        kode.includes('syahriyah') ||
+        nama.includes('syahriyah') ||
+        kode.includes('spp');
+      if (!isSyahriyah) continue;
+
+      const rawCandidates = [d.periode_tagihan, d.periode, d.bulan_tagihan, d.bulan_periode];
+      let foundYm = false;
+      for (const c of rawCandidates) {
+        const yms = normalizePeriodYm(c);
+        if (yms.length > 0) {
+          yms.forEach((ym) => addPaidMonth(sid, ym));
+          foundYm = true;
+        }
+      }
+      if (!foundYm && d.tahun && d.bulan) {
+        const yNum = Number(d.tahun);
+        const mNum = Number(d.bulan);
+        if (yNum >= 2020 && mNum >= 1 && mNum <= 12) {
+          addPaidMonth(sid, `${yNum}-${String(mNum).padStart(2, '0')}`);
+        }
+      }
+    }
+
+    // Fallback transaksi keuangan masuk Syahriyah per santri
+    for (const trx of extraRaw.keuanganTransaksiRows) {
+      const sid = String(trx.santri_id || '');
+      if (!sid) continue;
+      const tipe = String(trx.tipe || trx.jenis || '').toLowerCase();
+      if (tipe && !/masuk|in|terima/.test(tipe)) continue;
+      const kat = `${String(trx.kategori || '')} ${String(trx.uraian || '')} ${String(
+        trx.keterangan || ''
+      )}`.toLowerCase();
+      if (!kat.includes('syahriyah') && !kat.includes('spp')) continue;
+
+      const yms = [
+        ...normalizePeriodYm(trx.periode_tagihan),
+        ...normalizePeriodYm(trx.periode),
+        ...normalizePeriodYm(trx.keterangan),
+        ...normalizePeriodYm(trx.uraian),
+      ];
+      yms.forEach((ym) => addPaidMonth(sid, ym));
+    }
+
+    const detail: Array<{
+      id: string;
+      namaSantri: string;
+      kamar: string;
+      tglMasuk: string;
+      bulanMenunggak: string;
+      jumlahBulan: number;
+      totalTunggakan: number;
+    }> = [];
+
+    let totalNominal = 0;
+    let totalBulanMenunggak = 0;
+
+    for (const s of santriList) {
+      const statusLower = String(s.status || s.status_santri || 'aktif').trim().toLowerCase();
+      if (statusLower !== 'aktif') continue;
+
+      const hasExplicitTarif =
+        s.tarif_syahriyah !== undefined &&
+        s.tarif_syahriyah !== null &&
+        String(s.tarif_syahriyah).trim() !== '';
+      const santriCustomTarif = hasExplicitTarif ? Number(s.tarif_syahriyah) : null;
+      if (santriCustomTarif !== null && (!Number.isFinite(santriCustomTarif) || santriCustomTarif <= 0)) {
+        continue;
+      }
+
+      const sid = String(s.id || '');
+      if (!sid) continue;
+
+      const tglMasukIso = extractIsoFromFields(s, ['tgl_masuk', 'tanggal_masuk', 'created_at']);
+      let startBillingYm = `${taStartYear}-07`;
+      if (tglMasukIso && /^\d{4}-\d{2}-\d{2}$/.test(tglMasukIso)) {
+        const [mY, mM, mD] = tglMasukIso.split('-').map(Number);
+        // Aturan cutoff tanggal 25: masuk > tgl 25 mulai ditagih bulan berikutnya
+        const bY = mD > 25 && mM === 12 ? mY + 1 : mY;
+        const bM = mD > 25 ? (mM === 12 ? 1 : mM + 1) : mM;
+        startBillingYm = `${bY}-${String(bM).padStart(2, '0')}`;
+      }
+
+      const paidSet = paidMonthsBySantri.get(sid) || new Set<string>();
+      const unpaidMonths = taMonths.filter((ym) => ym >= startBillingYm && !paidSet.has(ym));
+      if (unpaidMonths.length === 0) continue;
+
+      let nominalSantri = 0;
+      for (const ym of unpaidMonths) {
+        const tarifBulan =
+          santriCustomTarif !== null && santriCustomTarif > 0
+            ? santriCustomTarif
+            : riwayatTarifForMonth(ym);
+        nominalSantri += tarifBulan;
+      }
+      if (nominalSantri <= 0) continue;
+
+      totalNominal += nominalSantri;
+      totalBulanMenunggak += unpaidMonths.length;
+
+      detail.push({
+        id: sid,
+        namaSantri: extractTextField(s, ['nama_lengkap', 'nama_santri', 'nama'], '-'),
+        kamar: extractTextField(s, ['kamar', 'nama_kamar'], '-'),
+        tglMasuk: tglMasukIso ? formatIsoDisplay(tglMasukIso) : '-',
+        bulanMenunggak: unpaidMonths.map(formatYmShort).join(', '),
+        jumlahBulan: unpaidMonths.length,
+        totalTunggakan: nominalSantri,
+      });
+    }
+
+    detail.sort((a, b) => {
+      if (b.totalTunggakan !== a.totalTunggakan) return b.totalTunggakan - a.totalTunggakan;
+      return a.namaSantri.localeCompare(b.namaSantri, 'id');
+    });
+
+    return {
+      totalNominal,
+      totalSantriMenunggak: detail.length,
+      totalBulanMenunggak,
+      detail,
+    };
+  }, [
+    todayStr,
+    pengaturanApproval.tahun_ajaran_aktif,
+    extraRaw.santriRows,
+    extraRaw.masterPembayaranRows,
+    extraRaw.masterRiwayatRows,
+    extraRaw.pembayaranDetailRows,
+    extraRaw.keuanganTransaksiRows,
+    rawData,
+  ]);
+
   useLayoutEffect(() => {
     const docRoot = docWrapperRef.current;
     const personaliaSource = personaliaSourceRef.current;
+    const approvalSource = approvalSourceRef.current;
+    const tunggakanTableSource = tunggakanTableSourceRef.current;
     const perizinanTableSource = perizinanTableSourceRef.current;
     const kegiatanFotoSource = kegiatanFotoSourceRef.current;
     const extraSource = extraSourceRef.current;
@@ -1203,18 +1660,34 @@ export default function PusatLaporanPage() {
       if (docRoot) {
         docRoot
           .querySelectorAll(
-            '[data-siap-personalia-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-chart-clone="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"]'
+            '[data-siap-personalia-clone="true"], [data-siap-approval-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-chart-clone="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"], [data-siap-tunggakan-clone="true"]'
           )
           .forEach((node) => node.remove());
         docRoot
+          .querySelectorAll<HTMLElement>('[data-siap-orig-text]')
+          .forEach((node) => {
+            const orig = node.getAttribute('data-siap-orig-text');
+            if (orig !== null) node.textContent = orig;
+            node.removeAttribute('data-siap-orig-text');
+          });
+        docRoot
           .querySelectorAll('[data-siap-hidden-personalia="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-personalia'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-approval="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-approval'));
         docRoot
           .querySelectorAll('[data-siap-hidden-kamar="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-kamar'));
         docRoot
           .querySelectorAll('[data-siap-hidden-perizinan="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-perizinan'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-tunggakan="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-tunggakan'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-kegiatan-foto="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-kegiatan-foto'));
         docRoot
           .querySelectorAll('[data-siap-hidden-signature="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-signature'));
@@ -1226,7 +1699,13 @@ export default function PusatLaporanPage() {
           .forEach((node) => node.removeAttribute('data-siap-full-span'));
         docRoot
           .querySelectorAll('[data-siap-page-start="true"]')
-          .forEach((node) => node.removeAttribute('data-siap-page-start'));
+          .forEach((node) => {
+            node.removeAttribute('data-siap-page-start');
+            if (node.hasAttribute('data-siap-added-break-cls')) {
+              node.classList.remove('break-before-page', 'print:break-before-page');
+              node.removeAttribute('data-siap-added-break-cls');
+            }
+          });
         docRoot
           .querySelectorAll('[data-siap-approval="true"]')
           .forEach((node) => node.removeAttribute('data-siap-approval'));
@@ -1242,12 +1721,76 @@ export default function PusatLaporanPage() {
         docRoot
           .querySelectorAll('[data-siap-chart-card="true"]')
           .forEach((node) => node.removeAttribute('data-siap-chart-card'));
+        docRoot
+          .querySelectorAll('[data-siap-xaxis-label="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-xaxis-label'));
       }
     };
 
     cleanupDomPatches();
 
-    if (loading || !bundle || !docRoot) {
+    if (loading || !bundle) {
+      return cleanupDomPatches;
+    }
+
+    const enforceReportFontFloor = (root: HTMLElement) => {
+      const textEls = root.querySelectorAll<HTMLElement>(
+        'p, li, span, div, label, td, th, dd, dt, a, strong, em, small'
+      );
+      textEls.forEach((el) => {
+        if (el.closest('[data-siap-hidden-personalia="true"]')) return;
+        if (el.closest('[data-siap-hidden-approval="true"]')) return;
+        if (el.closest('[data-siap-hidden-kamar="true"]')) return;
+        if (el.closest('[data-siap-hidden-chart="true"]')) return;
+        if (el.closest('[data-siap-izin-table="true"]')) return;
+        if (el.hasAttribute('data-siap-xaxis-label') || el.closest('[data-siap-xaxis-label="true"]')) {
+          el.style.fontSize = '9pt';
+          el.style.whiteSpace = 'nowrap';
+          return;
+        }
+        if (el.closest('h1, h2, h3')) return;
+        const hasDirectText = Array.from(el.childNodes).some(
+          (n) => n.nodeType === Node.TEXT_NODE && (n.nodeValue || '').trim().length > 0
+        );
+        if (!hasDirectText) return;
+        const computedSize = parseFloat(window.getComputedStyle(el).fontSize || '16');
+        if (!computedSize || Number.isNaN(computedSize)) return;
+        const inTableOrChartOrCompact = Boolean(
+          el.closest(
+            'table, svg, [data-siap-chart-card="true"], [data-siap-chart-clone="true"], [data-siap-compact-table="true"]'
+          )
+        );
+        if (inTableOrChartOrCompact) {
+          if (computedSize < 14.6) {
+            el.style.fontSize = '11pt';
+          }
+        } else if (computedSize < 15.8) {
+          const isEyebrowOrBadge =
+            computedSize < 13.5 || /\buppercase\b/.test(el.className || '');
+          el.style.fontSize = isEyebrowOrBadge ? '11pt' : '12pt';
+        }
+      });
+
+      root.querySelectorAll<SVGElement>('svg text, svg tspan').forEach((svgTxt) => {
+        if (
+          svgTxt.hasAttribute('data-siap-xaxis-label') ||
+          svgTxt.closest('[data-siap-xaxis-label="true"]')
+        ) {
+          svgTxt.style.fontSize = '9pt';
+          svgTxt.style.whiteSpace = 'nowrap';
+          return;
+        }
+        const computedSize = parseFloat(window.getComputedStyle(svgTxt).fontSize || '14');
+        if (computedSize < 14.6) {
+          svgTxt.style.fontSize = '11pt';
+        }
+      });
+    };
+
+    if (!docRoot) {
+      document
+        .querySelectorAll<HTMLElement>('[data-siap-laporan-doc="true"]')
+        .forEach((standaloneDoc) => enforceReportFontFloor(standaloneDoc));
       return cleanupDomPatches;
     }
 
@@ -1256,19 +1799,26 @@ export default function PusatLaporanPage() {
       (docRoot.firstElementChild as HTMLElement | null) ||
       docRoot;
 
-    // 0. Ganti semua istilah "Tiket Sarpras" menjadi "Laporan Sarpras" di seluruh dokumen
+    // 0. Ganti istilah "Tiket Sarpras" -> "Laporan Sarpras" & bersihkan string [IZIN_META:{...}] di seluruh dokumen
     const textWalker = document.createTreeWalker(searchContainer, NodeFilter.SHOW_TEXT);
     const textNodesToUpdate: Text[] = [];
     let walkedNode = textWalker.nextNode();
     while (walkedNode) {
-      if (walkedNode.nodeValue && /tiket\s+sarpras/i.test(walkedNode.nodeValue)) {
+      if (
+        walkedNode.nodeValue &&
+        (/tiket\s+sarpras/i.test(walkedNode.nodeValue) || /\[IZIN_META:/i.test(walkedNode.nodeValue))
+      ) {
         textNodesToUpdate.push(walkedNode as Text);
       }
       walkedNode = textWalker.nextNode();
     }
     for (const tNode of textNodesToUpdate) {
       if (tNode.nodeValue) {
-        tNode.nodeValue = tNode.nodeValue.replace(/tiket\s+sarpras/gi, 'Laporan Sarpras');
+        let updated = tNode.nodeValue.replace(/tiket\s+sarpras/gi, 'Laporan Sarpras');
+        if (/\[IZIN_META:/i.test(updated)) {
+          updated = parseCleanKeperluan(updated);
+        }
+        tNode.nodeValue = updated;
       }
     }
 
@@ -1298,8 +1848,20 @@ export default function PusatLaporanPage() {
     const approvalEl =
       outermostApprovalCandidates[outermostApprovalCandidates.length - 1] || null;
 
-    // Atur visibilitas TTD & Stempel Digital pada Lembar Pengesahan
-    if (approvalEl) {
+    // Ganti / sinkronkan Lembar Pengesahan agar TTD & Stempel Digital tampil jelas & tidak terpotong di tepi kanan
+    if (approvalEl && approvalSource && showCoverAndApproval) {
+      const approvalClone = document.createElement('div');
+      approvalClone.setAttribute('data-siap-approval-clone', 'true');
+      approvalClone.innerHTML = approvalSource.innerHTML;
+      const clonedSection = approvalClone.firstElementChild as HTMLElement | null;
+      if (clonedSection) {
+        clonedSection.setAttribute('data-siap-approval-clone', 'true');
+        clonedSection.setAttribute('data-siap-page-start', 'true');
+        clonedSection.setAttribute('data-siap-approval', 'true');
+        approvalEl.setAttribute('data-siap-hidden-approval', 'true');
+        approvalEl.parentElement?.insertBefore(clonedSection, approvalEl);
+      }
+    } else if (approvalEl) {
       approvalEl.setAttribute('data-siap-page-start', 'true');
       approvalEl.setAttribute('data-siap-approval', 'true');
       if (!useDigitalSignature) {
@@ -1317,13 +1879,23 @@ export default function PusatLaporanPage() {
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (txt.length === 0 || txt.length > 150000) return false;
       if (/Ringkasan\s+Eksekutif/i.test(txt)) return false;
-      const romans = txt.match(/\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/gi) || [];
-      const uniqueRomans = new Set(romans.map((r) => r.toUpperCase().replace(/\s+/g, ' ')));
+      const romans = txt.match(/\b(?:Divisi|Bab)\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/gi) || [];
+      const uniqueRomans = new Set(
+        romans.map((r) => r.toUpperCase().replace(/\b(?:DIVISI|BAB)\s+/i, '').trim())
+      );
       if (uniqueRomans.size === 1) return true;
-      if (el.tagName === 'SECTION') {
-        const firstHeading = el.querySelector('h2, h3');
-        const hTxt = (firstHeading?.textContent || '').trim();
-        if (/^(?:Divisi\s+|Bab\s+)?(I|II|III|IV|V|VI|VII|VIII|IX|X)\b/i.test(hTxt)) {
+      if (el.tagName === 'SECTION' || el.tagName === 'DIV') {
+        const headings = Array.from(el.querySelectorAll('h2, h3')).filter(
+          (h) =>
+            !h.closest('[data-siap-personalia-clone="true"]') &&
+            !/^\s*(?:I|II)\.\s*(?:DEWAN\s+HARIAN|PLENO)\b/i.test((h.textContent || '').trim())
+        );
+        const romanHeadings = headings.filter((h) =>
+          /^(?:(?:Divisi|Bab)\s+)?(I|II|III|IV|V|VI|VII|VIII|IX|X)(?:[\s.:·-])+/i.test(
+            (h.textContent || '').trim()
+          )
+        );
+        if (romanHeadings.length === 1 && headings[0] === romanHeadings[0]) {
           return true;
         }
       }
@@ -1343,48 +1915,46 @@ export default function PusatLaporanPage() {
       }
     });
 
+    const findDivByMatcher = (rx: RegExp): HTMLElement | null =>
+      outermostDivSections.find((el) => {
+        const firstH = (el.querySelector('h2, h3')?.textContent || '').replace(/\s+/g, ' ').trim();
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return rx.test(firstH) || rx.test(txt.slice(0, 400));
+      }) || null;
+
     const div1ScopeEl =
-      outermostDivSections.find((el) => {
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return /\bDivisi\s+I\b/i.test(txt) && /Administrasi|Santri/i.test(txt);
-      }) || null;
+      findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+I\b|^\s*I[.\s·:-]+).*(?:Administrasi|Santri)/i) ||
+      (Array.from(searchContainer.querySelectorAll<HTMLElement>('section, div')).find((el) => {
+        if (el === searchContainer) return false;
+        const h = (el.querySelector('h2, h3')?.textContent || '').replace(/\s+/g, ' ').trim();
+        return /(?:\b(?:Divisi|Bab)\s+I\b|^\s*I[.\s·:-]+).*(?:Administrasi|Santri)/i.test(h);
+      }) || null);
+    const div2El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+II\b|^\s*II[.\s·:-]+).*(?:Keuangan)/i);
+    const div3El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+III\b|^\s*III[.\s·:-]+).*(?:Kegiatan)/i);
+    const div4El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+IV\b|^\s*IV[.\s·:-]+).*(?:Perizinan|Izin)/i);
+    const div8El = findDivByMatcher(/(?:\b(?:Divisi|Bab)\s+VIII\b|^\s*VIII[.\s·:-]+).*(?:Dapur)/i);
 
-    const div2El =
-      outermostDivSections.find((el) => {
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (/\bDivisi\s+II\b/i.test(txt) || /^\s*II\./i.test(txt)) && /Keuangan/i.test(txt);
-      }) || null;
-
-    const div3El =
-      outermostDivSections.find((el) => {
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (/\bDivisi\s+III\b/i.test(txt) || /^\s*III\./i.test(txt)) && /Kegiatan/i.test(txt);
-      }) || null;
-
-    const div4El =
-      outermostDivSections.find((el) => {
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (/\bDivisi\s+IV\b/i.test(txt) || /^\s*IV\./i.test(txt)) && /Perizinan|Izin/i.test(txt);
-      }) || null;
-
-    const div8El =
-      outermostDivSections.find((el) => {
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return (/\bDivisi\s+VIII\b/i.test(txt) || /^\s*VIII\./i.test(txt)) && /Dapur/i.test(txt);
-      }) || null;
+    // Pastikan Bab I selalu memiliki break-before-page (dimulai di halaman baru tersendiri)
+    if (div1ScopeEl) {
+      div1ScopeEl.setAttribute('data-siap-page-start', 'true');
+      if (!div1ScopeEl.classList.contains('break-before-page')) {
+        div1ScopeEl.classList.add('break-before-page', 'print:break-before-page');
+        div1ScopeEl.setAttribute('data-siap-added-break-cls', 'true');
+      }
+    }
 
     // 0b. Penataan Grafik di Ringkasan Eksekutif -> Pindahkan ke Bab II (Keuangan) & Bab VIII (Dapur)
     const execCandidates = allSectionDivs.filter((el) => {
       if (el === searchContainer) return false;
       if (approvalEl && (el === approvalEl || el.contains(approvalEl))) return false;
       if (outermostDivSections.some((d) => d === el || el.contains(d) || d.contains(el))) return false;
-      const heading = el.querySelector('h1, h2, h3');
+      const heading = el.querySelector('h1, h2, h3, h4, p');
       const hTxt = (heading?.textContent || '').replace(/\s+/g, ' ').trim();
       const fullTxt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       return (
         /Ringkasan\s+Eksekutif/i.test(hTxt) &&
         !/\bDivisi\s+I\b/i.test(fullTxt) &&
-        fullTxt.length < 30000
+        fullTxt.length < 35000
       );
     });
     const execSectionEl =
@@ -1404,7 +1974,7 @@ export default function PusatLaporanPage() {
       if (hasChartSvg) return true;
       const styledBars = Array.from(el.querySelectorAll<HTMLElement>('div, span')).filter((d) => {
         const st = d.getAttribute('style') || '';
-        return /\b(width|height)\s*:\s*[\d.]+%/.test(st);
+        return /\b(width|height)\s*:\s*[\d.]+%/.test(st) || /\bheight\s*:\s*\d+px/i.test(st);
       });
       if (styledBars.length >= 2) return true;
       if (el.querySelectorAll('[role="progressbar"]').length >= 2) return true;
@@ -1424,7 +1994,141 @@ export default function PusatLaporanPage() {
           }
         }
         svg.style.maxWidth = '100%';
+        svg.style.width = '100%';
+        svg.style.height = 'auto';
         svg.style.overflow = 'visible';
+      });
+    };
+
+    const formatChartXAxisLabels = (chartCard: HTMLElement) => {
+      // 1. SVG charts (custom SVG atau Recharts)
+      chartCard.querySelectorAll('svg').forEach((svg) => {
+        if (svg.classList.contains('lucide')) return;
+        const allTexts = Array.from(svg.querySelectorAll<SVGTextElement>('text'));
+        if (allTexts.length === 0) return;
+
+        let xAxisTexts: SVGTextElement[] = [];
+        const rechartsX = Array.from(
+          svg.querySelectorAll<SVGTextElement>('.recharts-xAxis text, .recharts-cartesian-axis-tick text')
+        );
+        if (rechartsX.length > 0) {
+          xAxisTexts = rechartsX.filter((t) => {
+            const val = (t.textContent || '').trim();
+            return !/^\d+(?:%|rb|jt)?$/i.test(val);
+          });
+        }
+
+        if (xAxisTexts.length === 0) {
+          const yCoords = allTexts
+            .map((t) => parseFloat(t.getAttribute('y') || '0'))
+            .filter((y) => !Number.isNaN(y) && y > 0);
+          const maxY = yCoords.length > 0 ? Math.max(...yCoords) : 0;
+          xAxisTexts = allTexts.filter((t) => {
+            const val = (t.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!val) return false;
+            const yVal = parseFloat(t.getAttribute('y') || '0');
+            const isBottomBand = maxY > 0 && yVal >= maxY - 18;
+            const looksLikeXLabel =
+              /kini|pekan|minggu|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|masak|petugas|\d{1,2}\/\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
+                val
+              );
+            return isBottomBand && (looksLikeXLabel || !/^\d+$/.test(val));
+          });
+        }
+
+        const isSixSeries = xAxisTexts.length === 6;
+        xAxisTexts.forEach((txtEl, idx) => {
+          const raw = (txtEl.textContent || '').replace(/\s+/g, ' ').trim();
+          const compacted = compactChartDateLabel(raw, isSixSeries && idx === xAxisTexts.length - 1);
+          if (compacted && compacted !== raw) {
+            const tspan = txtEl.querySelector('tspan');
+            if (tspan && txtEl.children.length === 1) {
+              tspan.textContent = compacted;
+            } else {
+              txtEl.textContent = compacted;
+            }
+          }
+          txtEl.setAttribute('data-siap-xaxis-label', 'true');
+          txtEl.style.fontSize = '9pt';
+          txtEl.style.whiteSpace = 'nowrap';
+          txtEl.querySelectorAll<SVGElement>('tspan').forEach((sp) => {
+            sp.setAttribute('data-siap-xaxis-label', 'true');
+            sp.style.fontSize = '9pt';
+            sp.style.whiteSpace = 'nowrap';
+          });
+        });
+      });
+
+      // 2. HTML bar / flex / grid charts
+      const htmlLabelRows = Array.from(
+        chartCard.querySelectorAll<HTMLElement>('[class*="grid-cols-"], [class*="flex"]')
+      ).filter((row) => {
+        if (row.closest('svg')) return false;
+        const kids = Array.from(row.children) as HTMLElement[];
+        if (kids.length < 2 || kids.length > 8) return false;
+        const hasNestedBarOrHeading = kids.some((k) => Boolean(k.querySelector('h3, h4, h5, svg')));
+        if (hasNestedBarOrHeading) return false;
+        const texts = kids.map((k) => (k.textContent || '').replace(/\s+/g, ' ').trim());
+        return texts.some((t) =>
+          /kini|pekan|minggu|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|masak|petugas|\d{1,2}\/\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
+            t
+          )
+        );
+      });
+
+      htmlLabelRows.forEach((row) => {
+        const kids = Array.from(row.children) as HTMLElement[];
+        const isSixSeries = kids.length === 6;
+        kids.forEach((kid, idx) => {
+          const leafTarget =
+            kid.children.length === 1 && kid.firstElementChild instanceof HTMLElement
+              ? (kid.firstElementChild as HTMLElement)
+              : kid;
+          const raw = (leafTarget.textContent || '').replace(/\s+/g, ' ').trim();
+          const compacted = compactChartDateLabel(raw, isSixSeries && idx === kids.length - 1);
+          if (compacted && compacted !== raw && leafTarget.children.length === 0) {
+            leafTarget.textContent = compacted;
+          }
+          leafTarget.setAttribute('data-siap-xaxis-label', 'true');
+          leafTarget.classList.add('whitespace-nowrap');
+          leafTarget.style.fontSize = '9pt';
+          leafTarget.style.whiteSpace = 'nowrap';
+        });
+      });
+
+      // 3. Per-column HTML bar cards (setiap kolom punya bar + label bawah)
+      const colGrids = Array.from(
+        chartCard.querySelectorAll<HTMLElement>('[class*="grid-cols-6"], [class*="grid-cols-5"], [class*="grid-cols-4"]')
+      );
+      colGrids.forEach((grid) => {
+        const cols = Array.from(grid.children) as HTMLElement[];
+        if (cols.length < 4) return;
+        const isSixSeries = cols.length === 6;
+        cols.forEach((col, idx) => {
+          const spans = Array.from(col.querySelectorAll<HTMLElement>('span, p, div')).filter(
+            (el) =>
+              el.children.length === 0 &&
+              (el.textContent || '').trim().length > 0 &&
+              !el.getAttribute('style')?.includes('height')
+          );
+          const bottomLabel = spans[spans.length - 1];
+          if (!bottomLabel) return;
+          const raw = (bottomLabel.textContent || '').replace(/\s+/g, ' ').trim();
+          if (
+            /kini|pekan|minggu|tunai|transfer|izin|pelanggaran|sakit|sarpras|agenda|laundry|\d{1,2}\/\d{1,2}|\b(jan|feb|mar|apr|mei|jun|jul|agu|ags|sep|okt|nov|des)\b/i.test(
+              raw
+            )
+          ) {
+            const compacted = compactChartDateLabel(raw, isSixSeries && idx === cols.length - 1);
+            if (compacted && compacted !== raw) {
+              bottomLabel.textContent = compacted;
+            }
+            bottomLabel.setAttribute('data-siap-xaxis-label', 'true');
+            bottomLabel.classList.add('whitespace-nowrap');
+            bottomLabel.style.fontSize = '9pt';
+            bottomLabel.style.whiteSpace = 'nowrap';
+          }
+        });
       });
     };
 
@@ -1452,58 +2156,120 @@ export default function PusatLaporanPage() {
       sectionEl.appendChild(blockEl);
     };
 
-    if (execSectionEl) {
-      const rawChartEls = Array.from(execSectionEl.querySelectorAll<HTMLElement>('div, section')).filter(
-        (el) => {
+    // Cari seluruh kartu grafik di area Ringkasan Eksekutif (sebelum Bab I..X)
+    const chartSearchScope: HTMLElement | null = execSectionEl || searchContainer;
+    if (chartSearchScope) {
+      const CHART_TITLE_RX =
+        /perbandingan\s+keuangan|tunai\s*(?:&|dan)\s*transfer|tren\s*6\s*(?:pekan|minggu)|perbandingan\s+(?:persentase\s+)?kedisiplinan|perbandingan\s+aktivitas\s+divisi/i;
+
+      const isOutsideDivisions = (el: HTMLElement): boolean => {
+        if (approvalEl && (el === approvalEl || approvalEl.contains(el) || el.contains(approvalEl))) {
+          return false;
+        }
+        if (outermostDivSections.some((d) => el === d || d.contains(el) || el.contains(d))) {
+          return false;
+        }
+        return true;
+      };
+
+      const titleNodes = Array.from(
+        chartSearchScope.querySelectorAll<HTMLElement>('h3, h4, h5, p, div, span')
+      ).filter((el) => {
+        if (!isOutsideDivisions(el)) return false;
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 110) return false;
+        if (el.querySelector('svg')) return false;
+        const hasChildMatch = Array.from(el.children).some((ch) =>
+          CHART_TITLE_RX.test((ch.textContent || '').replace(/\s+/g, ' ').trim())
+        );
+        return !hasChildMatch && CHART_TITLE_RX.test(t);
+      });
+
+      const resolvedCards: HTMLElement[] = [];
+      for (const titleEl of titleNodes) {
+        let cur: HTMLElement | null = titleEl.parentElement;
+        let bestCard: HTMLElement | null = null;
+        while (cur && cur !== chartSearchScope && cur !== searchContainer) {
+          if (!isOutsideDivisions(cur)) break;
+          const containedTitles = titleNodes.filter((tn) => cur!.contains(tn));
+          if (containedTitles.length > 1) break;
+          const fullT = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+          if (/Ringkasan\s+Eksekutif/i.test(fullT) && fullT.length > 400) break;
+          if (fullT.length > 4500) break;
+          const cls = typeof cur.className === 'string' ? cur.className : '';
+          if (/\bborder\b|\brounded|\bbg-/.test(cls) && hasChartVisual(cur)) {
+            bestCard = cur;
+          }
+          cur = cur.parentElement;
+        }
+        if (bestCard && !resolvedCards.includes(bestCard)) {
+          resolvedCards.push(bestCard);
+        }
+      }
+
+      // Fallback scan bila ada kartu grafik lain di execSectionEl
+      if (execSectionEl) {
+        const rawChartEls = Array.from(
+          execSectionEl.querySelectorAll<HTMLElement>('div, section')
+        ).filter((el) => {
           if (el === execSectionEl) return false;
+          if (!isOutsideDivisions(el)) return false;
           const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
           if (!txt || txt.length > 4500) return false;
           if (/Ringkasan\s+Eksekutif/i.test(txt) && txt.length > 600) return false;
-          const cls = el.className || '';
+          const cls = typeof el.className === 'string' ? el.className : '';
           const looksLikeCard = /\bborder\b|\brounded|\bbg-/.test(cls);
           const hasTitle = Boolean(
             el.querySelector('h3, h4, h5, p, [class*="font-bold"], [class*="font-semibold"]')
           );
           return looksLikeCard && hasTitle && hasChartVisual(el);
-        }
-      );
+        });
 
-      // Buang wrapper grid yang membungkus 2+ kartu grafik terpisah
-      const singleChartCandidates = rawChartEls.filter((cand) => {
-        const directOrNestedTitled = rawChartEls.filter(
-          (other) =>
-            other !== cand &&
-            cand.contains(other) &&
-            Boolean(other.querySelector('h3, h4, h5'))
-        );
-        // Cek apakah ada ≥ 2 kartu saudara terpisah di dalam cand
-        const topNested = directOrNestedTitled.filter(
-          (n) => !directOrNestedTitled.some((p) => p !== n && p.contains(n))
-        );
-        return topNested.length < 2;
-      });
+        const singleChartCandidates = rawChartEls.filter((cand) => {
+          const titledChildren = rawChartEls.filter((other) => {
+            if (other === cand || !cand.contains(other)) return false;
+            const firstT = (other.textContent || '').replace(/\s+/g, ' ').trim();
+            return CHART_TITLE_RX.test(firstT) || Boolean(other.querySelector('h3, h4, h5'));
+          });
+          const topNested = titledChildren.filter(
+            (n) => !titledChildren.some((p) => p !== n && p.contains(n))
+          );
+          return topNested.length < 2;
+        });
 
-      const execChartCards = singleChartCandidates.filter(
-        (cand) => !singleChartCandidates.some((other) => other !== cand && other.contains(cand))
-      );
+        singleChartCandidates
+          .filter((cand) => !singleChartCandidates.some((other) => other !== cand && other.contains(cand)))
+          .forEach((cand) => {
+            if (
+              !resolvedCards.some(
+                (rc) => rc === cand || rc.contains(cand) || cand.contains(rc)
+              )
+            ) {
+              resolvedCards.push(cand);
+            }
+          });
+      }
 
       const financeCards: HTMLElement[] = [];
       const disciplineCards: HTMLElement[] = [];
       const activityCards: HTMLElement[] = [];
+      const otherExtraExecCharts: HTMLElement[] = [];
 
-      for (const card of execChartCards) {
+      for (const card of resolvedCards) {
         card.setAttribute('data-siap-chart-card', 'true');
         const txt = (card.textContent || '').replace(/\s+/g, ' ').trim();
         const isActivity =
           /aktivitas\s+divisi/i.test(txt) ||
-          (/izin\s+pulang/i.test(txt) && (/pelanggaran/i.test(txt) || /sarpras/i.test(txt) || /laundry/i.test(txt)));
+          (/izin\s+pulang/i.test(txt) &&
+            (/pelanggaran/i.test(txt) || /sarpras/i.test(txt) || /laundry/i.test(txt)));
         if (isActivity) {
           activityCards.push(card);
           continue;
         }
         const isFinance =
+          /perbandingan\s+keuangan/i.test(txt) ||
           (/tunai/i.test(txt) && /transfer/i.test(txt)) ||
-          /tren\s*6\s*pekan/i.test(txt) ||
+          /tren\s*6\s*(?:pekan|minggu)/i.test(txt) ||
           /arus\s*kas|pemasukan.*pengeluaran/i.test(txt);
         const isDiscipline =
           /kedisiplinan/i.test(txt) ||
@@ -1515,10 +2281,12 @@ export default function PusatLaporanPage() {
           financeCards.push(card);
         } else if (isDiscipline) {
           disciplineCards.push(card);
+        } else {
+          otherExtraExecCharts.push(card);
         }
       }
 
-      // 0b-1. Sembunyikan grafik keuangan di Ringkasan Eksekutif & kloning ke Bab II. Keuangan Pesantren
+      // 0b-1. Sembunyikan grafik keuangan di Ringkasan Eksekutif & kloning ke Bab II. Laporan Keuangan Pesantren
       if (financeCards.length > 0) {
         financeCards.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
         if (div2El) {
@@ -1534,13 +2302,14 @@ export default function PusatLaporanPage() {
             clone.setAttribute('data-siap-chart-card', 'true');
             clone.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
             normalizeSvgForClone(clone);
+            formatChartXAxisLabels(clone);
             finWrap.appendChild(clone);
           });
           insertAfterHeaderOrSummary(div2El, finWrap);
         }
       }
 
-      // 0b-2. Sembunyikan grafik kedisiplinan campuran di Ringkasan Eksekutif & kloning versi khusus Dapur ke Bab VIII. Dapur & Konsumsi
+      // 0b-2. Sembunyikan grafik kedisiplinan campuran di Ringkasan Eksekutif & kloning versi khusus Dapur ke Bab VIII. Dapur Umum & Konsumsi Santri
       if (disciplineCards.length > 0) {
         disciplineCards.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
         if (div8El) {
@@ -1575,7 +2344,7 @@ export default function PusatLaporanPage() {
             // Hapus grup SVG Jamaah jika grafik memakai SVG
             clone.querySelectorAll('svg g').forEach((gEl) => {
               const gt = (gEl.textContent || '').replace(/\s+/g, ' ').trim();
-              if (/\bjamaah\b/i.test(gt) && !/\bdapur\b|\bmasak\b|\bpetugas\b/i.test(gt) && gt.length < 120) {
+              if (/\bjamaah\b|\bsholat\b/i.test(gt) && !/\bdapur\b|\bmasak\b|\bpetugas\b/i.test(gt) && gt.length < 120) {
                 gEl.remove();
               }
             });
@@ -1583,7 +2352,7 @@ export default function PusatLaporanPage() {
             // Perbarui judul kartu jika menyebut Jamaah
             clone.querySelectorAll('h3, h4, h5, p').forEach((hdr) => {
               const ht = (hdr.textContent || '').trim();
-              if (/kedisiplinan/i.test(ht) && /jamaah/i.test(ht)) {
+              if (/kedisiplinan/i.test(ht) && (/jamaah/i.test(ht) || /persentase/i.test(ht))) {
                 hdr.textContent = 'Kedisiplinan Operasional Dapur (Masak & Petugas)';
               } else if (/jamaah/i.test(ht) && /dapur/i.test(ht)) {
                 hdr.textContent = ht.replace(/jamaah\s*(?:&|dan)?\s*/gi, '').trim();
@@ -1591,6 +2360,7 @@ export default function PusatLaporanPage() {
             });
 
             normalizeSvgForClone(clone);
+            formatChartXAxisLabels(clone);
             dapurWrap.appendChild(clone);
           });
 
@@ -1598,13 +2368,38 @@ export default function PusatLaporanPage() {
         }
       }
 
+      // Sembunyikan juga grafik sisa di Ringkasan Eksekutif agar tersisa HANYA 1 grafik "Perbandingan Aktivitas Divisi"
+      otherExtraExecCharts.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
+
+      // Sembunyikan grid pembungkus jika seluruh anaknya tersembunyi
+      [...financeCards, ...disciplineCards, ...otherExtraExecCharts].forEach((hiddenCard) => {
+        const p = hiddenCard.parentElement;
+        if (!p || p === execSectionEl || p === searchContainer) return;
+        const visibleKids = Array.from(p.children).filter(
+          (ch) => !ch.hasAttribute('data-siap-hidden-chart')
+        );
+        if (visibleKids.length === 0) {
+          p.setAttribute('data-siap-hidden-chart', 'true');
+        }
+      });
+
       // 0b-3. Pastikan grafik gabungan "Perbandingan Aktivitas Divisi" melebar penuh rapi di Ringkasan Eksekutif
       activityCards.forEach((actCard) => {
         actCard.setAttribute('data-siap-full-span', 'true');
         actCard.setAttribute('data-siap-card-styled', 'true');
         actCard.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
+        formatChartXAxisLabels(actCard);
       });
     }
+
+    // Rapikan label sumbu X pada grafik lain di seluruh dokumen (termasuk grafik Koperasi & PSB)
+    searchContainer
+      .querySelectorAll<HTMLElement>('[data-siap-chart-card="true"]')
+      .forEach((card) => {
+        if (!card.hasAttribute('data-siap-hidden-chart')) {
+          formatChartXAxisLabels(card);
+        }
+      });
 
     // 1. Ganti blok Struktur Personalia (Divisi Administrasi) dengan susunan baku & hapus struktur lama ganda
     const administrasiVisible =
@@ -1615,6 +2410,41 @@ export default function PusatLaporanPage() {
 
     if (administrasiVisible) {
       const adminScopeEl = div1ScopeEl || searchContainer;
+
+      // 1a. Sinkronkan angka kartu Pengurus Aktif (18 orang: Kepala Pondok ke bawah, kecuali Pengasuh, Dewan Pengasuh/Dzurriyah, Direktur Pendidikan)
+      if (pengurusRows.length > 0) {
+        const updatePengurusCardInScope = (rootEl: HTMLElement | null) => {
+          if (!rootEl) return;
+          const cards = Array.from(rootEl.querySelectorAll<HTMLElement>('div')).filter((d) => {
+            if (d.closest('[data-siap-personalia-clone="true"]')) return false;
+            const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
+            return /Pengurus\s+Aktif/i.test(t) && t.length < 180;
+          });
+          const innerCards = cards.filter(
+            (cand) => !cards.some((other) => other !== cand && cand.contains(other))
+          );
+          innerCards.forEach((card) => {
+            const numNodes = Array.from(
+              card.querySelectorAll<HTMLElement>('strong, b, p, span, div')
+            ).filter((n) => {
+              if (n.children.length > 0) return false;
+              const nt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+              return /^\d+(?:\s*Orang)?$/i.test(nt);
+            });
+            numNodes.forEach((n) => {
+              const nt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+              if (!n.hasAttribute('data-siap-orig-text')) {
+                n.setAttribute('data-siap-orig-text', n.textContent || '');
+              }
+              n.textContent = /orang/i.test(nt)
+                ? `${pengurusAktifCount} Orang`
+                : String(pengurusAktifCount);
+            });
+          });
+        };
+        updatePengurusCardInScope(adminScopeEl);
+        updatePengurusCardInScope(execSectionEl);
+      }
 
       if (personaliaSource) {
         const adminEls = Array.from(adminScopeEl.querySelectorAll('*')) as HTMLElement[];
@@ -1636,6 +2466,8 @@ export default function PusatLaporanPage() {
         if (headingEl && headingEl.parentElement) {
           cloneWrap = document.createElement('div');
           cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+          cloneWrap.setAttribute('data-siap-page-start', 'true');
+          cloneWrap.className = 'break-before-page print:break-before-page';
           cloneWrap.innerHTML = personaliaSource.innerHTML;
 
           const parent = headingEl.parentElement;
@@ -1679,6 +2511,8 @@ export default function PusatLaporanPage() {
           if (outermostFallback && outermostFallback.parentElement) {
             cloneWrap = document.createElement('div');
             cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+            cloneWrap.setAttribute('data-siap-page-start', 'true');
+            cloneWrap.className = 'break-before-page print:break-before-page';
             cloneWrap.innerHTML = personaliaSource.innerHTML;
             outermostFallback.setAttribute('data-siap-hidden-personalia', 'true');
             outermostFallback.parentElement.insertBefore(cloneWrap, outermostFallback);
@@ -1716,7 +2550,8 @@ export default function PusatLaporanPage() {
         }
       }
 
-      // 1b. Tata ulang daftar jumlah santri per kamar menjadi 2 kolom simetris (Kiri: A1-A10; Kanan: C1-C6, Tahfidz, Al-Fachriyah 1-4 VIP)
+      // 1b. Susun daftar 21 kamar ke dalam 2 tabel terpisah yang simetris:
+      // Tabel Kiri: 1-11 (Kamar A1-A10 dan C1) | Tabel Kanan: 12-21 (Kamar C2-C6, Tahfidz, Al-Fachriyah 1-4 VIP)
       const kamarTables = Array.from(adminScopeEl.querySelectorAll('table')).filter((tbl) => {
         if (tbl.closest('[data-siap-personalia-clone="true"]')) return false;
         if (tbl.closest('[data-siap-hidden-personalia="true"]')) return false;
@@ -1740,6 +2575,16 @@ export default function PusatLaporanPage() {
 
       const primaryKamarTable = kamarTables[0] || null;
       if (primaryKamarTable) {
+        const origThead = primaryKamarTable.querySelector('thead');
+        const origTfoot = primaryKamarTable.querySelector('tfoot');
+        const headCells = origThead
+          ? Array.from(origThead.querySelectorAll('th, td')).map((c) =>
+              (c.textContent || '').replace(/\s+/g, ' ').trim()
+            )
+          : [];
+        const noColIdx = headCells.findIndex((t) => /^no\.?$/i.test(t));
+        const detectedKamarCol = headCells.findIndex((t) => /kamar/i.test(t));
+
         const allCollectedRows: HTMLTableRowElement[] = [];
         kamarTables.forEach((tbl) => {
           tbl.querySelectorAll<HTMLTableRowElement>('tbody tr').forEach((r) => {
@@ -1750,12 +2595,21 @@ export default function PusatLaporanPage() {
         const totalRows: HTMLTableRowElement[] = [];
         const roomRows: Array<{ row: HTMLTableRowElement; name: string }> = [];
         allCollectedRows.forEach((r) => {
-          const firstCell = (r.querySelector('td, th')?.textContent || '').replace(/\s+/g, ' ').trim();
+          const cells = Array.from(r.querySelectorAll('td, th')).map((c) =>
+            (c.textContent || '').replace(/\s+/g, ' ').trim()
+          );
           const rowText = (r.textContent || '').replace(/\s+/g, ' ').trim();
+          const firstCell = cells[0] || '';
           if (/^(total|jumlah\s+seluruh|grand\s+total)\b/i.test(firstCell) || /^total\b/i.test(rowText)) {
             totalRows.push(r);
-          } else if (firstCell) {
-            roomRows.push({ row: r, name: firstCell });
+          } else {
+            const roomName =
+              (detectedKamarCol >= 0 ? cells[detectedKamarCol] : '') ||
+              cells.find((c) => c && !/^\d+\.?$/.test(c)) ||
+              firstCell;
+            if (roomName) {
+              roomRows.push({ row: r, name: roomName });
+            }
           }
         });
 
@@ -1770,7 +2624,9 @@ export default function PusatLaporanPage() {
             }
             const cMatch = norm.match(/^(?:kamar\s*)?C\s*(\d+)\b/i);
             if (cMatch) {
-              return { side: 'right', order: 10 + Number(cMatch[1]) };
+              const cNum = Number(cMatch[1]);
+              if (cNum === 1) return { side: 'left', order: 11 };
+              return { side: 'right', order: 10 + cNum };
             }
             if (/tahfidz/i.test(norm)) {
               return { side: 'right', order: 100 };
@@ -1799,18 +2655,38 @@ export default function PusatLaporanPage() {
             rightEntries = roomRows.slice(mid);
           }
 
-          const origThead = primaryKamarTable.querySelector('thead');
-          const origTfoot = primaryKamarTable.querySelector('tfoot');
-
-          const buildHalfTable = (rows: HTMLTableRowElement[]) => {
+          const buildHalfTable = (rows: HTMLTableRowElement[], startNo: number) => {
             const tbl = document.createElement('table');
             tbl.className = 'w-full border-collapse';
             tbl.setAttribute('data-siap-compact-table', 'true');
             if (origThead) {
-              tbl.appendChild(origThead.cloneNode(true));
+              const clonedHead = origThead.cloneNode(true) as HTMLTableSectionElement;
+              const headRow = clonedHead.querySelector('tr');
+              if (headRow && noColIdx === -1) {
+                const thNo = document.createElement('th');
+                thNo.className = 'px-2 py-1 border border-slate-200 bg-slate-100 text-slate-700 text-center w-9';
+                thNo.textContent = 'No';
+                headRow.insertBefore(thNo, headRow.firstChild);
+              }
+              tbl.appendChild(clonedHead);
             }
             const tbody = document.createElement('tbody');
-            rows.forEach((r) => tbody.appendChild(r.cloneNode(true)));
+            rows.forEach((r, idx) => {
+              const rowClone = r.cloneNode(true) as HTMLTableRowElement;
+              const rowNum = String(startNo + idx);
+              if (noColIdx >= 0) {
+                const cells = rowClone.querySelectorAll('td, th');
+                if (cells[noColIdx]) {
+                  cells[noColIdx].textContent = rowNum;
+                }
+              } else {
+                const tdNo = document.createElement('td');
+                tdNo.className = 'px-2 py-1 border border-slate-200 text-center font-mono tabular-nums text-slate-600 w-9';
+                tdNo.textContent = rowNum;
+                rowClone.insertBefore(tdNo, rowClone.firstChild);
+              }
+              tbody.appendChild(rowClone);
+            });
             tbl.appendChild(tbody);
             return tbl;
           };
@@ -1825,12 +2701,17 @@ export default function PusatLaporanPage() {
           const leftWrap = document.createElement('div');
           leftWrap.className =
             'min-w-0 rounded-xl overflow-hidden border border-slate-200 bg-white siap-table-card';
-          leftWrap.appendChild(buildHalfTable(leftEntries.map((e) => e.row)));
+          leftWrap.appendChild(buildHalfTable(leftEntries.map((e) => e.row), 1));
 
           const rightWrap = document.createElement('div');
           rightWrap.className =
             'min-w-0 rounded-xl overflow-hidden border border-slate-200 bg-white siap-table-card';
-          rightWrap.appendChild(buildHalfTable(rightEntries.map((e) => e.row)));
+          rightWrap.appendChild(
+            buildHalfTable(
+              rightEntries.map((e) => e.row),
+              leftEntries.length + 1
+            )
+          );
 
           kamarGrid.appendChild(leftWrap);
           kamarGrid.appendChild(rightWrap);
@@ -1882,28 +2763,170 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 2. Tempel Foto Dokumentasi Kegiatan pada Bab III. Kegiatan Pondok di bawah daftar pengisi acara
-    if (div3El && kegiatanFotoSource && kegiatanLampiranFoto.length > 0) {
-      const fotoClone = document.createElement('div');
-      fotoClone.setAttribute('data-siap-kegiatan-foto-clone', 'true');
-      fotoClone.className = 'mt-5 pt-4 border-t border-slate-200 space-y-3';
-      fotoClone.innerHTML = kegiatanFotoSource.innerHTML;
+    // 1c. Bab II (Laporan Keuangan Pesantren): Sinkronkan kartu & rincian Tunggakan Syahriyah (aktif saja, cutoff tgl 25, bebas bulan lunas)
+    if (div2El && extraRaw.santriRows.length > 0) {
+      const syncTunggakanCard = (scopeEl: HTMLElement | null) => {
+        if (!scopeEl) return;
+        const cardEls = Array.from(scopeEl.querySelectorAll<HTMLElement>('div')).filter((d) => {
+          if (d.closest('[data-siap-tunggakan-clone="true"]')) return false;
+          const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
+          return /Tunggakan\s*Syahriyah|Estimasi\s*Tunggakan/i.test(t) && t.length < 220;
+        });
+        const innerCards = cardEls.filter(
+          (cand) => !cardEls.some((other) => other !== cand && cand.contains(other))
+        );
+        innerCards.forEach((card) => {
+          const leafNodes = Array.from(
+            card.querySelectorAll<HTMLElement>('strong, b, p, span, div')
+          ).filter((n) => n.children.length === 0);
+          leafNodes.forEach((n) => {
+            const nt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+            if (/^Rp[\s\d.,]+$/i.test(nt)) {
+              if (!n.hasAttribute('data-siap-orig-text')) {
+                n.setAttribute('data-siap-orig-text', n.textContent || '');
+              }
+              n.textContent = formatRupiah(syahriyahTunggakan.totalNominal);
+            } else if (/^\d+\s*santri(?:\s*\(\s*\d+\s*bulan\s*\))?$/i.test(nt)) {
+              if (!n.hasAttribute('data-siap-orig-text')) {
+                n.setAttribute('data-siap-orig-text', n.textContent || '');
+              }
+              n.textContent = /\bbulan\b/i.test(nt)
+                ? `${syahriyahTunggakan.totalSantriMenunggak} santri (${syahriyahTunggakan.totalBulanMenunggak} bulan)`
+                : `${syahriyahTunggakan.totalSantriMenunggak} santri`;
+            } else if (/\d+\s*santri/i.test(nt) && nt.length < 90) {
+              if (!n.hasAttribute('data-siap-orig-text')) {
+                n.setAttribute('data-siap-orig-text', n.textContent || '');
+              }
+              n.textContent = nt
+                .replace(/\d+\s*santri/gi, `${syahriyahTunggakan.totalSantriMenunggak} santri`)
+                .replace(/\d+\s*bulan/gi, `${syahriyahTunggakan.totalBulanMenunggak} bulan`);
+            }
+          });
+        });
+      };
 
-      const pengisiCandidates = Array.from(div3El.querySelectorAll('table, div, section')).filter(
-        (el) => {
-          if (el === div3El) return false;
-          const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-          return /Pengisi\s+Acara|Rincian\s+Pengisi|Daftar\s+Pengisi/i.test(txt) && txt.length < 15000;
+      syncTunggakanCard(div2El);
+      syncTunggakanCard(execSectionEl);
+
+      if (tunggakanTableSource) {
+        const tunggakanTables = Array.from(div2El.querySelectorAll('table')).filter((tbl) => {
+          const headTxt = (tbl.querySelector('thead')?.textContent || '').toLowerCase();
+          const prevTxt = (tbl.previousElementSibling?.textContent || '').toLowerCase();
+          return (
+            headTxt.includes('tunggakan') ||
+            headTxt.includes('menunggak') ||
+            (headTxt.includes('syahriyah') && headTxt.includes('santri')) ||
+            prevTxt.includes('tunggakan')
+          );
+        });
+
+        const tunggakanClone = document.createElement('div');
+        tunggakanClone.setAttribute('data-siap-tunggakan-clone', 'true');
+        tunggakanClone.className = 'mt-3';
+        tunggakanClone.innerHTML = tunggakanTableSource.innerHTML;
+
+        if (tunggakanTables.length > 0) {
+          tunggakanTables.forEach((tbl, idx) => {
+            const pWrap = tbl.parentElement;
+            const isSingleWrap =
+              pWrap &&
+              pWrap !== div2El &&
+              pWrap.children.length === 1 &&
+              /overflow|rounded|border/i.test(pWrap.className || '');
+            if (idx === 0) {
+              if (isSingleWrap && pWrap.parentElement) {
+                pWrap.parentElement.insertBefore(tunggakanClone, pWrap);
+              } else if (pWrap) {
+                pWrap.insertBefore(tunggakanClone, tbl);
+              }
+            }
+            if (isSingleWrap) {
+              pWrap.setAttribute('data-siap-hidden-tunggakan', 'true');
+            } else {
+              tbl.setAttribute('data-siap-hidden-tunggakan', 'true');
+            }
+          });
         }
+      }
+    }
+
+    // 2. Bab III (Kegiatan Pondok): Tampilkan "LAMPIRAN DOKUMENTASI FOTO KEGIATAN" cukup 1 kali saja (hapus duplikasi)
+    if (div3El) {
+      const fotoTitleEls = Array.from(
+        div3El.querySelectorAll<HTMLElement>('h3, h4, h5, p, div, span')
+      ).filter((el) => {
+        if (el.closest('[data-siap-kegiatan-foto-clone="true"]')) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!txt || txt.length > 100) return false;
+        const hasChildMatch = Array.from(el.children).some((ch) =>
+          /lampiran\s+dokumentasi\s+foto\s+kegiatan|dokumentasi\s+foto\s+kegiatan/i.test(
+            (ch.textContent || '').replace(/\s+/g, ' ').trim()
+          )
+        );
+        return (
+          !hasChildMatch &&
+          /^(?:lampiran\s+)?dokumentasi\s+foto\s+kegiatan\b/i.test(txt)
+        );
+      });
+
+      const existingFotoBlocks: HTMLElement[] = [];
+      for (const titleEl of fotoTitleEls) {
+        let cur: HTMLElement | null = titleEl;
+        let bestBlock: HTMLElement = titleEl;
+        while (cur && cur !== div3El) {
+          const fullTxt = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+          if (
+            /\bDivisi\s+III\b|Pengisi\s+Acara|Agenda\s+Kegiatan|Notulensi\s+Kegiatan/i.test(fullTxt)
+          ) {
+            break;
+          }
+          if (fullTxt.length > 20000) break;
+          bestBlock = cur;
+          cur = cur.parentElement;
+        }
+        if (bestBlock !== div3El && !existingFotoBlocks.includes(bestBlock)) {
+          existingFotoBlocks.push(bestBlock);
+        }
+      }
+      const outermostFotoBlocks = existingFotoBlocks.filter(
+        (cand) => !existingFotoBlocks.some((other) => other !== cand && other.contains(cand))
       );
-      const outermostPengisi = pengisiCandidates.filter(
-        (cand) => !pengisiCandidates.some((other) => other !== cand && other.contains(cand))
-      );
-      const lastPengisiBlock = outermostPengisi[outermostPengisi.length - 1] || null;
-      if (lastPengisiBlock) {
-        lastPengisiBlock.insertAdjacentElement('afterend', fotoClone);
-      } else {
-        div3El.appendChild(fotoClone);
+
+      if (kegiatanFotoSource && kegiatanLampiranFoto.length > 0) {
+        // Sembunyikan seluruh blok duplikat bawaan dokumen utama agar hanya tampil 1x dari sumber lengkap
+        outermostFotoBlocks.forEach((blk) => {
+          blk.setAttribute('data-siap-hidden-kegiatan-foto', 'true');
+        });
+
+        const fotoClone = document.createElement('div');
+        fotoClone.setAttribute('data-siap-kegiatan-foto-clone', 'true');
+        fotoClone.className = 'mt-5 pt-4 border-t border-slate-200 space-y-3';
+        fotoClone.innerHTML = kegiatanFotoSource.innerHTML;
+
+        const pengisiCandidates = Array.from(div3El.querySelectorAll('table, div, section')).filter(
+          (el) => {
+            if (el === div3El) return false;
+            if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return false;
+            const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            return (
+              /Pengisi\s+Acara|Rincian\s+Pengisi|Daftar\s+Pengisi/i.test(txt) &&
+              txt.length < 15000
+            );
+          }
+        );
+        const outermostPengisi = pengisiCandidates.filter(
+          (cand) => !pengisiCandidates.some((other) => other !== cand && other.contains(cand))
+        );
+        const lastPengisiBlock = outermostPengisi[outermostPengisi.length - 1] || null;
+        if (lastPengisiBlock) {
+          lastPengisiBlock.insertAdjacentElement('afterend', fotoClone);
+        } else {
+          div3El.appendChild(fotoClone);
+        }
+      } else if (outermostFotoBlocks.length > 1) {
+        outermostFotoBlocks.slice(1).forEach((blk) => {
+          blk.setAttribute('data-siap-hidden-kegiatan-foto', 'true');
+        });
       }
     }
 
@@ -1947,6 +2970,70 @@ export default function PusatLaporanPage() {
       }
     }
 
+    // 2c. Bab VIII (Dapur Umum & Konsumsi Santri): Pastikan kolom Menu Ringkas tampil sebagai teks biasa (tanpa $ atau format rumus matematika)
+    if (div8El) {
+      div8El.querySelectorAll('table').forEach((tbl) => {
+        const heads = Array.from(tbl.querySelectorAll('thead th, thead td')).map((h) =>
+          (h.textContent || '').trim().toLowerCase()
+        );
+        const menuColIdx = heads.findIndex((h) => h.includes('menu'));
+        tbl.querySelectorAll<HTMLElement>('tbody tr').forEach((tr) => {
+          const cells = Array.from(tr.children) as HTMLElement[];
+          const targetCells =
+            menuColIdx >= 0 && cells[menuColIdx] ? [cells[menuColIdx]] : cells;
+          targetCells.forEach((cell) => {
+            const hasMathDom = Boolean(
+              cell.querySelector('.katex, .MathJax, math, annotation')
+            );
+            if (hasMathDom) {
+              const ann = cell.querySelector('annotation');
+              const rawMenu = (ann?.textContent || cell.textContent || '')
+                .replace(/^\s*\$+|\$+\s*$/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (!cell.hasAttribute('data-siap-orig-text')) {
+                cell.setAttribute('data-siap-orig-text', cell.textContent || '');
+              }
+              cell.textContent = rawMenu || '-';
+            } else {
+              const rawCellTxt = (cell.textContent || '').trim();
+              if (/^\s*\$[\s\S]*\$\s*$/.test(rawCellTxt) || (menuColIdx >= 0 && rawCellTxt.includes('$'))) {
+                const cleanedMenu = rawCellTxt
+                  .replace(/\$([^$]*[A-Za-z+][^$]*)\$/g, '$1')
+                  .replace(/^\s*\$+|\$+\s*$/g, '')
+                  .trim();
+                if (cleanedMenu !== rawCellTxt) {
+                  if (!cell.hasAttribute('data-siap-orig-text')) {
+                    cell.setAttribute('data-siap-orig-text', cell.textContent || '');
+                  }
+                  cell.textContent = cleanedMenu;
+                }
+              }
+            }
+            if (menuColIdx >= 0 && cells[menuColIdx] === cell) {
+              cell.style.fontStyle = 'normal';
+              cell.style.fontFamily = 'inherit';
+            }
+          });
+        });
+      });
+
+      const d8Walker = document.createTreeWalker(div8El, NodeFilter.SHOW_TEXT);
+      const d8Nodes: Text[] = [];
+      let d8Cur = d8Walker.nextNode();
+      while (d8Cur) {
+        if (d8Cur.nodeValue && /\$([^$]*[A-Za-z+][^$]*)\$/.test(d8Cur.nodeValue)) {
+          d8Nodes.push(d8Cur as Text);
+        }
+        d8Cur = d8Walker.nextNode();
+      }
+      d8Nodes.forEach((n) => {
+        if (n.nodeValue) {
+          n.nodeValue = n.nodeValue.replace(/\$([^$]*[A-Za-z+][^$]*)\$/g, '$1');
+        }
+      });
+    }
+
     // 3. Tempel blok Divisi XI, XII, XIII ke dalam kontainer kertas laporan utama
     const shouldInjectExtrasInsidePaper =
       scope === 'gabungan' &&
@@ -1980,10 +3067,13 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 4. Seragamkan sudut agak lengkung (rounded-xl) pada seluruh kartu & tabel laporan
+    // 4. Seragamkan sudut agak lengkung (rounded-xl overflow-hidden border) pada seluruh kartu & tabel laporan
     searchContainer.querySelectorAll<HTMLTableElement>('table').forEach((tbl) => {
       if (tbl.closest('[data-siap-hidden-personalia="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-approval="true"]')) return;
       if (tbl.closest('[data-siap-hidden-kamar="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-tunggakan="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
       if (tbl.closest('[data-siap-hidden-chart="true"]')) return;
       if (tbl.closest('.siap-table-card')) return;
       tbl.setAttribute('data-siap-table-styled', 'true');
@@ -1992,69 +3082,34 @@ export default function PusatLaporanPage() {
         pWrap &&
         pWrap !== searchContainer &&
         pWrap.children.length === 1 &&
-        /overflow/i.test(pWrap.className || '')
+        /overflow|rounded|border/i.test(pWrap.className || '')
       ) {
         pWrap.setAttribute('data-siap-table-wrap', 'true');
+        pWrap.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
       }
     });
 
     searchContainer.querySelectorAll<HTMLElement>('div, section').forEach((el) => {
       if (el === searchContainer) return;
       if (el.closest('[data-siap-hidden-personalia="true"]')) return;
+      if (el.closest('[data-siap-hidden-approval="true"]')) return;
       if (el.closest('[data-siap-hidden-kamar="true"]')) return;
+      if (el.closest('[data-siap-hidden-tunggakan="true"]')) return;
+      if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
       if (el.closest('[data-siap-hidden-chart="true"]')) return;
       const cls = el.className || '';
       if (
         typeof cls === 'string' &&
         /\bborder\b/.test(cls) &&
-        /\brounded/.test(cls) &&
-        !/\brounded-full\b/.test(cls)
+        !/\brounded-full\b/.test(cls) &&
+        !/\bprint:border-0\b/.test(cls)
       ) {
         el.setAttribute('data-siap-card-styled', 'true');
+        el.classList.add('rounded-xl', 'overflow-hidden');
       }
     });
 
-    // 5. Pastikan tidak ada teks laporan di bawah 11pt (14.67px), dan narasi/keterangan utama 12pt (16px)
-    const enforceReportFontFloor = (root: HTMLElement) => {
-      const textEls = root.querySelectorAll<HTMLElement>(
-        'p, li, span, div, label, td, th, dd, dt, a, strong, em, small'
-      );
-      textEls.forEach((el) => {
-        if (el.closest('[data-siap-hidden-personalia="true"]')) return;
-        if (el.closest('[data-siap-hidden-kamar="true"]')) return;
-        if (el.closest('[data-siap-hidden-chart="true"]')) return;
-        if (el.closest('h1, h2, h3')) return;
-        // Hanya proses elemen yang memiliki teks langsung (leaf text)
-        const hasDirectText = Array.from(el.childNodes).some(
-          (n) => n.nodeType === Node.TEXT_NODE && (n.nodeValue || '').trim().length > 0
-        );
-        if (!hasDirectText) return;
-        const computedSize = parseFloat(window.getComputedStyle(el).fontSize || '16');
-        if (!computedSize || Number.isNaN(computedSize)) return;
-        const inTableOrChart = Boolean(
-          el.closest('table, svg, [data-siap-chart-card="true"], [data-siap-chart-clone="true"]')
-        );
-        if (inTableOrChart) {
-          if (computedSize < 14.6) {
-            el.style.fontSize = '11pt';
-          }
-        } else if (computedSize < 15.8) {
-          const isEyebrowOrBadge =
-            computedSize < 13.5 ||
-            /\buppercase\b/.test(el.className || '') ||
-            Boolean(el.closest('[data-siap-compact-table="true"]'));
-          el.style.fontSize = isEyebrowOrBadge ? '11pt' : '12pt';
-        }
-      });
-
-      root.querySelectorAll<SVGElement>('svg text, svg tspan').forEach((svgTxt) => {
-        const computedSize = parseFloat(window.getComputedStyle(svgTxt).fontSize || '14');
-        if (computedSize < 14.6) {
-          svgTxt.style.fontSize = '11pt';
-        }
-      });
-    };
-
+    // 5. Pastikan tidak ada teks laporan di bawah 11pt (14.67px), kecuali label sumbu X grafik (9pt)
     enforceReportFontFloor(searchContainer);
 
     return cleanupDomPatches;
@@ -2067,8 +3122,14 @@ export default function PusatLaporanPage() {
     showCoverAndApproval,
     showNotaLampiran,
     useDigitalSignature,
+    pengaturanApproval,
+    todayStr,
     mobilePreviewOpen,
     strukturPersonalia,
+    pengurusAktifCount,
+    pengurusRows.length,
+    extraRaw.santriRows.length,
+    syahriyahTunggakan,
     extraReports,
     perizinanReportRows,
     kegiatanLampiranFoto,
@@ -2334,10 +3395,12 @@ export default function PusatLaporanPage() {
                           <div className="w-full h-1 rounded-full bg-slate-200" />
                         )}
                       </div>
-                      <div className="text-center leading-tight">
-                        <span className="block text-[11pt] font-bold text-slate-800">{wk.label}</span>
-                        <span className="block text-[11pt] text-slate-500">{wk.shortLabel}</span>
-                      </div>
+                      <span
+                        data-siap-xaxis-label="true"
+                        className="block text-[9pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
+                      >
+                        {wk.shortLabel}
+                      </span>
                     </div>
                   );
                 })}
@@ -2390,16 +3453,16 @@ export default function PusatLaporanPage() {
           (scope === 'gabungan' && extraSelectedDivisions.includes('psb'))) && (
           <section
             data-siap-page-start={hasBeforeXiii ? 'true' : undefined}
-            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-6 sm:p-8 space-y-4 print:border-slate-300 ${
+            className={`bg-white border border-slate-200 rounded-xl overflow-hidden p-4 sm:p-5 space-y-2.5 print:border-slate-300 print:space-y-2 ${
               hasBeforeXiii ? 'print:break-before-page' : ''
             }`}
           >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
               <div>
                 <span className="text-[11pt] font-bold uppercase tracking-wider text-emerald-700">
                   Divisi XIII · Pendaftaran Santri Baru (PSB)
                 </span>
-                <h3 className="text-[14pt] font-extrabold text-slate-900">
+                <h3 className="text-[13pt] font-extrabold text-slate-900 leading-tight">
                   Laporan Penerimaan &amp; Verifikasi Calon Santri Baru
                 </h3>
               </div>
@@ -2408,56 +3471,56 @@ export default function PusatLaporanPage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11pt]">
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Pendaftar Periode Ini</span>
-                <strong className="text-[14pt] font-extrabold text-slate-900 tabular-nums">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11pt]">
+              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
+                <span className="text-slate-600 block leading-tight">Pendaftar Periode Ini</span>
+                <strong className="text-[13pt] font-extrabold text-slate-900 tabular-nums leading-tight">
                   {extraReports.psb.pendaftarPeriode}
                 </strong>
-                <span className="text-[11pt] text-slate-500 block">
-                  Total data PSB: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
+                <span className="text-[11pt] text-slate-500 block leading-tight">
+                  Total: {extraReports.psb.totalSemua} (Lalu: {extraReports.psb.prevPendaftar})
                 </span>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200">
-                <span className="text-emerald-800 block">Terverifikasi / Diterima</span>
-                <strong className="text-[14pt] font-extrabold text-emerald-950 tabular-nums">
+              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200">
+                <span className="text-emerald-800 block leading-tight">Terverifikasi / Diterima</span>
+                <strong className="text-[13pt] font-extrabold text-emerald-950 tabular-nums leading-tight">
                   {extraReports.psb.terverifikasi}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-amber-50 border border-amber-200">
-                <span className="text-amber-800 block">Menunggu / Proses</span>
-                <strong className="text-[14pt] font-extrabold text-amber-950 tabular-nums">
+              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-amber-50 border border-amber-200">
+                <span className="text-amber-800 block leading-tight">Menunggu / Proses</span>
+                <strong className="text-[13pt] font-extrabold text-amber-950 tabular-nums leading-tight">
                   {extraReports.psb.menunggu}
                 </strong>
               </div>
-              <div className="p-3 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
-                <span className="text-slate-600 block">Pembayaran Masuk PSB</span>
-                <strong className="text-[13pt] font-extrabold text-slate-900 tabular-nums">
+              <div className="px-2.5 py-2 rounded-xl overflow-hidden bg-slate-50 border border-slate-200">
+                <span className="text-slate-600 block leading-tight">Pembayaran Masuk PSB</span>
+                <strong className="text-[12pt] font-extrabold text-slate-900 tabular-nums leading-tight">
                   {formatRupiah(extraReports.psb.totalBayar)}
                 </strong>
               </div>
             </div>
 
             {/* Banner Indikator Sisa Kuota Diskon Pangkal (100 Kuota Pertama) */}
-            <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50/70 p-4 space-y-2.5 break-inside-avoid">
+            <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50/70 px-3 py-2 space-y-1.5 break-inside-avoid">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-[12pt] font-extrabold text-emerald-950">
+                  <h4 className="text-[11pt] font-extrabold text-emerald-950 leading-snug">
                     Sisa Kuota Diskon Pangkal (dari {extraReports.psb.kuotaMaks} Kuota Pertama)
                   </h4>
-                  <p className="text-[11pt] text-emerald-900">
-                    Kuota terpakai: <strong className="tabular-nums">{extraReports.psb.kuotaTerpakai}</strong> dari{' '}
-                    <strong className="tabular-nums">{extraReports.psb.kuotaMaks}</strong> pendaftar terverifikasi / aktif ({extraReports.psb.persenKuota}%)
+                  <p className="text-[11pt] text-emerald-900 leading-snug">
+                    Terpakai: <strong className="tabular-nums">{extraReports.psb.kuotaTerpakai}</strong> dari{' '}
+                    <strong className="tabular-nums">{extraReports.psb.kuotaMaks}</strong> terverifikasi / aktif ({extraReports.psb.persenKuota}%)
                   </p>
                 </div>
-                <div className="rounded-xl overflow-hidden border border-emerald-300 bg-white px-3.5 py-2 text-right">
-                  <span className="block text-[11pt] text-emerald-700 font-semibold">Sisa Kuota Tersedia</span>
-                  <strong className="text-[15pt] font-extrabold text-emerald-900 tabular-nums">
+                <div className="rounded-xl overflow-hidden border border-emerald-300 bg-white px-3 py-1 text-right">
+                  <span className="block text-[11pt] text-emerald-700 font-semibold leading-tight">Sisa Kuota</span>
+                  <strong className="text-[13pt] font-extrabold text-emerald-900 tabular-nums leading-tight">
                     {extraReports.psb.sisaKuota} Kuota
                   </strong>
                 </div>
               </div>
-              <div className="w-full h-3 rounded-full bg-white border border-emerald-200 overflow-hidden">
+              <div className="w-full h-2 rounded-full bg-white border border-emerald-200 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-emerald-600 transition-all"
                   style={{ width: `${extraReports.psb.persenKuota}%` }}
@@ -2466,36 +3529,36 @@ export default function PusatLaporanPage() {
             </div>
 
             {/* Grafik Batang Tren Pendaftaran Santri Baru (6 Pekan Terakhir) */}
-            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/60 p-4 space-y-3 break-inside-avoid">
+            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50/60 px-3 py-2 space-y-1.5 break-inside-avoid">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-[12pt] font-extrabold text-slate-900">
+                  <h4 className="text-[11pt] font-extrabold text-slate-900 leading-snug">
                     Tren Pendaftaran Santri Baru (6 Pekan Terakhir)
                   </h4>
-                  <p className="text-[11pt] text-slate-600">
-                    Total pendaftar 6 pekan terakhir:{' '}
+                  <p className="text-[11pt] text-slate-600 leading-snug">
+                    Total 6 pekan terakhir:{' '}
                     <strong className="text-slate-900 tabular-nums">
                       {extraReports.psb.weeklyTrend.reduce((acc, w) => acc + w.total, 0)} Santri
                     </strong>
                   </p>
                 </div>
-                <span className="text-[11pt] font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-1 tabular-nums">
+                <span className="text-[11pt] font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-0.5 tabular-nums">
                   Terverifikasi: {extraReports.psb.weeklyTrend.reduce((acc, w) => acc + w.verif, 0)}
                 </span>
               </div>
 
-              <div className="grid grid-cols-6 gap-2 sm:gap-3 items-end pt-2">
+              <div className="grid grid-cols-6 gap-2 items-end pt-1">
                 {extraReports.psb.weeklyTrend.map((wk) => {
                   const pct =
                     wk.total > 0
-                      ? Math.max(12, Math.round((wk.total / extraReports.psb.maxTrend) * 100))
+                      ? Math.max(14, Math.round((wk.total / extraReports.psb.maxTrend) * 100))
                       : 0;
                   return (
-                    <div key={wk.label} className="flex flex-col items-center gap-1.5 min-w-0">
+                    <div key={wk.label} className="flex flex-col items-center gap-1 min-w-0">
                       <span className="text-[11pt] font-bold text-slate-800 tabular-nums text-center leading-tight">
                         {wk.total} Org
                       </span>
-                      <div className="w-full h-28 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1.5 overflow-hidden">
+                      <div className="w-full h-14 rounded-xl bg-white border border-slate-200 flex items-end justify-center p-1 overflow-hidden">
                         {wk.total > 0 ? (
                           <div
                             className="w-full rounded-lg bg-emerald-600 transition-all"
@@ -2505,10 +3568,12 @@ export default function PusatLaporanPage() {
                           <div className="w-full h-1 rounded-full bg-slate-200" />
                         )}
                       </div>
-                      <div className="text-center leading-tight">
-                        <span className="block text-[11pt] font-bold text-slate-800">{wk.label}</span>
-                        <span className="block text-[11pt] text-slate-500">{wk.shortLabel}</span>
-                      </div>
+                      <span
+                        data-siap-xaxis-label="true"
+                        className="block text-[9pt] whitespace-nowrap font-semibold text-slate-700 text-center leading-tight"
+                      >
+                        {wk.shortLabel}
+                      </span>
                     </div>
                   );
                 })}
@@ -2521,32 +3586,40 @@ export default function PusatLaporanPage() {
               </p>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                <table className="w-full text-[11pt] border-collapse">
+                <table className="w-full text-[11pt] border-collapse" data-siap-compact-table="true">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 text-left">
-                      <th className="px-2.5 py-1.5 border border-slate-200">Tanggal</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200">No. Reg</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200">Nama Calon Santri</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200">Program / Asal</th>
-                      <th className="px-2.5 py-1.5 border border-slate-200">Status</th>
+                      <th className="px-2 py-1 border border-slate-200">Tanggal</th>
+                      <th className="px-2 py-1 border border-slate-200">No. Reg</th>
+                      <th className="px-2 py-1 border border-slate-200">Nama Calon Santri</th>
+                      <th className="px-2 py-1 border border-slate-200">Program / Asal</th>
+                      <th className="px-2 py-1 border border-slate-200">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {extraReports.psb.detail.map((row, i) => (
                       <tr key={i}>
-                        <td className="px-2.5 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                        <td className="px-2 py-1 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
                           {row.tanggal}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 font-mono font-semibold text-slate-700">
+                        <td className="px-2 py-1 border border-slate-200 font-mono font-semibold text-slate-700 whitespace-nowrap">
                           {row.noReg}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 font-semibold text-slate-900">
+                        <td className="px-2 py-1 border border-slate-200 font-semibold text-slate-900">
                           {row.nama}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 text-slate-700">
+                        <td className="px-2 py-1 border border-slate-200 text-slate-700">
                           {row.program}
                         </td>
-                        <td className="px-2.5 py-1.5 border border-slate-200 font-semibold text-slate-800">
+                        <td
+                          className={`px-2 py-1 border border-slate-200 font-semibold whitespace-nowrap ${
+                            /diterima|verif|lunas|aktif/i.test(row.status)
+                              ? 'text-emerald-800'
+                              : /ditolak|batal/i.test(row.status)
+                              ? 'text-rose-700'
+                              : 'text-amber-800'
+                          }`}
+                        >
                           {row.status}
                         </td>
                       </tr>
@@ -2566,8 +3639,11 @@ export default function PusatLaporanPage() {
       {/* Aturan Cetak A4 untuk PDF Bersih */}
       <style jsx global>{`
         [data-siap-hidden-personalia="true"],
+        [data-siap-hidden-approval="true"],
         [data-siap-hidden-kamar="true"],
         [data-siap-hidden-perizinan="true"],
+        [data-siap-hidden-tunggakan="true"],
+        [data-siap-hidden-kegiatan-foto="true"],
         [data-siap-hidden-chart="true"] {
           display: none !important;
         }
@@ -2603,32 +3679,53 @@ export default function PusatLaporanPage() {
           font-size: 12pt !important;
           line-height: 1.45 !important;
         }
-        #pusat-laporan-dokumen table,
-        #pusat-laporan-dokumen table th,
-        #pusat-laporan-dokumen table td,
-        [data-siap-laporan-doc="true"] table,
-        [data-siap-laporan-doc="true"] table th,
-        [data-siap-laporan-doc="true"] table td {
+        #pusat-laporan-dokumen table:not([data-siap-izin-table="true"]),
+        #pusat-laporan-dokumen table:not([data-siap-izin-table="true"]) th,
+        #pusat-laporan-dokumen table:not([data-siap-izin-table="true"]) td,
+        [data-siap-laporan-doc="true"] table:not([data-siap-izin-table="true"]),
+        [data-siap-laporan-doc="true"] table:not([data-siap-izin-table="true"]) th,
+        [data-siap-laporan-doc="true"] table:not([data-siap-izin-table="true"]) td {
           font-size: 11pt !important;
           line-height: 1.35 !important;
         }
-        #pusat-laporan-dokumen table th,
-        #pusat-laporan-dokumen table td,
-        [data-siap-laporan-doc="true"] table th,
-        [data-siap-laporan-doc="true"] table td {
-          padding: 5px 8px !important;
+        #pusat-laporan-dokumen table:not([data-siap-izin-table="true"]) th,
+        #pusat-laporan-dokumen table:not([data-siap-izin-table="true"]) td,
+        [data-siap-laporan-doc="true"] table:not([data-siap-izin-table="true"]) th,
+        [data-siap-laporan-doc="true"] table:not([data-siap-izin-table="true"]) td {
+          padding: 5px 7px !important;
+        }
+        #pusat-laporan-dokumen table[data-siap-izin-table="true"],
+        [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] {
+          table-layout: fixed !important;
+          width: 100% !important;
+          font-size: 10.5pt !important;
+        }
+        #pusat-laporan-dokumen table[data-siap-izin-table="true"] th,
+        #pusat-laporan-dokumen table[data-siap-izin-table="true"] td,
+        [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] th,
+        [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] td {
+          font-size: 10.5pt !important;
+          line-height: 1.3 !important;
+          padding: 4px 5px !important;
+          overflow-wrap: anywhere;
         }
         [data-siap-kamar-grid="true"] table th,
         [data-siap-kamar-grid="true"] table td,
         [data-siap-compact-table="true"] th,
         [data-siap-compact-table="true"] td {
-          padding: 4px 6px !important;
+          padding: 3.5px 6px !important;
         }
-        #pusat-laporan-dokumen svg text,
-        #pusat-laporan-dokumen svg tspan,
-        [data-siap-laporan-doc="true"] svg text,
-        [data-siap-laporan-doc="true"] svg tspan {
+        #pusat-laporan-dokumen svg text:not([data-siap-xaxis-label="true"]),
+        #pusat-laporan-dokumen svg tspan:not([data-siap-xaxis-label="true"]),
+        [data-siap-laporan-doc="true"] svg text:not([data-siap-xaxis-label="true"]),
+        [data-siap-laporan-doc="true"] svg tspan:not([data-siap-xaxis-label="true"]) {
           font-size: 11pt !important;
+        }
+        [data-siap-xaxis-label="true"],
+        #pusat-laporan-dokumen [data-siap-xaxis-label="true"],
+        [data-siap-laporan-doc="true"] [data-siap-xaxis-label="true"] {
+          font-size: 9pt !important;
+          white-space: nowrap !important;
         }
         #pusat-laporan-dokumen svg,
         [data-siap-laporan-doc="true"] svg {
@@ -2676,12 +3773,22 @@ export default function PusatLaporanPage() {
           [data-siap-laporan-doc="true"] {
             overflow: visible !important;
           }
+          #pusat-laporan-dokumen [data-siap-card-styled="true"],
+          [data-siap-laporan-doc="true"] [data-siap-card-styled="true"],
+          .siap-table-card {
+            border-radius: 0.75rem !important;
+            border-color: #cbd5e1 !important;
+          }
+          [data-siap-kamar-grid="true"] .siap-table-card {
+            overflow: hidden !important;
+          }
           #pusat-laporan-dokumen [data-siap-table-wrap="true"],
           [data-siap-laporan-doc="true"] [data-siap-table-wrap="true"],
           #pusat-laporan-dokumen table[data-siap-table-styled="true"],
           [data-siap-laporan-doc="true"] table[data-siap-table-styled="true"] {
             overflow: visible !important;
             border-color: #cbd5e1 !important;
+            border-radius: 0.75rem !important;
           }
           [data-siap-page-start="true"] {
             break-before: page !important;
@@ -3140,8 +4247,11 @@ export default function PusatLaporanPage() {
 
           {/* Sumber tersembunyi Struktur Personalia baku (Bagian I Dewan Harian + Bagian II Pleno/Divisi A-K) */}
           <div ref={personaliaSourceRef} className="hidden" aria-hidden="true">
-            <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div
+              data-siap-page-start="true"
+              className="break-before-page print:break-before-page pt-2 space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
                 <div>
                   <h4 className="text-[12pt] font-extrabold uppercase tracking-wider text-slate-900">
                     Struktur Personalia Pengurus Aktif
@@ -3221,37 +4331,36 @@ export default function PusatLaporanPage() {
                             Belum ada personel ditugaskan
                           </p>
                         ) : isMusyrif ? (
-                          <div className="grid grid-cols-2 gap-4 p-2.5">
+                          <div className="grid grid-cols-2 gap-3 p-2.5" data-siap-compact-table="true">
                             {halves.map((half, colIdx) => {
                               const offset = colIdx === 0 ? 0 : mid;
                               return (
-                                <div key={`K-col-${colIdx}`} className="border border-slate-200 rounded-xl overflow-hidden siap-table-card">
-                                  <table className="w-full text-[11pt] border-collapse" data-siap-compact-table="true">
-                                    <tbody>
-                                      {half.length === 0 ? (
-                                        <tr>
-                                          <td className="px-2 py-1 italic text-slate-400">-</td>
-                                        </tr>
-                                      ) : (
-                                        half.map((m, idx) => (
-                                          <tr
-                                            key={`K-${offset + idx}`}
-                                            className="border-t first:border-t-0 border-slate-100"
-                                          >
-                                            <td className="px-2 py-1 w-7 text-slate-500 font-mono tabular-nums align-top">
-                                              {offset + idx + 1}.
-                                            </td>
-                                            <td className="px-1.5 py-1 font-semibold text-slate-900 align-top">
-                                              {m.nama}
-                                            </td>
-                                            <td className="px-2 py-1 text-right text-slate-600 whitespace-nowrap align-top">
-                                              {m.peran}
-                                            </td>
-                                          </tr>
-                                        ))
-                                      )}
-                                    </tbody>
-                                  </table>
+                                <div
+                                  key={`K-col-${colIdx}`}
+                                  className="border border-slate-200 rounded-xl overflow-hidden bg-white divide-y divide-slate-100"
+                                >
+                                  {half.length === 0 ? (
+                                    <div className="px-2.5 py-1.5 text-[11pt] italic text-slate-400">-</div>
+                                  ) : (
+                                    half.map((m, idx) => (
+                                      <div
+                                        key={`K-${offset + idx}`}
+                                        className="px-2.5 py-1.5 flex items-start gap-2"
+                                      >
+                                        <span className="text-[11pt] text-slate-500 font-mono tabular-nums shrink-0 leading-snug">
+                                          {offset + idx + 1}.
+                                        </span>
+                                        <div className="flex flex-col min-w-0 leading-snug">
+                                          <span className="text-[11pt] font-bold text-slate-900 break-words">
+                                            {m.nama}
+                                          </span>
+                                          <span className="text-[11pt] text-slate-600 break-words">
+                                            {m.peran}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
                                 </div>
                               );
                             })}
@@ -3345,12 +4454,12 @@ export default function PusatLaporanPage() {
             )}
           </div>
 
-          {/* Sumber tersembunyi Tabel Rincian Perizinan Pulang 8 Kolom untuk Bab IV */}
-          <div ref={perizinanTableSourceRef} className="hidden" aria-hidden="true">
-            {perizinanReportRows.length === 0 ? (
-              <p className="text-[12pt] text-slate-600 italic py-2">
-                Belum ada catatan perizinan pulang santri pada periode ini.
-              </p>
+          {/* Sumber tersembunyi Rincian Tunggakan Syahriyah (Aktif saja & cutoff tgl 25) untuk Bab II */}
+          <div ref={tunggakanTableSourceRef} className="hidden" aria-hidden="true">
+            {syahriyahTunggakan.detail.length === 0 ? (
+              <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-[12pt] text-emerald-900 font-medium">
+                Seluruh santri aktif sudah melunasi Syahriyah berjalan sesuai tanggal masuk.
+              </div>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
                 <table className="w-full text-[11pt] border-collapse">
@@ -3359,15 +4468,15 @@ export default function PusatLaporanPage() {
                       <th className="px-2 py-1.5 border border-slate-200 w-10 text-center">No</th>
                       <th className="px-2 py-1.5 border border-slate-200">Nama Santri</th>
                       <th className="px-2 py-1.5 border border-slate-200">Kamar</th>
-                      <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Tgl Pulang</th>
-                      <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Rencana Kembali</th>
-                      <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Tgl Kembali</th>
-                      <th className="px-2 py-1.5 border border-slate-200">Keperluan</th>
-                      <th className="px-2 py-1.5 border border-slate-200">Keterangan</th>
+                      <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Tgl Masuk</th>
+                      <th className="px-2 py-1.5 border border-slate-200">Bulan Menunggak</th>
+                      <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">
+                        Nominal Tunggakan
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {perizinanReportRows.map((row, idx) => (
+                    {syahriyahTunggakan.detail.map((row, idx) => (
                       <tr key={row.id}>
                         <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums">
                           {idx + 1}
@@ -3379,19 +4488,79 @@ export default function PusatLaporanPage() {
                           {row.kamar}
                         </td>
                         <td className="px-2 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                          {row.tglPulang}
-                        </td>
-                        <td className="px-2 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                          {row.rencanaKembali}
-                        </td>
-                        <td className="px-2 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
-                          {row.tglKembali}
+                          {row.tglMasuk}
                         </td>
                         <td className="px-2 py-1.5 border border-slate-200 text-slate-700">
+                          {row.bulanMenunggak} ({row.jumlahBulan} bln)
+                        </td>
+                        <td className="px-2 py-1.5 border border-slate-200 text-right font-mono font-bold tabular-nums text-rose-700 whitespace-nowrap">
+                          {formatRupiah(row.totalTunggakan)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Sumber tersembunyi Tabel Rincian Perizinan Pulang 8 Kolom untuk Bab IV */}
+          <div ref={perizinanTableSourceRef} className="hidden" aria-hidden="true">
+            {perizinanReportRows.length === 0 ? (
+              <p className="text-[12pt] text-slate-600 italic py-2">
+                Belum ada catatan perizinan pulang santri pada periode ini.
+              </p>
+            ) : (
+              <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
+                <table className="table-fixed w-full text-[10.5pt] border-collapse" data-siap-izin-table="true">
+                  <colgroup>
+                    <col className="w-[5%]" />
+                    <col className="w-[17%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[14%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 text-left">
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">No</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200">Nama Santri</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Kamar</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Tgl Pulang</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Rencana Kembali</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Tgl Kembali</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200">Keperluan</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {perizinanReportRows.map((row, idx) => (
+                      <tr key={row.id}>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums align-top">
+                          {idx + 1}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 font-semibold text-slate-900 break-words align-top">
+                          {row.namaSantri}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center text-slate-700 break-words align-top">
+                          {row.kamar}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                          {row.tglPulang}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                          {row.rencanaKembali}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                          {row.tglKembali}
+                        </td>
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-slate-700 break-words align-top">
                           {row.keperluan}
                         </td>
                         <td
-                          className={`px-2 py-1.5 border border-slate-200 font-semibold whitespace-nowrap ${
+                          className={`px-1.5 py-1.5 border border-slate-200 font-semibold break-words align-top ${
                             row.keterangan === 'Tepat Waktu'
                               ? 'text-emerald-800'
                               : row.keterangan === 'Sedang Izin'
@@ -3407,6 +4576,89 @@ export default function PusatLaporanPage() {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* Sumber tersembunyi Lembar Pengesahan baku (TTD & Stempel Digital pas & tidak terpotong) */}
+          <div ref={approvalSourceRef} className="hidden" aria-hidden="true">
+            <section
+              data-siap-page-start="true"
+              data-siap-approval="true"
+              className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible"
+            >
+              <div className="text-center border-b border-slate-200 pb-3 mb-6">
+                <h3 className="text-[14pt] font-extrabold uppercase tracking-wider text-slate-900">
+                  Lembar Pengesahan
+                </h3>
+                <p className="text-[12pt] text-slate-600 mt-0.5">
+                  {pengaturanApproval.kota_surat}, {formatTanggalSuratIndo(todayStr)}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 px-2 text-center text-[12pt]">
+                <div className="space-y-2 min-w-0">
+                  <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
+                  <div className="h-20 w-full max-w-[170px] mx-auto flex items-center justify-center relative overflow-visible">
+                    {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={pengaturanApproval.ttd_sekretaris_url}
+                        alt="TTD Sekretaris"
+                        referrerPolicy="no-referrer"
+                        className="max-h-16 max-w-full object-contain"
+                      />
+                    )}
+                  </div>
+                  <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
+                    {pengaturanApproval.nama_sekretaris}
+                  </p>
+                </div>
+
+                <div className="space-y-2 min-w-0">
+                  <p className="font-semibold text-slate-700">Kepala Pondok</p>
+                  <div className="h-20 w-full max-w-[180px] mx-auto flex items-center justify-center relative overflow-visible">
+                    {useDigitalSignature && pengaturanApproval.stempel_url && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={pengaturanApproval.stempel_url}
+                        alt="Stempel Pondok"
+                        referrerPolicy="no-referrer"
+                        className="max-h-16 max-w-[96px] object-contain opacity-85 absolute left-1/2 -translate-x-1/2 pointer-events-none"
+                      />
+                    )}
+                    {useDigitalSignature && pengaturanApproval.ttd_kepala_pondok_url && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={pengaturanApproval.ttd_kepala_pondok_url}
+                        alt="TTD Kepala Pondok"
+                        referrerPolicy="no-referrer"
+                        className="max-h-16 max-w-full object-contain relative z-10"
+                      />
+                    )}
+                  </div>
+                  <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
+                    {pengaturanApproval.nama_kepala_pondok}
+                  </p>
+                </div>
+
+                <div className="space-y-2 min-w-0">
+                  <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
+                  <div className="h-20 w-full max-w-[170px] mx-auto flex items-center justify-center relative overflow-visible">
+                    {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={pengaturanApproval.ttd_pengasuh_url}
+                        alt="TTD Pengasuh"
+                        referrerPolicy="no-referrer"
+                        className="max-h-16 max-w-full object-contain"
+                      />
+                    )}
+                  </div>
+                  <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
+                    {pengaturanApproval.nama_pengasuh}
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
 
           {/* Sumber tersembunyi Divisi XI-XIII untuk disuntikkan ke dalam kontainer kertas laporan tepat setelah Divisi X & sebelum Lembar Pengesahan */}
@@ -3457,7 +4709,7 @@ export default function PusatLaporanPage() {
                   <section
                     data-siap-page-start="true"
                     data-siap-approval="true"
-                    className="bg-white border border-slate-200 rounded-xl overflow-hidden p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page"
+                    className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 print:border-slate-300 break-inside-avoid print:break-before-page overflow-visible"
                   >
                     <div className="text-center border-b border-slate-200 pb-3 mb-6">
                       <h3 className="text-[14pt] font-extrabold uppercase tracking-wider text-slate-900">
@@ -3468,33 +4720,35 @@ export default function PusatLaporanPage() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-6 text-center text-[12pt]">
-                      <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 px-2 text-center text-[12pt]">
+                      <div className="space-y-2 min-w-0">
                         <p className="font-semibold text-slate-700">Sekretaris Pondok</p>
-                        <div className="h-16 flex items-center justify-center">
+                        <div className="h-20 w-full max-w-[170px] mx-auto flex items-center justify-center relative overflow-visible">
                           {useDigitalSignature && pengaturanApproval.ttd_sekretaris_url && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_sekretaris_url}
                               alt="TTD Sekretaris"
-                              className="max-h-14 object-contain"
+                              referrerPolicy="no-referrer"
+                              className="max-h-16 max-w-full object-contain"
                             />
                           )}
                         </div>
-                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                        <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
                           {pengaturanApproval.nama_sekretaris}
                         </p>
                       </div>
 
-                      <div className="space-y-2">
+                      <div className="space-y-2 min-w-0">
                         <p className="font-semibold text-slate-700">Kepala Pondok</p>
-                        <div className="h-16 flex items-center justify-center relative">
+                        <div className="h-20 w-full max-w-[180px] mx-auto flex items-center justify-center relative overflow-visible">
                           {useDigitalSignature && pengaturanApproval.stempel_url && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.stempel_url}
                               alt="Stempel Pondok"
-                              className="max-h-14 object-contain opacity-80 absolute"
+                              referrerPolicy="no-referrer"
+                              className="max-h-16 max-w-[96px] object-contain opacity-85 absolute left-1/2 -translate-x-1/2 pointer-events-none"
                             />
                           )}
                           {useDigitalSignature && pengaturanApproval.ttd_kepala_pondok_url && (
@@ -3502,28 +4756,30 @@ export default function PusatLaporanPage() {
                             <img
                               src={pengaturanApproval.ttd_kepala_pondok_url}
                               alt="TTD Kepala Pondok"
-                              className="max-h-14 object-contain relative z-10"
+                              referrerPolicy="no-referrer"
+                              className="max-h-16 max-w-full object-contain relative z-10"
                             />
                           )}
                         </div>
-                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                        <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
                           {pengaturanApproval.nama_kepala_pondok}
                         </p>
                       </div>
 
-                      <div className="space-y-2">
+                      <div className="space-y-2 min-w-0">
                         <p className="font-semibold text-slate-700">Mengetahui, Pengasuh Pondok</p>
-                        <div className="h-16 flex items-center justify-center">
+                        <div className="h-20 w-full max-w-[170px] mx-auto flex items-center justify-center relative overflow-visible">
                           {useDigitalSignature && pengaturanApproval.ttd_pengasuh_url && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={pengaturanApproval.ttd_pengasuh_url}
                               alt="TTD Pengasuh"
-                              className="max-h-14 object-contain"
+                              referrerPolicy="no-referrer"
+                              className="max-h-16 max-w-full object-contain"
                             />
                           )}
                         </div>
-                        <p className="font-bold text-slate-900 underline underline-offset-4">
+                        <p className="font-bold text-slate-900 underline underline-offset-4 break-words">
                           {pengaturanApproval.nama_pengasuh}
                         </p>
                       </div>
