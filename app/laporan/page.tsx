@@ -178,11 +178,9 @@ function isExcludedTopLeadership(divisi: string, namaJabatan: string): boolean {
   const d = normalizeDivisiName(divisi).toLowerCase();
   const j = (namaJabatan || '').trim().toLowerCase();
   const matchesExcluded = (val: string) =>
-    val === 'pengasuh pondok' ||
-    val === 'pengasuh' ||
-    val.startsWith('dewan pengasuh') ||
+    val.includes('pengasuh') ||
     val.includes('dzurriyah') ||
-    val === 'direktur pendidikan';
+    val.includes('direktur');
   return matchesExcluded(d) || matchesExcluded(j);
 }
 
@@ -325,38 +323,72 @@ async function fetchSafeTable(table: string): Promise<Array<Record<string, unkno
   return [];
 }
 
-function readLocalFallbackRows(keyHints: string[]): Array<Record<string, unknown>> {
-  if (typeof window === 'undefined') return [];
-  const collected: Array<Record<string, unknown>> = [];
-  const seenIds = new Set<string>();
+function clearLaporanLocalCache(): void {
+  if (typeof window === 'undefined') return;
   try {
+    const cacheHints = [
+      'kegiatan',
+      'agenda',
+      'psb',
+      'pendaftaran',
+      'calon_santri',
+      'kebersihan',
+      'piket',
+      'koperasi',
+      'perizinan',
+      'izin_pulang',
+      'laporan',
+    ];
+    const toDelete: string[] = [];
     for (let i = 0; i < window.localStorage.length; i += 1) {
-      const storageKey = window.localStorage.key(i) || '';
-      const lower = storageKey.toLowerCase();
-      if (!keyHints.some((hint) => lower.includes(hint))) continue;
-      const raw = window.localStorage.getItem(storageKey);
-      if (!raw || !raw.trim().startsWith('[')) continue;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) continue;
-      for (const item of parsed) {
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-          const rec = item as Record<string, unknown>;
-          const id = String(rec.id || '');
-          if (id && seenIds.has(id)) continue;
-          if (id) seenIds.add(id);
-          collected.push(rec);
-        }
+      const k = window.localStorage.key(i) || '';
+      const lower = k.toLowerCase();
+      if (
+        lower.startsWith('sb-') ||
+        lower.includes('auth') ||
+        lower.includes('token') ||
+        lower.includes('session') ||
+        lower.includes('theme') ||
+        lower.includes('pengaturan')
+      ) {
+        continue;
+      }
+      if (cacheHints.some((hint) => lower.includes(hint))) {
+        toDelete.push(k);
       }
     }
+    toDelete.forEach((k) => window.localStorage.removeItem(k));
   } catch {
-    // ignore invalid localStorage data
+    // ignore storage cleanup errors
   }
-  return collected;
+}
+
+async function fetchAllAbsenJamaahPaginated(): Promise<Array<Record<string, unknown>> | null> {
+  try {
+    const allRows: Array<Record<string, unknown>> = [];
+    const batchSize = 1000;
+    let offset = 0;
+    for (let page = 0; page < 50; page += 1) {
+      const { data, error } = await supabase
+        .from('absen_jamaah')
+        .select('*')
+        .order('tgl', { ascending: false })
+        .order('id', { ascending: true })
+        .range(offset, offset + batchSize - 1);
+      if (error) return null;
+      if (!Array.isArray(data) || data.length === 0) break;
+      allRows.push(...(data as Array<Record<string, unknown>>));
+      if (data.length < batchSize) break;
+      offset += batchSize;
+    }
+    return allRows;
+  } catch {
+    return null;
+  }
 }
 
 function mergeUniqueRows(
-  groups: Array<Array<Record<string, unknown>>>,
-  fallbackHints: string[]
+  groups: Array<Array<Record<string, unknown>>>
 ): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
@@ -367,9 +399,6 @@ function mergeUniqueRows(
       if (id) seen.add(id);
       out.push(row);
     }
-  }
-  if (out.length === 0) {
-    return readLocalFallbackRows(fallbackHints);
   }
   return out;
 }
@@ -638,8 +667,10 @@ export default function PusatLaporanPage() {
   const loadData = useCallback(async () => {
     try {
       setErrorMsg('');
+      clearLaporanLocalCache();
       const [
         data,
+        fullAbsenJamaahRows,
         kebLog,
         kebPiket,
         kebTugas,
@@ -658,7 +689,7 @@ export default function PusatLaporanPage() {
         amanRows,
         jabatanRows,
         santriKamarRows,
-        kegiatanAgendaRows,
+        kegiatanAgendaRes,
         perizinan1,
         perizinan2,
         perizinan3,
@@ -668,6 +699,7 @@ export default function PusatLaporanPage() {
         keuanganTransaksiRows,
       ] = await Promise.all([
         fetchAllLaporanRawData({ canViewBisyaroh }),
+        fetchAllAbsenJamaahPaginated(),
         fetchSafeTable('kebersihan_log'),
         fetchSafeTable('kebersihan_piket'),
         fetchSafeTable('kebersihan_tugas'),
@@ -686,7 +718,7 @@ export default function PusatLaporanPage() {
         fetchSafeTable('v_pengurus_aman'),
         fetchSafeTable('pengurus_jabatan'),
         fetchSafeTable('santri'),
-        fetchSafeTable('kegiatan_agenda'),
+        supabase.from('kegiatan_agenda').select('*'),
         fetchSafeTable('perizinan'),
         fetchSafeTable('perizinan_pulang'),
         fetchSafeTable('izin_pulang'),
@@ -695,32 +727,50 @@ export default function PusatLaporanPage() {
         fetchSafeTable('master_pembayaran_riwayat'),
         fetchSafeTable('keuangan_transaksi'),
       ]);
-      setRawData(data);
+
+      const kegiatanAgendaRows =
+        !kegiatanAgendaRes.error && Array.isArray(kegiatanAgendaRes.data)
+          ? (kegiatanAgendaRes.data as Array<Record<string, unknown>>)
+          : [];
+
+      const patchedRaw = { ...(data as unknown as Record<string, unknown>) };
+      if (fullAbsenJamaahRows !== null) {
+        const jamaahKey = Object.keys(patchedRaw).find((k) => {
+          const val = patchedRaw[k];
+          if (!Array.isArray(val)) return false;
+          if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+            const sample = val[0] as Record<string, unknown>;
+            if ('waktu_sholat' in sample && 'santri_id' in sample && 'tgl' in sample) return true;
+          }
+          return /absen.*jamaah|jamaah.*rows|absenjamaah/i.test(k);
+        });
+        if (jamaahKey) {
+          patchedRaw[jamaahKey] = fullAbsenJamaahRows;
+        }
+      }
+      if (!kegiatanAgendaRes.error && Array.isArray(kegiatanAgendaRes.data)) {
+        const kegiatanKey = Object.keys(patchedRaw).find((k) => {
+          const val = patchedRaw[k];
+          if (!Array.isArray(val)) return false;
+          if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+            const sample = val[0] as Record<string, unknown>;
+            if ('kode_kegiatan' in sample || 'pengisi_list' in sample) return true;
+          }
+          return /^kegiatan/i.test(k);
+        });
+        if (kegiatanKey) {
+          patchedRaw[kegiatanKey] = kegiatanAgendaRows;
+        }
+      }
+
+      setRawData(patchedRaw as unknown as AllLaporanRawData);
       setExtraRaw({
-        kebersihanRows: mergeUniqueRows(
-          [kebLog, kebPiket, kebTugas, kebChecklist, kebNilai],
-          ['kebersihan', 'piket']
-        ),
-        koperasiTransaksiRows: mergeUniqueRows(
-          [kopTrx, kopKas, kopJual, kopKulaan],
-          ['koperasi_transaksi', 'koperasi_kas', 'siap_koperasi']
-        ),
-        koperasiProdukRows: mergeUniqueRows(
-          [kopProduk, kopBarang],
-          ['koperasi_produk', 'koperasi_barang']
-        ),
-        psbRows: mergeUniqueRows(
-          [psb1, psb2, psb3],
-          ['psb', 'pendaftaran']
-        ),
-        kegiatanRows: mergeUniqueRows(
-          [kegiatanAgendaRows],
-          ['kegiatan_agenda', 'siap_kegiatan']
-        ),
-        perizinanRows: mergeUniqueRows(
-          [perizinan1, perizinan2, perizinan3],
-          ['perizinan', 'izin_pulang']
-        ),
+        kebersihanRows: mergeUniqueRows([kebLog, kebPiket, kebTugas, kebChecklist, kebNilai]),
+        koperasiTransaksiRows: mergeUniqueRows([kopTrx, kopKas, kopJual, kopKulaan]),
+        koperasiProdukRows: mergeUniqueRows([kopProduk, kopBarang]),
+        psbRows: mergeUniqueRows([psb1, psb2, psb3]),
+        kegiatanRows: mergeUniqueRows([kegiatanAgendaRows]),
+        perizinanRows: mergeUniqueRows([perizinan1, perizinan2, perizinan3]),
         santriRows: santriKamarRows,
         pembayaranDetailRows,
         masterPembayaranRows,
@@ -1130,10 +1180,7 @@ export default function PusatLaporanPage() {
       }
     }
 
-    const mergedPerizinan = mergeUniqueRows(
-      [extraRaw.perizinanRows, rawPerizinanArr],
-      ['perizinan', 'izin_pulang']
-    );
+    const mergedPerizinan = mergeUniqueRows([extraRaw.perizinanRows, rawPerizinanArr]);
 
     interface PerizinanDetailRow {
       id: string;
@@ -3606,7 +3653,7 @@ export default function PusatLaporanPage() {
           return (
             /\bI\.\s*DEWAN\s*HARIAN\b/i.test(txt) ||
             /\bII\.\s*PLENO\b/i.test(txt) ||
-            /Dewan\s+Pengasuh\s*\(Dzurriyah\)|Direktur\s+Pendidikan|\bPengasuh\s+Pondok\b/i.test(txt) ||
+            /pengasuh|dzurriyah|direktur\s+pendidikan/i.test(txt) ||
             /\b[A-L]\.\s*(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Sie\s+Kegiatan|Sie\s+Keamanan|Sie\s+Kesehatan|Sie\s+Kebersihan|Sie\s+Sarpras|Sie\s+Dapur|Sie\s+Koperasi|Sie\s+Koprasi|Sie\s+Laundry|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\b/i.test(
               txt
             ) ||
@@ -5553,42 +5600,31 @@ export default function PusatLaporanPage() {
               </div>
 
               {/* BAGIAN I: DEWAN HARIAN */}
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
-                  Bagian I · Dewan Harian
+                  BAGIAN I &bull; DEWAN HARIAN
                 </h5>
-                <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                  <table className="w-full text-[8.5pt] leading-tight border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 text-left">
-                        <th className="px-2 py-1 border border-slate-200 w-10 text-center">No</th>
-                        <th className="px-2 py-1 border border-slate-200 w-52">Jabatan</th>
-                        <th className="px-2 py-1 border border-slate-200">Nama Pengurus</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {strukturPersonalia.dewanHarianSlots.map((slot) => (
-                        <tr key={slot.nomor}>
-                          <td className="px-2 py-1 border border-slate-200 text-center font-mono tabular-nums">
-                            {slot.nomor}
-                          </td>
-                          <td className="px-2 py-1 border border-slate-200 font-semibold text-slate-800">
-                            {slot.jabatan}
-                          </td>
-                          <td className="px-2 py-1 border border-slate-200 text-slate-900">
-                            {slot.names.length > 0 ? slot.names.join(', ') : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="grid grid-cols-2 gap-2.5 text-[9pt] leading-snug">
+                  {strukturPersonalia.dewanHarianSlots.map((slot) => (
+                    <div
+                      key={slot.nomor}
+                      className="border border-slate-200 rounded-xl overflow-hidden bg-white px-3 py-2 break-inside-avoid"
+                    >
+                      <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
+                        {slot.nomor}. {slot.jabatan}
+                      </span>
+                      <span className="text-[9pt] font-semibold text-slate-900 block mt-0.5 break-words">
+                        {slot.names.length > 0 ? slot.names.join(', ') : '-'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               {/* BAGIAN II: PLENO / DIVISI (A - K) */}
               <div className="space-y-1.5">
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
-                  Bagian II · Pleno / Divisi
+                  BAGIAN II &bull; PLENO / DIVISI
                 </h5>
                 <div className="grid grid-cols-2 gap-3 text-[9.5pt] leading-snug">
                   {strukturPersonalia.plenoSections.map((sec) => {

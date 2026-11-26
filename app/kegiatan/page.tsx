@@ -114,6 +114,36 @@ const SLOT_STATUS_META: Record<StatusSlotPengisi, { label: string; cls: string }
   },
 };
 
+function clearKegiatanLocalCache() {
+  if (typeof window === 'undefined') return;
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const k = window.localStorage.key(i);
+      if (!k) continue;
+      const lower = k.toLowerCase();
+      if (
+        lower.startsWith('sb-') ||
+        lower.includes('auth') ||
+        lower.includes('token') ||
+        lower.includes('session') ||
+        lower.includes('theme') ||
+        lower.includes('pengaturan')
+      ) {
+        continue;
+      }
+      if (lower.includes('kegiatan') || lower.includes('agenda')) {
+        toRemove.push(k);
+      }
+    }
+    for (const k of toRemove) {
+      window.localStorage.removeItem(k);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export default function KegiatanPage() {
   const { canEditModule } = useAuth();
   const canEdit = canEditModule('kegiatan');
@@ -188,14 +218,34 @@ export default function KegiatanPage() {
   );
 
   const loadAllData = useCallback(async () => {
-    const [fmtList, agdList, persList, vPengurusRes] = await Promise.all([
-      fetchKegiatanFormats(),
-      fetchKegiatanAgenda(),
-      fetchPersonelOptions(),
-      supabase
-        .from('v_pengurus_lengkap')
-        .select('id, nama_lengkap, no_wa, status, jabatan_list'),
-    ]);
+    clearKegiatanLocalCache();
+    const [fmtListRaw, agdListRaw, persList, vPengurusRes, liveAgdIdsRes, liveFmtIdsRes] =
+      await Promise.all([
+        fetchKegiatanFormats(),
+        fetchKegiatanAgenda(),
+        fetchPersonelOptions(),
+        supabase
+          .from('v_pengurus_lengkap')
+          .select('id, nama_lengkap, no_wa, status, jabatan_list'),
+        supabase.from('kegiatan_agenda').select('id'),
+        supabase.from('kegiatan_format').select('id'),
+      ]);
+
+    let agdList = agdListRaw;
+    if (!liveAgdIdsRes.error && Array.isArray(liveAgdIdsRes.data)) {
+      const liveIds = new Set(liveAgdIdsRes.data.map((r: { id: string | number }) => String(r.id)));
+      agdList = agdListRaw.filter((a) => liveIds.has(String(a.id)));
+    }
+
+    let fmtList = fmtListRaw;
+    if (!liveFmtIdsRes.error && Array.isArray(liveFmtIdsRes.data)) {
+      const liveFmtIds = new Set(
+        liveFmtIdsRes.data.map((r: { id: string | number }) => String(r.id))
+      );
+      fmtList = fmtListRaw.filter((f) => liveFmtIds.has(String(f.id)));
+    }
+
+    clearKegiatanLocalCache();
 
     let loadedPengurus: PengurusAutocompleteOption[] = [];
     if (!vPengurusRes.error && Array.isArray(vPengurusRes.data) && vPengurusRes.data.length > 0) {
@@ -417,6 +467,7 @@ export default function KegiatanPage() {
   const handleSaveAgenda = async (payload: KegiatanAgendaItem, isEdit: boolean) => {
     if (!canEdit) return;
     const saved = await saveKegiatanAgendaRow(payload, isEdit);
+    clearKegiatanLocalCache();
     setAgendas((prev) =>
       isEdit ? prev.map((a) => (a.id === saved.id ? saved : a)) : [saved, ...prev]
     );
@@ -448,6 +499,7 @@ export default function KegiatanPage() {
         updated_at: new Date().toISOString(),
       };
       const saved = await saveKegiatanAgendaRow(updated, true);
+      clearKegiatanLocalCache();
       setAgendas((prev) => prev.map((a) => (a.id === saved.id ? saved : a)));
       setDraftDirty(false);
       pushToast('success', 'Perubahan Disimpan', `Detail ${saved.judul} berhasil diperbarui.`);
@@ -727,6 +779,7 @@ export default function KegiatanPage() {
     };
 
     const saved = await saveKegiatanAgendaRow(nextAgenda, false);
+    clearKegiatanLocalCache();
     setAgendas((prev) => [saved, ...prev]);
     setSelectedAgendaId(saved.id);
     setMobileShowDetail(true);
@@ -742,6 +795,7 @@ export default function KegiatanPage() {
   const handleSaveFormat = async (template: KegiatanFormatTemplate, isEdit: boolean) => {
     if (!canEdit) return;
     const saved = await saveKegiatanFormatRow(template, isEdit);
+    clearKegiatanLocalCache();
     setFormats((prev) =>
       isEdit ? prev.map((f) => (f.id === saved.id ? saved : f)) : [saved, ...prev]
     );
@@ -770,6 +824,7 @@ export default function KegiatanPage() {
     if (!canEdit || !deleteConfirm) return;
     if (deleteConfirm.kind === 'agenda' && deleteConfirm.itemAgenda) {
       await deleteKegiatanAgendaRow(deleteConfirm.itemAgenda);
+      clearKegiatanLocalCache();
       const remaining = agendas.filter((a) => a.id !== deleteConfirm.id);
       setAgendas(remaining);
       if (selectedAgendaId === deleteConfirm.id) {
@@ -779,6 +834,7 @@ export default function KegiatanPage() {
       pushToast('info', 'Agenda Dihapus', `${deleteConfirm.label} telah dihapus.`);
     } else if (deleteConfirm.kind === 'format') {
       await deleteKegiatanFormatRow(deleteConfirm.id);
+      clearKegiatanLocalCache();
       setFormats((prev) => prev.filter((f) => f.id !== deleteConfirm.id));
       pushToast('info', 'Format Dihapus', `${deleteConfirm.label} telah dihapus.`);
     }

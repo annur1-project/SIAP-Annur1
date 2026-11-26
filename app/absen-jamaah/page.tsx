@@ -214,6 +214,20 @@ function getKamarSortWeight(kamar: string): number {
 }
 
 function getLocalTodayStr(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {
+    // fallback below
+  }
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -308,6 +322,10 @@ export default function AbsenJamaahPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [dbConstraintFixNeeded, setDbConstraintFixNeeded] = useState<boolean>(false);
   const [draftOverrides, setDraftOverrides] = useState<Record<string, Record<string, DailySantriDraft>>>({});
+  const [saveFeedback, setSaveFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [toasts, setToasts] = useState<ToastState[]>([]);
 
   const showToast = useCallback((type: ToastState['type'], title: string, message: string) => {
@@ -348,22 +366,38 @@ export default function AbsenJamaahPage() {
   }, [selectedDate]);
 
   const fetchData = useCallback(async () => {
-    const [santriRes, absenRes, pengaturanRes] = await Promise.all([
+    const fetchAllAbsenInRange = async (): Promise<AbsenRecord[]> => {
+      const all: AbsenRecord[] = [];
+      const pageSize = 1000;
+      let offset = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('absen_jamaah')
+          .select('*')
+          .gte('tgl', rangeStart)
+          .lte('tgl', rangeEnd)
+          .order('tgl', { ascending: false })
+          .order('id', { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        const batch = (data || []) as AbsenRecord[];
+        all.push(...batch);
+        if (batch.length < pageSize) break;
+        offset += pageSize;
+      }
+      return all;
+    };
+
+    const [santriRes, absenRows, pengaturanRes] = await Promise.all([
       supabase
         .from('santri')
         .select('id, nis, nama_lengkap, kamar, status, nama_ayah, no_wa_ayah, nama_ibu, no_wa_ibu, nama_wali, no_wa_wali')
         .in('status', ['aktif', 'ndalem', 'beasiswa_lazis']),
-      supabase
-        .from('absen_jamaah')
-        .select('*')
-        .gte('tgl', rangeStart)
-        .lte('tgl', rangeEnd)
-        .order('tgl', { ascending: false }),
+      fetchAllAbsenInRange(),
       supabase.from('pengaturan_aplikasi').select('*').limit(1).maybeSingle(),
     ]);
 
     if (santriRes.error) throw santriRes.error;
-    if (absenRes.error) throw absenRes.error;
 
     const activeSantri = ((santriRes.data || []) as SantriRow[]).sort((a, b) => {
       const wa = getKamarSortWeight(a.kamar);
@@ -376,7 +410,7 @@ export default function AbsenJamaahPage() {
 
     return {
       santri: activeSantri,
-      absen: (absenRes.data || []) as AbsenRecord[],
+      absen: absenRows,
       pengaturan: (pengaturanRes.data || null) as Partial<PengaturanRow> | null,
     };
   }, [rangeStart, rangeEnd]);
@@ -625,11 +659,14 @@ export default function AbsenJamaahPage() {
   const handleSaveDailyFiveWaktu = async () => {
     if (!canEdit || !selectedDate) return;
     if (filteredSantri.length === 0) {
-      showToast('error', 'Tidak Ada Data', 'Tidak ada santri pada filter kamar atau pencarian ini.');
+      const emptyMsg = 'Tidak ada santri pada filter kamar atau pencarian ini.';
+      setSaveFeedback({ type: 'error', text: emptyMsg });
+      showToast('error', 'Tidak Ada Data', emptyMsg);
       return;
     }
 
     setSaving(true);
+    setSaveFeedback(null);
     try {
       const targetIds = filteredSantri.map((s) => s.id);
       const idChunkSize = 100;
@@ -677,7 +714,16 @@ export default function AbsenJamaahPage() {
       for (let i = 0; i < payload.length; i += rowChunkSize) {
         const chunk = payload.slice(i, i + rowChunkSize);
         const { error: insErr } = await supabase.from('absen_jamaah').insert(chunk);
-        if (insErr) throw insErr;
+        if (insErr) {
+          if (insErr.code === '23505') {
+            const { error: upsErr } = await supabase
+              .from('absen_jamaah')
+              .upsert(chunk, { onConflict: 'santri_id,tgl,waktu_sholat' });
+            if (upsErr) throw upsErr;
+          } else {
+            throw insErr;
+          }
+        }
       }
 
       const refreshed = await fetchData();
@@ -690,17 +736,19 @@ export default function AbsenJamaahPage() {
         return next;
       });
 
-      showToast(
-        'success',
-        'Absen 5 Waktu Tersimpan',
-        `Presensi 5 waktu (${formatTanggalIndo(selectedDate)}) untuk ${filteredSantri.length} santri berhasil disimpan.`
-      );
+      const successText = `Absensi tanggal ${formatTanggalIndo(selectedDate)} berhasil disimpan!`;
+      setSaveFeedback({ type: 'success', text: successText });
+      showToast('success', 'Absen 5 Waktu Tersimpan', successText);
     } catch (err: unknown) {
       const { message, isWaktuConstraint } = extractSupabaseError(
         err,
         'Gagal menyimpan presensi 5 waktu.'
       );
       if (isWaktuConstraint) setDbConstraintFixNeeded(true);
+      setSaveFeedback({
+        type: 'error',
+        text: `Gagal menyimpan absensi tanggal ${formatTanggalIndo(selectedDate)}: ${message}`,
+      });
       showToast('error', 'Gagal Menyimpan Presensi', message);
     } finally {
       setSaving(false);
@@ -1600,7 +1648,10 @@ export default function AbsenJamaahPage() {
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => {
+                setSelectedDate(e.target.value);
+                setSaveFeedback(null);
+              }}
               className="w-full min-w-0 bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
             />
           </div>
@@ -1712,6 +1763,33 @@ export default function AbsenJamaahPage() {
               )}
             </div>
           </div>
+
+          {saveFeedback && (
+            <div
+              className={`rounded-2xl border p-3.5 flex items-center justify-between gap-3 text-xs font-semibold ${
+                saveFeedback.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-rose-50 border-rose-200 text-rose-900'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {saveFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{saveFeedback.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaveFeedback(null)}
+                className="p-1 rounded-lg hover:bg-black/5 shrink-0"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             {/* MOBILE / PWA CARD LIST (INPUT 5 WAKTU) */}

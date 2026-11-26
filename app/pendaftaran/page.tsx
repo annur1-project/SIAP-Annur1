@@ -62,6 +62,36 @@ const REJECT_PRESET_REASONS = [
   'Nominal transfer tidak sesuai ketentuan DP minimal',
 ];
 
+function clearPsbLocalCache() {
+  if (typeof window === 'undefined') return;
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const k = window.localStorage.key(i);
+      if (!k) continue;
+      const lower = k.toLowerCase();
+      if (
+        lower.startsWith('sb-') ||
+        lower.includes('auth') ||
+        lower.includes('token') ||
+        lower.includes('session') ||
+        lower.includes('theme') ||
+        lower.includes('pengaturan')
+      ) {
+        continue;
+      }
+      if (lower.includes('psb') || lower.includes('pendaftaran') || lower.includes('calon_santri')) {
+        toRemove.push(k);
+      }
+    }
+    for (const k of toRemove) {
+      window.localStorage.removeItem(k);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export default function PendaftaranInternalPage() {
   const { canEditModule, pengurus } = useAuth();
   const canEdit = canEditModule('pendaftaran');
@@ -151,16 +181,27 @@ export default function PendaftaranInternalPage() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    clearPsbLocalCache();
     const localExt = readExtendedLocal();
-    const [psbRes, santriRes, setRes, authRes] = await Promise.all([
+    const [psbRes, santriRes, setRes, authRes, livePsbIdsRes] = await Promise.all([
       fetchPsbRecords(),
       supabase.from('santri').select('id, nis'),
       supabase.from('pengaturan_aplikasi').select('*').eq('id', 1).maybeSingle(),
       supabase.auth.getUser(),
+      supabase.from('psb_pendaftaran').select('id'),
     ]);
 
-    setRecords(psbRes.records);
-    setTableMissing(psbRes.tableMissing);
+    let finalRecords = psbRes.records;
+    let finalTableMissing = psbRes.tableMissing;
+    if (!livePsbIdsRes.error && Array.isArray(livePsbIdsRes.data)) {
+      const liveIds = new Set(livePsbIdsRes.data.map((r: { id: string | number }) => String(r.id)));
+      finalRecords = psbRes.records.filter((r) => liveIds.has(String(r.id)));
+      finalTableMissing = false;
+    }
+
+    clearPsbLocalCache();
+    setRecords(finalRecords);
+    setTableMissing(finalTableMissing);
 
     if (Array.isArray(santriRes.data)) {
       setSantriList(santriRes.data as Array<{ id: string; nis?: string | null }>);
@@ -618,6 +659,7 @@ export default function PendaftaranInternalPage() {
     const tahunPsbAktif = Number(
       skema.tahun_psb || dynamicPsbInfo.tahunPsb || getDynamicTahunPsbInfo().tahunPsb
     );
+    clearPsbLocalCache();
     const { records: latestRows } = await fetchPsbRecords();
     const sourceRows = latestRows.length > 0 ? latestRows : records;
     const noRegistrasi = generateNextNoRegistrasi(sourceRows, tahunPsbAktif);
@@ -706,6 +748,7 @@ export default function PendaftaranInternalPage() {
     }
 
     const { record } = await savePsbRecord(newRecord);
+    clearPsbLocalCache();
     setRecords((prev) => [record, ...prev]);
     setOfflineSaving(false);
     setOfflineModalOpen(false);
@@ -789,6 +832,7 @@ export default function PendaftaranInternalPage() {
     );
 
     const { record } = await savePsbRecord(updated);
+    clearPsbLocalCache();
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
     setSavingAction(false);
@@ -833,6 +877,7 @@ export default function PendaftaranInternalPage() {
     };
 
     const { record } = await savePsbRecord(updated);
+    clearPsbLocalCache();
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
     setSavingAction(false);
@@ -967,6 +1012,7 @@ export default function PendaftaranInternalPage() {
     };
 
     const { record } = await savePsbRecord(updated);
+    clearPsbLocalCache();
     return {
       ok: true,
       updatedRecord: record,
@@ -1085,6 +1131,7 @@ export default function PendaftaranInternalPage() {
       updated_at: new Date().toISOString(),
     };
     const { record } = await savePsbRecord(updated);
+    clearPsbLocalCache();
     setRecords((prev) => prev.map((r) => (r.id === record.id ? record : r)));
     setSelected(record);
     setEditCatatanPengurus(reasonText);
@@ -1095,6 +1142,7 @@ export default function PendaftaranInternalPage() {
   const handleDeleteRecord = async (id: string) => {
     if (!canEdit) return;
     await deletePsbRecord(id);
+    clearPsbLocalCache();
     setRecords((prev) => prev.filter((r) => r.id !== id));
     setConfirmDeleteId(null);
     if (selected?.id === id) setSelected(null);
