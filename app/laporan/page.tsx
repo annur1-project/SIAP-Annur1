@@ -76,6 +76,9 @@ interface ExtraRawData {
   masterPembayaranRows: Array<Record<string, unknown>>;
   masterRiwayatRows: Array<Record<string, unknown>>;
   keuanganTransaksiRows: Array<Record<string, unknown>>;
+  dapurAbsenRows: Array<Record<string, unknown>>;
+  dapurBukuMasakRows: Array<Record<string, unknown>>;
+  dapurJualanMalamRows: Array<Record<string, unknown>>;
 }
 
 interface KegiatanLampiranItem {
@@ -86,6 +89,20 @@ interface KegiatanLampiranItem {
   lokasi: string;
   notulensi: string;
   urls: string[];
+}
+
+interface KegiatanTableRow {
+  id: string;
+  tanggalIso: string;
+  tanggalText: string;
+  waktuText: string;
+  judul: string;
+  kategori: string;
+  lokasi: string;
+  pj: string;
+  pengisiList: Array<{ nama: string; peran: string }>;
+  statusLabel: string;
+  statusTone: 'emerald' | 'amber' | 'rose' | 'slate';
 }
 
 interface RawJabatanPersonalia {
@@ -135,9 +152,9 @@ const PLENO_DIVISI_ORDER: Array<{
   { letter: 'D', label: 'Sie Kebersihan', aliases: ['sie kebersihan'] },
   { letter: 'E', label: 'Sie Sarpras', aliases: ['sie sarpras'] },
   { letter: 'F', label: 'Sie Dapur', aliases: ['sie dapur'] },
-  { letter: 'G', label: 'Sie Koperasi', aliases: ['sie koperasi', 'sie koprasi'] },
-  { letter: 'H', label: 'Sie Laundry', aliases: ['sie laundry'] },
-  { letter: 'I', label: 'Operator EMIS', aliases: ['operator emis'] },
+  { letter: 'G', label: 'Operator EMIS', aliases: ['operator emis'] },
+  { letter: 'H', label: 'Sie Koperasi', aliases: ['sie koperasi', 'sie koprasi'] },
+  { letter: 'I', label: 'Sie Laundry', aliases: ['sie laundry'] },
   { letter: 'J', label: 'Guru Bantu', aliases: ['guru bantu'] },
   { letter: 'K', label: 'Musyrif Kamar', aliases: ['musyrif kamar'] },
 ];
@@ -637,6 +654,9 @@ export default function PusatLaporanPage() {
     masterPembayaranRows: [],
     masterRiwayatRows: [],
     keuanganTransaksiRows: [],
+    dapurAbsenRows: [],
+    dapurBukuMasakRows: [],
+    dapurJualanMalamRows: [],
   });
   const [pengurusRows, setPengurusRows] = useState<RawPengurusPersonalia[]>([]);
   const [kamarOrder, setKamarOrder] = useState<string[]>(DEFAULT_KAMAR_ORDER);
@@ -661,7 +681,9 @@ export default function PusatLaporanPage() {
   const approvalSourceRef = useRef<HTMLDivElement>(null);
   const tunggakanTableSourceRef = useRef<HTMLDivElement>(null);
   const perizinanTableSourceRef = useRef<HTMLDivElement>(null);
+  const kegiatanTableSourceRef = useRef<HTMLDivElement>(null);
   const kegiatanFotoSourceRef = useRef<HTMLDivElement>(null);
+  const dapurExtraSourceRef = useRef<HTMLDivElement>(null);
   const extraSourceRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
@@ -697,6 +719,9 @@ export default function PusatLaporanPage() {
         masterPembayaranRows,
         masterRiwayatRows,
         keuanganTransaksiRows,
+        dapurAbsenRows,
+        dapurBukuMasakRows,
+        dapurJualanMalamRows,
       ] = await Promise.all([
         fetchAllLaporanRawData({ canViewBisyaroh }),
         fetchAllAbsenJamaahPaginated(),
@@ -726,6 +751,9 @@ export default function PusatLaporanPage() {
         fetchSafeTable('master_pembayaran'),
         fetchSafeTable('master_pembayaran_riwayat'),
         fetchSafeTable('keuangan_transaksi'),
+        fetchSafeTable('dapur_absen_petugas'),
+        fetchSafeTable('dapur_buku_masak'),
+        fetchSafeTable('dapur_jualan_malam'),
       ]);
 
       const kegiatanAgendaRows =
@@ -776,6 +804,9 @@ export default function PusatLaporanPage() {
         masterPembayaranRows,
         masterRiwayatRows,
         keuanganTransaksiRows,
+        dapurAbsenRows,
+        dapurBukuMasakRows,
+        dapurJualanMalamRows,
       });
 
       const rawPengaturan =
@@ -1219,6 +1250,8 @@ export default function PusatLaporanPage() {
         'tanggal_batas_kembali',
       ]);
       const actualKembaliCandidate = extractIsoFromFields(row, [
+        'tgl_aktual_kembali',
+        'tanggal_aktual_kembali',
         'tanggal_kembali_aktual',
         'tgl_kembali_aktual',
         'tanggal_kembali_riil',
@@ -1234,9 +1267,11 @@ export default function PusatLaporanPage() {
 
       const resolvedRencanaIso =
         rencanaKembaliIso || (actualKembaliCandidate ? genericTglKembali : '');
+      const hasReturnedStatus = /\b(kembali|terlambat|selesai|sudah|tepat)\b/.test(statusLower);
       const hasNotReturnedStatus =
-        /sedang|belum|keluar|aktif|berlangsung|menunggu/.test(statusLower) &&
-        !/sudah|selesai|kembali|tepat/.test(statusLower);
+        (/sedang|belum|keluar|aktif|berlangsung|menunggu|disetujui/.test(statusLower) &&
+          !hasReturnedStatus) ||
+        false;
 
       const resolvedTglKembaliIso =
         actualKembaliCandidate || (hasNotReturnedStatus ? '' : genericTglKembali);
@@ -1273,9 +1308,35 @@ export default function PusatLaporanPage() {
         }
       }
 
+      let metaBatasJam = '';
+      let metaJamKembali = '';
+      for (const fieldName of ['alasan', 'keperluan']) {
+        const rawVal = String(row[fieldName] || '');
+        const m = rawVal.match(/\[IZIN_META:(\{[\s\S]*?\})\]/i);
+        if (m && m[1]) {
+          try {
+            const parsed = JSON.parse(m[1]) as Record<string, unknown>;
+            if (typeof parsed.b === 'string') metaBatasJam = parsed.b.trim();
+            if (typeof parsed.jk === 'string') metaJamKembali = parsed.jk.trim();
+          } catch {
+            // ignore
+          }
+          break;
+        }
+      }
+
       let keterangan: PerizinanDetailRow['keterangan'];
-      if (resolvedTglKembaliIso) {
+      if (statusLower === 'terlambat') {
+        keterangan = 'Terlambat';
+      } else if (resolvedTglKembaliIso) {
         if (resolvedRencanaIso && resolvedTglKembaliIso > resolvedRencanaIso) {
+          keterangan = 'Terlambat';
+        } else if (
+          (!resolvedRencanaIso || resolvedTglKembaliIso === resolvedRencanaIso) &&
+          metaBatasJam &&
+          metaJamKembali &&
+          metaJamKembali > metaBatasJam
+        ) {
           keterangan = 'Terlambat';
         } else {
           keterangan = 'Tepat Waktu';
@@ -1302,6 +1363,366 @@ export default function PusatLaporanPage() {
     rows.sort((a, b) => b.tglPulangIso.localeCompare(a.tglPulangIso));
     return rows;
   }, [activeRange, extraRaw, rawData, todayStr]);
+
+  const kegiatanTableRows = useMemo<KegiatanTableRow[]>(() => {
+    const { start, end } = activeRange;
+
+    const parsePengisi = (raw: unknown): Array<{ nama: string; peran: string }> => {
+      let arr: unknown[] = [];
+      if (Array.isArray(raw)) {
+        arr = raw;
+      } else if (typeof raw === 'string' && raw.trim()) {
+        const trimmed = raw.trim();
+        if (trimmed.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) arr = parsed;
+          } catch {
+            arr = trimmed.split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
+          }
+        } else {
+          arr = trimmed.split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
+        }
+      }
+      const out: Array<{ nama: string; peran: string }> = [];
+      for (const item of arr) {
+        if (typeof item === 'string') {
+          const s = item.trim();
+          if (!s) continue;
+          const m = s.match(/^(.+?)\s*(?:\(([^)]+)\)|[-—–]\s*(.+))$/);
+          if (m) {
+            out.push({ nama: m[1].trim(), peran: (m[2] || m[3] || '').trim() });
+          } else {
+            out.push({ nama: s, peran: '' });
+          }
+        } else if (item && typeof item === 'object') {
+          const rec = item as Record<string, unknown>;
+          const nama = extractTextField(rec, ['nama', 'nama_lengkap', 'name', 'petugas', 'pengisi'], '');
+          const peran = extractTextField(rec, ['peran', 'tugas', 'jabatan', 'role', 'sebagai'], '');
+          if (nama) out.push({ nama, peran });
+        }
+      }
+      return out;
+    };
+
+    const formatStatus = (
+      rawStatus: string
+    ): { label: string; tone: KegiatanTableRow['statusTone'] } => {
+      const st = (rawStatus || '').trim().toLowerCase();
+      if (/selesai|terlaksana|done|completed|sudah/.test(st)) {
+        return { label: 'Terlaksana', tone: 'emerald' };
+      }
+      if (/batal|cancel/.test(st)) {
+        return { label: 'Dibatalkan', tone: 'rose' };
+      }
+      if (/berlangsung|aktif|jalan/.test(st)) {
+        return { label: 'Berlangsung', tone: 'amber' };
+      }
+      if (/terjadwal|rencana|scheduled|akan/.test(st) || !st) {
+        return { label: 'Terjadwal', tone: 'slate' };
+      }
+      return { label: rawStatus.trim(), tone: 'slate' };
+    };
+
+    const out: KegiatanTableRow[] = [];
+    extraRaw.kegiatanRows.forEach((row, idx) => {
+      const judul = extractTextField(row, ['judul', 'nama_kegiatan', 'nama', 'kegiatan'], '');
+      if (!judul) return;
+      const iso = extractRowDateIso(row);
+      if (iso && (iso < start || iso > end)) return;
+
+      const jamMulai = extractTextField(row, ['jam_mulai', 'waktu_mulai', 'jam'], '');
+      const jamSelesai = extractTextField(row, ['jam_selesai', 'waktu_selesai'], '');
+      const waktuText = jamMulai
+        ? jamSelesai
+          ? `${jamMulai}–${jamSelesai} WIB`
+          : `${jamMulai} WIB`
+        : '-';
+      const kategori = extractTextField(row, ['kategori', 'jenis', 'bidang'], 'Agenda Pondok');
+      const lokasi = extractTextField(row, ['lokasi', 'tempat', 'ruangan'], '-');
+      const pj = extractTextField(row, ['penanggung_jawab', 'pj', 'koordinator', 'ketua'], '-');
+      const pengisiList = parsePengisi(row.pengisi_list ?? row.pengisi ?? row.petugas_list);
+      const st = formatStatus(String(row.status || ''));
+
+      out.push({
+        id: String(row.id || `giat-${idx}`),
+        tanggalIso: iso,
+        tanggalText: iso ? formatIsoDisplay(iso) : '-',
+        waktuText,
+        judul,
+        kategori,
+        lokasi,
+        pj,
+        pengisiList,
+        statusLabel: st.label,
+        statusTone: st.tone,
+      });
+    });
+
+    out.sort((a, b) => {
+      const dCmp = a.tanggalIso.localeCompare(b.tanggalIso);
+      if (dCmp !== 0) return dCmp;
+      return a.waktuText.localeCompare(b.waktuText);
+    });
+    return out;
+  }, [activeRange, extraRaw.kegiatanRows]);
+
+  const dapurExtraReports = useMemo(() => {
+    const { start, end } = activeRange;
+    const activeTa =
+      pengaturanApproval.tahun_ajaran_aktif ||
+      (todayStr ? getTahunAjaranForDate(todayStr) : '');
+    const aktifAll = pengurusRows.filter(
+      (p) => !p.status || p.status.trim().toLowerCase() === 'aktif'
+    );
+    const matchedTa = activeTa ? aktifAll.filter((p) => p.masa_khidmat === activeTa) : [];
+    const sourcePeople = matchedTa.length > 0 ? matchedTa : aktifAll;
+
+    // 1. Rekap Absensi Petugas Dapur
+    const dapurStaff: Array<{ id: string; nama: string; jabatan: string }> = [];
+    for (const p of sourcePeople) {
+      const jabs = Array.isArray(p.jabatan_list) ? p.jabatan_list : [];
+      const dJab = jabs.find((j) => {
+        if (isExcludedTopLeadership(j.divisi, j.nama_jabatan)) return false;
+        return (
+          normalizeDivisiName(j.divisi).toLowerCase().includes('dapur') ||
+          (j.nama_jabatan || '').toLowerCase().includes('dapur')
+        );
+      });
+      if (dJab) {
+        dapurStaff.push({
+          id: p.id,
+          nama: p.nama_lengkap,
+          jabatan: formatCleanSectionRole(dJab.divisi, dJab.nama_jabatan, dJab.urutan_struktur),
+        });
+      }
+    }
+    dapurStaff.sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+
+    const absenMap = new Map<
+      string,
+      { nama: string; total: number; hadir: number; izinTelat: number; alpha: number }
+    >();
+    for (const st of dapurStaff) {
+      absenMap.set(st.id, { nama: st.nama, total: 0, hadir: 0, izinTelat: 0, alpha: 0 });
+    }
+
+    for (const row of extraRaw.dapurAbsenRows) {
+      const iso = extractRowDateIso(row);
+      if (!iso || iso < start || iso > end) continue;
+      const rawPid = String(row.petugas_id || '').trim();
+      const rawNama = String(row.petugas_nama || '').trim();
+      const matched = dapurStaff.find(
+        (st) =>
+          st.id === rawPid ||
+          `pg-${st.id}` === rawPid ||
+          (rawNama && st.nama.trim().toLowerCase() === rawNama.toLowerCase())
+      );
+      const key = matched?.id || rawPid || rawNama.toLowerCase() || `unknown-${absenMap.size}`;
+      const existing = absenMap.get(key) || {
+        nama: matched?.nama || rawNama || 'Petugas Dapur',
+        total: 0,
+        hadir: 0,
+        izinTelat: 0,
+        alpha: 0,
+      };
+      const stLower = String(row.status || '').trim().toLowerCase();
+      if (stLower === 'hadir') {
+        existing.hadir += 1;
+        existing.total += 1;
+      } else if (/izin|sakit|terlambat|telat/.test(stLower)) {
+        existing.izinTelat += 1;
+        existing.total += 1;
+      } else if (/alpha|alpa|tidak/.test(stLower)) {
+        existing.alpha += 1;
+        existing.total += 1;
+      }
+      absenMap.set(key, existing);
+    }
+
+    const absenRekap = Array.from(absenMap.values())
+      .map((r) => ({
+        ...r,
+        persen: r.total > 0 ? Math.round((r.hadir / r.total) * 100) : 0,
+      }))
+      .sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+
+    const absenTotals = absenRekap.reduce(
+      (acc, r) => ({
+        total: acc.total + r.total,
+        hadir: acc.hadir + r.hadir,
+        izinTelat: acc.izinTelat + r.izinTelat,
+        alpha: acc.alpha + r.alpha,
+      }),
+      { total: 0, hadir: 0, izinTelat: 0, alpha: 0 }
+    );
+    const absenPersenTotal =
+      absenTotals.total > 0 ? Math.round((absenTotals.hadir / absenTotals.total) * 100) : 0;
+
+    // 2. Buku Kas Harian Belanja Masak Dapur (Buku 1 • Anggaran Pondok)
+    const b1Asc = [...extraRaw.dapurBukuMasakRows]
+      .map((r) => ({
+        row: r,
+        iso: extractRowDateIso(r),
+        createdAt: String(r.created_at || ''),
+      }))
+      .filter((x) => !end || !x.iso || x.iso <= end)
+      .sort((a, b) => {
+        if (a.iso !== b.iso) return a.iso.localeCompare(b.iso);
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+    let b1Saldo = 0;
+    let b1JatahMasuk = 0;
+    let b1BelanjaPagiSore = 0;
+    let b1SubsidiMasuk = 0;
+    const b1Mutations: Array<{
+      id: string;
+      tanggal: string;
+      kategoriLabel: string;
+      uraian: string;
+      pj: string;
+      arah: 'masuk' | 'keluar';
+      nominal: number;
+      saldo: number;
+    }> = [];
+
+    b1Asc.forEach(({ row, iso }, idx) => {
+      const tipe = String(row.tipe || '').toLowerCase();
+      const arahRaw = String(row.arah || '').toLowerCase();
+      const arah: 'masuk' | 'keluar' =
+        arahRaw === 'masuk' || tipe === 'jatah_harian' || tipe === 'subsidi_jualan_malam'
+          ? 'masuk'
+          : 'keluar';
+      const nominal = extractNumericField(row, ['nominal', 'jumlah', 'total']);
+      b1Saldo += arah === 'masuk' ? nominal : -nominal;
+
+      if (iso && iso >= start && iso <= end) {
+        if (tipe === 'subsidi_jualan_malam') {
+          b1SubsidiMasuk += nominal;
+        } else if (arah === 'masuk') {
+          b1JatahMasuk += nominal;
+        } else {
+          b1BelanjaPagiSore += nominal;
+        }
+        const kategoriLabel =
+          tipe === 'jatah_harian'
+            ? 'Jatah Harian'
+            : tipe === 'subsidi_jualan_malam'
+            ? 'Subsidi Jualan Malam'
+            : tipe === 'belanja_pagi'
+            ? 'Belanja Pagi'
+            : tipe === 'belanja_sore'
+            ? 'Belanja Sore'
+            : arah === 'masuk'
+            ? 'Masuk'
+            : 'Belanja';
+        b1Mutations.push({
+          id: String(row.id || `b1-${idx}`),
+          tanggal: iso ? formatIsoDisplay(iso) : '-',
+          kategoriLabel,
+          uraian: extractTextField(row, ['uraian', 'keterangan'], '-'),
+          pj: extractTextField(row, ['penanggung_jawab', 'pj'], '-'),
+          arah,
+          nominal,
+          saldo: b1Saldo,
+        });
+      }
+    });
+
+    // 3. Buku Kas Usaha Jualan Malam Dapur (Buku 2)
+    const b2Asc = [...extraRaw.dapurJualanMalamRows]
+      .map((r) => ({
+        row: r,
+        iso: extractRowDateIso(r),
+        createdAt: String(r.created_at || ''),
+      }))
+      .filter((x) => !end || !x.iso || x.iso <= end)
+      .sort((a, b) => {
+        if (a.iso !== b.iso) return a.iso.localeCompare(b.iso);
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+    let b2Saldo = 0;
+    let b2Omzet = 0;
+    let b2Modal = 0;
+    let b2SubsidiKeluar = 0;
+    const b2Transactions: Array<{
+      id: string;
+      tanggal: string;
+      kategoriLabel: string;
+      uraian: string;
+      pj: string;
+      arah: 'masuk' | 'keluar';
+      nominal: number;
+      saldo: number;
+    }> = [];
+
+    b2Asc.forEach(({ row, iso }, idx) => {
+      const tipe = String(row.tipe || '').toLowerCase();
+      const arahRaw = String(row.arah || '').toLowerCase();
+      const arah: 'masuk' | 'keluar' =
+        arahRaw === 'masuk' || tipe === 'omzet_jualan' ? 'masuk' : 'keluar';
+      const nominal = extractNumericField(row, ['nominal', 'jumlah', 'total']);
+      b2Saldo += arah === 'masuk' ? nominal : -nominal;
+
+      if (iso && iso >= start && iso <= end) {
+        if (arah === 'masuk') {
+          b2Omzet += nominal;
+        } else if (tipe === 'subsidi_ke_masak') {
+          b2SubsidiKeluar += nominal;
+        } else {
+          b2Modal += nominal;
+        }
+        const kategoriLabel =
+          tipe === 'omzet_jualan'
+            ? 'Omzet Malam'
+            : tipe === 'subsidi_ke_masak'
+            ? 'Subsidi ke Buku 1'
+            : 'Modal / Belanja';
+        b2Transactions.push({
+          id: String(row.id || `b2-${idx}`),
+          tanggal: iso ? formatIsoDisplay(iso) : '-',
+          kategoriLabel,
+          uraian: extractTextField(row, ['uraian', 'keterangan'], '-'),
+          pj: extractTextField(row, ['penanggung_jawab', 'pj'], '-'),
+          arah,
+          nominal,
+          saldo: b2Saldo,
+        });
+      }
+    });
+
+    return {
+      absen: {
+        rows: absenRekap,
+        totals: absenTotals,
+        persenTotal: absenPersenTotal,
+      },
+      buku1: {
+        jatahMasuk: b1JatahMasuk,
+        belanjaPagiSore: b1BelanjaPagiSore,
+        subsidiMasuk: b1SubsidiMasuk,
+        sisaSaldo: b1Saldo,
+        mutations: b1Mutations.slice().reverse(),
+      },
+      buku2: {
+        omzet: b2Omzet,
+        modal: b2Modal,
+        subsidiKeluar: b2SubsidiKeluar,
+        saldoBersih: b2Saldo,
+        transactions: b2Transactions.slice().reverse(),
+      },
+    };
+  }, [
+    activeRange,
+    extraRaw.dapurAbsenRows,
+    extraRaw.dapurBukuMasakRows,
+    extraRaw.dapurJualanMalamRows,
+    pengaturanApproval.tahun_ajaran_aktif,
+    pengurusRows,
+    todayStr,
+  ]);
 
   const kegiatanLampiranFoto = useMemo<KegiatanLampiranItem[]>(() => {
     const { start, end } = activeRange;
@@ -1349,9 +1770,25 @@ export default function PusatLaporanPage() {
     const activeTa =
       pengaturanApproval.tahun_ajaran_aktif ||
       (todayStr ? getTahunAjaranForDate(todayStr) : '');
-    const aktifAll = pengurusRows.filter((p) => p.status === 'aktif');
+    const aktifAll = pengurusRows.filter(
+      (p) => !p.status || p.status.trim().toLowerCase() === 'aktif'
+    );
     const matchedTa = activeTa ? aktifAll.filter((p) => p.masa_khidmat === activeTa) : [];
     const sourcePeople = matchedTa.length > 0 ? matchedTa : aktifAll;
+
+    const matchDewanHarianRole = (rawJabatan: string, targetSlot: string): boolean => {
+      const j = (rawJabatan || '').trim().toLowerCase();
+      const t = targetSlot.toLowerCase();
+      if (j === t) return true;
+      const isWakil = /\bwakil\b/.test(j);
+      if (t === 'kepala pondok') return !isWakil && /\b(?:kepala|ketua)\s+pondok\b/.test(j);
+      if (t === 'wakil kepala pondok') return isWakil && /\b(?:kepala|ketua)\s+pondok\b/.test(j);
+      if (t === 'sekretaris') return !isWakil && /\bsekretaris\b/.test(j);
+      if (t === 'wakil sekretaris') return isWakil && /\bsekretaris\b/.test(j);
+      if (t === 'bendahara') return !isWakil && /\bbendahara\b/.test(j);
+      if (t === 'wakil bendahara') return isWakil && /\bbendahara\b/.test(j);
+      return false;
+    };
 
     const dewanHarianSlots = DEWAN_HARIAN_ORDER.map((jabatan, index) => {
       const names: string[] = [];
@@ -1360,9 +1797,11 @@ export default function PusatLaporanPage() {
           if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
           if (
             normalizeDivisiName(jab.divisi).toLowerCase() === 'dewan harian' &&
-            jab.nama_jabatan.trim().toLowerCase() === jabatan.toLowerCase()
+            matchDewanHarianRole(jab.nama_jabatan, jabatan)
           ) {
-            names.push(person.nama_lengkap);
+            if (!names.includes(person.nama_lengkap)) {
+              names.push(person.nama_lengkap);
+            }
           }
         }
       }
@@ -1447,7 +1886,9 @@ export default function PusatLaporanPage() {
     const activeTa =
       pengaturanApproval.tahun_ajaran_aktif ||
       (todayStr ? getTahunAjaranForDate(todayStr) : '');
-    const aktifAll = pengurusRows.filter((p) => p.status === 'aktif');
+    const aktifAll = pengurusRows.filter(
+      (p) => !p.status || p.status.trim().toLowerCase() === 'aktif'
+    );
     const matchedTa = activeTa ? aktifAll.filter((p) => p.masa_khidmat === activeTa) : [];
     const sourcePeople = matchedTa.length > 0 ? matchedTa : aktifAll;
     return sourcePeople.filter((person) => {
@@ -1965,14 +2406,16 @@ export default function PusatLaporanPage() {
     const approvalSource = approvalSourceRef.current;
     const tunggakanTableSource = tunggakanTableSourceRef.current;
     const perizinanTableSource = perizinanTableSourceRef.current;
+    const kegiatanTableSource = kegiatanTableSourceRef.current;
     const kegiatanFotoSource = kegiatanFotoSourceRef.current;
+    const dapurExtraSource = dapurExtraSourceRef.current;
     const extraSource = extraSourceRef.current;
 
     const cleanupDomPatches = () => {
       if (docRoot) {
         docRoot
           .querySelectorAll(
-            '[data-siap-personalia-clone="true"], [data-siap-approval-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-chart-clone="true"], [data-siap-std-chart="true"], [data-siap-dapur-trend-inject="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"], [data-siap-tunggakan-clone="true"], [data-siap-cakupan-clone="true"]'
+            '[data-siap-personalia-clone="true"], [data-siap-approval-clone="true"], [data-siap-extra-clone="true"], [data-siap-kamar-grid="true"], [data-siap-kegiatan-table-clone="true"], [data-siap-kegiatan-foto-clone="true"], [data-siap-dapur-extra-clone="true"], [data-siap-chart-clone="true"], [data-siap-std-chart="true"], [data-siap-dapur-trend-inject="true"], [data-siap-kamar-total="true"], [data-siap-perizinan-clone="true"], [data-siap-tunggakan-clone="true"], [data-siap-cakupan-clone="true"], [data-siap-reordered-col-clone="true"]'
           )
           .forEach((node) => node.remove());
         docRoot
@@ -2000,6 +2443,9 @@ export default function PusatLaporanPage() {
         docRoot
           .querySelectorAll('[data-siap-hidden-tunggakan="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-tunggakan'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-kegiatan-list="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-kegiatan-list'));
         docRoot
           .querySelectorAll('[data-siap-hidden-kegiatan-foto="true"]')
           .forEach((node) => node.removeAttribute('data-siap-hidden-kegiatan-foto'));
@@ -2225,10 +2671,9 @@ export default function PusatLaporanPage() {
       (cand) => !singleDivSections.some((other) => other !== cand && other.contains(cand))
     );
 
-    // Setiap Bab Romawi (I s/d X) selalu dimulai di halaman baru
+    // Setiap Bab Romawi (I s/d X) selalu dimulai di halaman baru (Bab I mengikuti cover jika cover tampil)
     outermostDivSections.forEach((divEl, idx) => {
-      const hasPrevContent =
-        idx > 0 || showCoverAndApproval || scope === 'gabungan' || Boolean(divEl.previousElementSibling);
+      const hasPrevContent = idx > 0 || showCoverAndApproval;
       if (hasPrevContent) {
         divEl.setAttribute('data-siap-page-start', 'true');
       }
@@ -2277,8 +2722,8 @@ export default function PusatLaporanPage() {
       });
     }
 
-    // Pastikan Bab I selalu memiliki break-before-page (dimulai di halaman baru tersendiri)
-    if (div1ScopeEl) {
+    // Pastikan Bab I memiliki break-before-page jika berada tepat setelah Cover agar Halaman 2 langsung Bab I
+    if (div1ScopeEl && showCoverAndApproval) {
       div1ScopeEl.setAttribute('data-siap-page-start', 'true');
       if (!div1ScopeEl.classList.contains('break-before-page')) {
         div1ScopeEl.classList.add('break-before-page', 'print:break-before-page');
@@ -2286,7 +2731,7 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 0a. Perbaiki daftar "CAKUPAN DATA LAPORAN" di halaman Cover agar lengkap dan berurutan I. sampai XIII.
+    // 0a. Perbaiki daftar "CAKUPAN DATA LAPORAN" di halaman Cover agar lengkap, berurutan I. sampai XIII., dan mengalir ke bawah per kolom
     if (showCoverAndApproval) {
       const COVER_CAKUPAN_LIST: Array<{ key: ExtendedDivisionKey; label: string }> = [
         { key: 'administrasi', label: 'I. Administrasi & Santri' },
@@ -2337,12 +2782,29 @@ export default function PusatLaporanPage() {
         const cakupanGrid = document.createElement('div');
         cakupanGrid.setAttribute('data-siap-cakupan-clone', 'true');
         cakupanGrid.className =
-          'grid grid-cols-2 sm:grid-cols-3 print:grid-cols-3 gap-x-4 gap-y-1 text-[8.5pt] leading-snug text-slate-700 mt-2';
-        activeCakupanItems.forEach((item) => {
-          const itemEl = document.createElement('div');
-          itemEl.className = 'font-medium text-slate-800';
-          itemEl.textContent = item.label;
-          cakupanGrid.appendChild(itemEl);
+          'grid grid-cols-3 gap-x-6 gap-y-1 items-start text-[8.5pt] leading-snug text-slate-700 mt-2';
+
+        const col1Count = activeCakupanItems.length === 13 ? 5 : Math.ceil(activeCakupanItems.length / 3);
+        const col2Count =
+          activeCakupanItems.length === 13
+            ? 5
+            : Math.ceil((activeCakupanItems.length - col1Count) / 2);
+        const colSlices = [
+          activeCakupanItems.slice(0, col1Count),
+          activeCakupanItems.slice(col1Count, col1Count + col2Count),
+          activeCakupanItems.slice(col1Count + col2Count),
+        ];
+
+        colSlices.forEach((colItems) => {
+          const colDiv = document.createElement('div');
+          colDiv.className = 'space-y-1 min-w-0';
+          colItems.forEach((item) => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'font-medium text-slate-800';
+            itemEl.textContent = item.label;
+            colDiv.appendChild(itemEl);
+          });
+          cakupanGrid.appendChild(colDiv);
         });
         targetCakupanWrap.appendChild(cakupanGrid);
       }
@@ -3331,26 +3793,53 @@ export default function PusatLaporanPage() {
         }
       }
 
-      // Sembunyikan juga grafik sisa di Ringkasan Eksekutif agar tersisa HANYA 1 grafik "Perbandingan Aktivitas Divisi"
+      // Hapus seluruh blok Ringkasan Eksekutif & SEMUA grafik atas sebelum Bab I agar Halaman 2 langsung Bab I
+      activityCards.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
       otherExtraExecCharts.forEach((c) => c.setAttribute('data-siap-hidden-chart', 'true'));
 
-      [...financeCards, ...disciplineCards, ...otherExtraExecCharts].forEach((hiddenCard) => {
-        const p = hiddenCard.parentElement;
-        if (!p || p === execSectionEl || p === searchContainer) return;
-        const visibleKids = Array.from(p.children).filter(
-          (ch) => !ch.hasAttribute('data-siap-hidden-chart')
-        );
-        if (visibleKids.length === 0) {
-          p.setAttribute('data-siap-hidden-chart', 'true');
+      [...financeCards, ...disciplineCards, ...activityCards, ...otherExtraExecCharts].forEach(
+        (hiddenCard) => {
+          const p = hiddenCard.parentElement;
+          if (!p || p === execSectionEl || p === searchContainer) return;
+          const visibleKids = Array.from(p.children).filter(
+            (ch) => !ch.hasAttribute('data-siap-hidden-chart')
+          );
+          if (visibleKids.length === 0) {
+            p.setAttribute('data-siap-hidden-chart', 'true');
+          }
         }
-      });
+      );
 
-      // 0b-3. Pastikan grafik gabungan "Perbandingan Aktivitas Divisi" melebar penuh rapi di Ringkasan Eksekutif
-      activityCards.forEach((actCard) => {
-        actCard.setAttribute('data-siap-full-span', 'true');
-        actCard.setAttribute('data-siap-card-styled', 'true');
-        actCard.classList.add('rounded-xl', 'overflow-hidden', 'border', 'border-slate-200');
-        standardizeChartCard(actCard, 'aktivitas');
+      if (execSectionEl) {
+        execSectionEl.setAttribute('data-siap-hidden-chart', 'true');
+      }
+
+      // Sapu bersih blok grafik / ringkasan lain di atas Bab I (kecuali Cover)
+      const firstBabEl = outermostDivSections[0] || null;
+      Array.from(searchContainer.children).forEach((child) => {
+        if (!(child instanceof HTMLElement)) return;
+        if (child.hasAttribute('data-siap-hidden-chart')) return;
+        if (outermostDivSections.includes(child)) return;
+        if (approvalEl && (child === approvalEl || child.contains(approvalEl))) return;
+        if (
+          firstBabEl &&
+          !(child.compareDocumentPosition(firstBabEl) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ) {
+          return;
+        }
+        const txt = (child.textContent || '').replace(/\s+/g, ' ').trim();
+        const isCoverCard =
+          Boolean(child.querySelector('[data-siap-cakupan-clone="true"]')) ||
+          /cakupan\s+data\s+laporan|laporan\s+pertanggungjawaban/i.test(txt);
+        if (isCoverCard) return;
+        if (
+          /Ringkasan\s+Eksekutif|Perbandingan\s+(?:Aktivitas|Keuangan|Persentase\s+Kedisiplinan)|Tren\s+6\s*(?:Bulan|Pekan)/i.test(
+            txt
+          ) ||
+          hasChartVisual(child)
+        ) {
+          child.setAttribute('data-siap-hidden-chart', 'true');
+        }
       });
     }
 
@@ -4022,7 +4511,7 @@ export default function PusatLaporanPage() {
       });
     }
 
-    // 2. Bab III (Kegiatan Pondok): Tampilkan "LAMPIRAN DOKUMENTASI FOTO KEGIATAN" cukup 1 kali saja (hapus duplikasi)
+    // 2. Bab III (Kegiatan Pondok): Ganti daftar kartu kegiatan dengan tabel terstruktur rapi + pastikan Dokumentasi Foto hanya 1 kali
     if (div3El) {
       const fotoTitleEls = Array.from(
         div3El.querySelectorAll<HTMLElement>('h3, h4, h5, p, div, span')
@@ -4086,6 +4575,67 @@ export default function PusatLaporanPage() {
         (cand) => !existingFotoBlocks.some((other) => other !== cand && other.contains(cand))
       );
 
+      const pengisiCandidates = Array.from(div3El.querySelectorAll('table, div, section')).filter(
+        (el) => {
+          if (el === div3El) return false;
+          if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return false;
+          if (el.closest('[data-siap-kpi-grid="true"]')) return false;
+          const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return (
+            /^(?:Rincian|Rekap|Daftar)?\s*Pengisi\s+(?:Kegiatan|Acara)|Rincian\s+Pengisi\s+Kegiatan|Rekap\s+Pengisi/i.test(
+              txt
+            ) && txt.length < 15000
+          );
+        }
+      );
+      const outermostPengisi = pengisiCandidates.filter(
+        (cand) => !pengisiCandidates.some((other) => other !== cand && other.contains(cand))
+      );
+
+      // Ganti daftar kartu / tabel kegiatan lama dengan Tabel Terstruktur Bab III
+      if (kegiatanTableSource) {
+        const agendaBlocksToHide: HTMLElement[] = [];
+        Array.from(div3El.children).forEach((child) => {
+          if (!(child instanceof HTMLElement)) return;
+          if (child.hasAttribute('data-siap-kpi-grid')) return;
+          if (child.hasAttribute('data-siap-chart-card')) return;
+          if (child.hasAttribute('data-siap-kegiatan-foto-clone')) return;
+          if (child.hasAttribute('data-siap-hidden-kegiatan-foto')) return;
+          if (outermostFotoBlocks.some((f) => child === f || child.contains(f) || f.contains(child))) {
+            return;
+          }
+          if (outermostPengisi.some((p) => child === p || child.contains(p))) return;
+          if (child.querySelector('h2, h3') && /Kegiatan\s+Pondok/i.test(child.textContent || '')) {
+            return;
+          }
+          const txt = (child.textContent || '').replace(/\s+/g, ' ').trim();
+          const isAgendaList =
+            Boolean(child.querySelector('table')) ||
+            /Daftar\s+(?:Agenda|Kegiatan)|Jadwal\s+Kegiatan|Rincian\s+Kegiatan|Susunan\s+Pengisi|Lokasi\s*:|Penanggung\s+Jawab\s*:|Belum\s+ada\s+(?:agenda|kegiatan)/i.test(
+              txt
+            );
+          if (isAgendaList) {
+            agendaBlocksToHide.push(child);
+          }
+        });
+
+        const tableClone = document.createElement('div');
+        tableClone.setAttribute('data-siap-kegiatan-table-clone', 'true');
+        tableClone.className = 'mt-3 space-y-2';
+        tableClone.innerHTML = kegiatanTableSource.innerHTML;
+
+        if (agendaBlocksToHide.length > 0) {
+          agendaBlocksToHide[0].parentElement?.insertBefore(tableClone, agendaBlocksToHide[0]);
+          agendaBlocksToHide.forEach((blk) =>
+            blk.setAttribute('data-siap-hidden-kegiatan-list', 'true')
+          );
+        } else if (outermostPengisi[0] && outermostPengisi[0].parentElement) {
+          outermostPengisi[0].parentElement.insertBefore(tableClone, outermostPengisi[0]);
+        } else {
+          insertAfterHeaderOrSummary(div3El, tableClone);
+        }
+      }
+
       if (kegiatanFotoSource && kegiatanLampiranFoto.length > 0) {
         outermostFotoBlocks.forEach((blk) => {
           blk.setAttribute('data-siap-hidden-kegiatan-foto', 'true');
@@ -4096,20 +4646,6 @@ export default function PusatLaporanPage() {
         fotoClone.className = 'mt-5 pt-4 border-t border-slate-200 space-y-3';
         fotoClone.innerHTML = kegiatanFotoSource.innerHTML;
 
-        const pengisiCandidates = Array.from(div3El.querySelectorAll('table, div, section')).filter(
-          (el) => {
-            if (el === div3El) return false;
-            if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return false;
-            const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-            return (
-              /Pengisi\s+Acara|Rincian\s+Pengisi|Daftar\s+Pengisi/i.test(txt) &&
-              txt.length < 15000
-            );
-          }
-        );
-        const outermostPengisi = pengisiCandidates.filter(
-          (cand) => !pengisiCandidates.some((other) => other !== cand && other.contains(cand))
-        );
         const lastPengisiBlock = outermostPengisi[outermostPengisi.length - 1] || null;
         if (lastPengisiBlock) {
           lastPengisiBlock.insertAdjacentElement('afterend', fotoClone);
@@ -4163,7 +4699,7 @@ export default function PusatLaporanPage() {
       }
     }
 
-    // 2c. Bab VIII (Dapur Umum & Konsumsi Santri): Pastikan kolom Menu Ringkas tampil sebagai teks biasa (tanpa $ atau ~)
+    // 2c. Bab VIII (Dapur Umum & Konsumsi Santri): Pastikan kolom Menu Ringkas tampil sebagai teks biasa & suntikkan 3 Rekap Operasional Dapur
     if (div8El) {
       div8El.querySelectorAll('table').forEach((tbl) => {
         const heads = Array.from(tbl.querySelectorAll('thead th, thead td')).map((h) =>
@@ -4227,6 +4763,14 @@ export default function PusatLaporanPage() {
           n.nodeValue = n.nodeValue.replace(/\$/g, '').replace(/~/g, ' ');
         }
       });
+
+      if (dapurExtraSource) {
+        const dapurClone = document.createElement('div');
+        dapurClone.setAttribute('data-siap-dapur-extra-clone', 'true');
+        dapurClone.className = 'mt-4 space-y-4';
+        dapurClone.innerHTML = dapurExtraSource.innerHTML;
+        div8El.appendChild(dapurClone);
+      }
     }
 
     // 3. Tempel blok Divisi XI, XII, XIII ke dalam kontainer kertas laporan utama
@@ -4262,12 +4806,49 @@ export default function PusatLaporanPage() {
       }
     }
 
+    // 3b. Pastikan seluruh daftar bernomor 2 kolom mengalir ke bawah dulu (Kolom Kiri 1..N/2, Kolom Kanan N/2+1..N)
+    Array.from(searchContainer.querySelectorAll<HTMLElement>('div, ul, ol')).forEach((gridEl) => {
+      if (gridEl.closest('[data-siap-hidden-dup="true"]')) return;
+      if (gridEl.closest('[data-siap-hidden-chart="true"]')) return;
+      if (gridEl.closest('[data-siap-hidden-personalia="true"]')) return;
+      if (gridEl.closest('[data-siap-hidden-kegiatan-list="true"]')) return;
+      if (gridEl.closest('[data-siap-personalia-clone="true"]')) return;
+      if (gridEl.closest('[data-siap-reordered-col-clone="true"]')) return;
+      if (gridEl.closest('[data-siap-kamar-grid="true"]')) return;
+      if (gridEl.closest('[data-siap-kpi-grid="true"]')) return;
+      if (gridEl.closest('[data-siap-chart-card="true"]')) return;
+      const cls = typeof gridEl.className === 'string' ? gridEl.className : '';
+      if (!/\b(?:sm:|md:|print:)?grid-cols-2\b/.test(cls)) return;
+      const kids = Array.from(gridEl.children) as HTMLElement[];
+      if (kids.length < 3) return;
+      const t0 = (kids[0].textContent || '').replace(/\s+/g, ' ').trim();
+      const t1 = (kids[1].textContent || '').replace(/\s+/g, ' ').trim();
+      const t2 = (kids[2].textContent || '').replace(/\s+/g, ' ').trim();
+      if (/^1[.)]\s*/.test(t0) && /^2[.)]\s*/.test(t1) && /^3[.)]\s*/.test(t2)) {
+        const mid = Math.ceil(kids.length / 2);
+        const reorderedWrap = document.createElement('div');
+        reorderedWrap.setAttribute('data-siap-reordered-col-clone', 'true');
+        reorderedWrap.className = 'grid grid-cols-2 gap-x-4 gap-y-1 items-start';
+        const leftCol = document.createElement('div');
+        leftCol.className = 'space-y-1 min-w-0';
+        const rightCol = document.createElement('div');
+        rightCol.className = 'space-y-1 min-w-0';
+        kids.slice(0, mid).forEach((k) => leftCol.appendChild(k.cloneNode(true)));
+        kids.slice(mid).forEach((k) => rightCol.appendChild(k.cloneNode(true)));
+        reorderedWrap.appendChild(leftCol);
+        reorderedWrap.appendChild(rightCol);
+        gridEl.setAttribute('data-siap-hidden-dup', 'true');
+        gridEl.parentElement?.insertBefore(reorderedWrap, gridEl);
+      }
+    });
+
     // 4. Seragamkan sudut agak lengkung (rounded-xl overflow-hidden border) pada seluruh kartu & tabel laporan
     searchContainer.querySelectorAll<HTMLTableElement>('table').forEach((tbl) => {
       if (tbl.closest('[data-siap-hidden-personalia="true"]')) return;
       if (tbl.closest('[data-siap-hidden-approval="true"]')) return;
       if (tbl.closest('[data-siap-hidden-kamar="true"]')) return;
       if (tbl.closest('[data-siap-hidden-tunggakan="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-kegiatan-list="true"]')) return;
       if (tbl.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
       if (tbl.closest('[data-siap-hidden-dup="true"]')) return;
       if (tbl.closest('[data-siap-hidden-chart="true"]')) return;
@@ -4292,6 +4873,7 @@ export default function PusatLaporanPage() {
       if (el.closest('[data-siap-hidden-approval="true"]')) return;
       if (el.closest('[data-siap-hidden-kamar="true"]')) return;
       if (el.closest('[data-siap-hidden-tunggakan="true"]')) return;
+      if (el.closest('[data-siap-hidden-kegiatan-list="true"]')) return;
       if (el.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
       if (el.closest('[data-siap-hidden-dup="true"]')) return;
       if (el.closest('[data-siap-hidden-chart="true"]')) return;
@@ -4330,7 +4912,9 @@ export default function PusatLaporanPage() {
     syahriyahTunggakan,
     extraReports,
     perizinanReportRows,
+    kegiatanTableRows,
     kegiatanLampiranFoto,
+    dapurExtraReports,
     validChartData,
   ]);
 
@@ -4420,7 +5004,7 @@ export default function PusatLaporanPage() {
       return koordinator ? `${koordinator.nama} (${sec?.label || fallback})` : fallback;
     };
     const pjKebersihan = getPlenoPj('D', 'Sie Kebersihan');
-    const pjKoperasi = getPlenoPj('G', 'Sie Koperasi');
+    const pjKoperasi = getPlenoPj('H', 'Sie Koperasi');
     const pjPsb = pengaturanApproval.nama_sekretaris
       ? `Panitia PSB (${pengaturanApproval.nama_sekretaris})`
       : 'Panitia PSB Pondok';
@@ -4882,6 +5466,7 @@ export default function PusatLaporanPage() {
         [data-siap-hidden-kamar="true"],
         [data-siap-hidden-perizinan="true"],
         [data-siap-hidden-tunggakan="true"],
+        [data-siap-hidden-kegiatan-list="true"],
         [data-siap-hidden-kegiatan-foto="true"],
         [data-siap-hidden-dup="true"],
         [data-siap-hidden-chart="true"] {
@@ -5017,10 +5602,10 @@ export default function PusatLaporanPage() {
         #pusat-laporan-dokumen table[data-siap-izin-table="true"] td,
         [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] th,
         [data-siap-laporan-doc="true"] table[data-siap-izin-table="true"] td {
-          font-size: 8.5pt !important;
+          font-size: 8pt !important;
           line-height: 1.25 !important;
-          padding: 5px 7px !important;
-          overflow-wrap: anywhere;
+          padding: 4px 5px !important;
+          overflow-wrap: break-word;
         }
         #pusat-laporan-dokumen [data-siap-chart-card="true"] p,
         #pusat-laporan-dokumen [data-siap-chart-card="true"] span,
@@ -5599,23 +6184,33 @@ export default function PusatLaporanPage() {
                 </span>
               </div>
 
-              {/* BAGIAN I: DEWAN HARIAN */}
+              {/* BAGIAN I: DEWAN HARIAN (3 Kolom Berpasangan) */}
               <div className="space-y-1.5">
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
                   BAGIAN I &bull; DEWAN HARIAN
                 </h5>
-                <div className="grid grid-cols-2 gap-2.5 text-[9pt] leading-snug">
-                  {strukturPersonalia.dewanHarianSlots.map((slot) => (
+                <div className="grid grid-cols-3 gap-2.5 text-[9pt] leading-snug items-stretch">
+                  {[
+                    [strukturPersonalia.dewanHarianSlots[0], strukturPersonalia.dewanHarianSlots[1]],
+                    [strukturPersonalia.dewanHarianSlots[2], strukturPersonalia.dewanHarianSlots[3]],
+                    [strukturPersonalia.dewanHarianSlots[4], strukturPersonalia.dewanHarianSlots[5]],
+                  ].map((pair, colIdx) => (
                     <div
-                      key={slot.nomor}
-                      className="border border-slate-200 rounded-xl overflow-hidden bg-white px-3 py-2 break-inside-avoid"
+                      key={`dh-col-${colIdx}`}
+                      className="border border-slate-200 rounded-xl overflow-hidden bg-white divide-y divide-slate-100 break-inside-avoid flex flex-col"
                     >
-                      <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
-                        {slot.nomor}. {slot.jabatan}
-                      </span>
-                      <span className="text-[9pt] font-semibold text-slate-900 block mt-0.5 break-words">
-                        {slot.names.length > 0 ? slot.names.join(', ') : '-'}
-                      </span>
+                      {pair.map((slot) =>
+                        slot ? (
+                          <div key={slot.nomor} className="px-3 py-2 flex-1">
+                            <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
+                              {slot.nomor}. {slot.jabatan}
+                            </span>
+                            <span className="text-[9pt] font-semibold text-slate-900 block mt-0.5 break-words">
+                              {slot.names.length > 0 ? slot.names.join(', ') : '-'}
+                            </span>
+                          </div>
+                        ) : null
+                      )}
                     </div>
                   ))}
                 </div>
@@ -5711,6 +6306,123 @@ export default function PusatLaporanPage() {
                   })}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Sumber tersembunyi Tabel Terstruktur Kegiatan Pondok untuk Bab III */}
+          <div ref={kegiatanTableSourceRef} className="hidden" aria-hidden="true">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-[10pt] font-bold uppercase tracking-wider text-slate-900">
+                  Rekapitulasi Agenda &amp; Susunan Petugas Kegiatan
+                </h4>
+                <span className="text-[8.5pt] font-semibold text-slate-600 tabular-nums">
+                  {kegiatanTableRows.length} Agenda
+                </span>
+              </div>
+              {kegiatanTableRows.length === 0 ? (
+                <p className="text-[9.5pt] leading-snug text-slate-600 italic py-2">
+                  Belum ada agenda kegiatan pondok tercatat pada periode ini.
+                </p>
+              ) : (
+                <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
+                  <table className="w-full table-fixed border-collapse text-[8.5pt] leading-tight">
+                    <colgroup>
+                      <col className="w-[34px]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[22%]" />
+                      <col className="w-[18%]" />
+                      <col className="w-[28%]" />
+                      <col className="w-[10%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 text-left">
+                        <th className="px-2 py-1.5 border border-slate-200 w-8 text-center whitespace-nowrap">
+                          No
+                        </th>
+                        <th className="px-2 py-1.5 border border-slate-200">
+                          Tanggal &amp; Waktu
+                        </th>
+                        <th className="px-2 py-1.5 border border-slate-200">
+                          Kegiatan &amp; Kategori
+                        </th>
+                        <th className="px-2 py-1.5 border border-slate-200">
+                          Lokasi &amp; PJ
+                        </th>
+                        <th className="px-2 py-1.5 border border-slate-200">
+                          Susunan Pengisi / Petugas
+                        </th>
+                        <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kegiatanTableRows.map((row, idx) => (
+                        <tr key={row.id} className="break-inside-avoid">
+                          <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                            {idx + 1}
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 align-top">
+                            <span className="font-mono font-semibold text-slate-900 tabular-nums block whitespace-nowrap">
+                              {row.tanggalText}
+                            </span>
+                            <span className="text-[8pt] text-slate-600 block mt-0.5">
+                              {row.waktuText}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 align-top">
+                            <span className="font-semibold text-slate-900 block break-words">
+                              {row.judul}
+                            </span>
+                            <span className="text-[8pt] text-slate-600 block mt-0.5">
+                              {row.kategori}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 align-top">
+                            <span className="font-semibold text-slate-800 block break-words">
+                              {row.lokasi}
+                            </span>
+                            <span className="text-[8pt] text-slate-600 block mt-0.5 break-words">
+                              PJ: {row.pj}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 align-top">
+                            {row.pengisiList.length === 0 ? (
+                              <span className="text-slate-400 italic">-</span>
+                            ) : (
+                              <div className="space-y-0.5">
+                                {row.pengisiList.map((pg, pIdx) => (
+                                  <div key={`${row.id}-pg-${pIdx}`} className="text-slate-800 break-words">
+                                    <span className="font-mono text-slate-500 mr-1">{pIdx + 1}.</span>
+                                    <span className="font-semibold">{pg.nama}</span>
+                                    {pg.peran ? (
+                                      <span className="text-slate-600"> ({pg.peran})</span>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td
+                            className={`px-2 py-1.5 border border-slate-200 text-center font-semibold whitespace-nowrap align-top ${
+                              row.statusTone === 'emerald'
+                                ? 'text-emerald-800'
+                                : row.statusTone === 'amber'
+                                ? 'text-amber-800'
+                                : row.statusTone === 'rose'
+                                ? 'text-rose-700'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {row.statusLabel}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
 
@@ -5834,55 +6546,55 @@ export default function PusatLaporanPage() {
               </p>
             ) : (
               <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
-                <table className="table-fixed w-full text-[8.5pt] leading-tight border-collapse" data-siap-izin-table="true">
+                <table className="table-fixed w-full text-[8pt] leading-tight border-collapse" data-siap-izin-table="true">
                   <colgroup>
-                    <col className="w-[4%]" />
-                    <col className="w-[16%]" />
-                    <col className="w-[9%]" />
-                    <col className="w-[13.5%]" />
-                    <col className="w-[14%]" />
-                    <col className="w-[13.5%]" />
-                    <col className="w-[17%]" />
+                    <col className="w-[34px]" />
+                    <col className="w-[19%]" />
                     <col className="w-[13%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[19%]" />
+                    <col className="w-[12%]" />
                   </colgroup>
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 text-left">
-                      <th className="px-2 py-1.5 border border-slate-200 text-center">No</th>
-                      <th className="px-2 py-1.5 border border-slate-200">Nama Santri</th>
-                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Kamar</th>
-                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Pulang</th>
-                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Rencana Kembali</th>
-                      <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Kembali</th>
-                      <th className="px-2 py-1.5 border border-slate-200">Keperluan</th>
-                      <th className="px-2 py-1.5 border border-slate-200">Keterangan</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">No</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200">Nama Santri</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Kamar</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Pulang</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center">Rencana Kembali</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 text-center whitespace-nowrap">Tgl Kembali</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200">Keperluan</th>
+                      <th className="px-1.5 py-1.5 border border-slate-200 whitespace-nowrap">Keterangan</th>
                     </tr>
                   </thead>
                   <tbody>
                     {perizinanReportRows.map((row, idx) => (
                       <tr key={row.id}>
-                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {idx + 1}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 font-semibold text-slate-900 break-words align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 font-semibold text-slate-900 break-words align-top">
                           {row.namaSantri}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 text-center text-slate-700 break-words align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center text-slate-700 break-words align-top">
                           {row.kamar}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.tglPulang}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.rencanaKembali}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap align-top">
                           {row.tglKembali}
                         </td>
-                        <td className="px-2 py-1.5 border border-slate-200 text-slate-700 break-words align-top">
+                        <td className="px-1.5 py-1.5 border border-slate-200 text-slate-700 break-words align-top">
                           {row.keperluan}
                         </td>
                         <td
-                          className={`px-2 py-1.5 border border-slate-200 font-semibold break-words align-top ${
+                          className={`px-1.5 py-1.5 border border-slate-200 font-semibold whitespace-nowrap align-top ${
                             row.keterangan === 'Tepat Waktu'
                               ? 'text-emerald-800'
                               : row.keterangan === 'Sedang Izin'
@@ -5898,6 +6610,259 @@ export default function PusatLaporanPage() {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* Sumber tersembunyi 3 Rekap Operasional Dapur (Absensi Petugas, Buku 1 Masak, Buku 2 Jualan Malam) untuk Bab VIII */}
+          <div ref={dapurExtraSourceRef} className="hidden" aria-hidden="true">
+            <div className="space-y-4 pt-2 border-t border-slate-200">
+              {/* 1. Rekap Absensi Petugas Dapur */}
+              <div className="space-y-2 break-inside-avoid">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-[10pt] font-bold uppercase tracking-wider text-slate-900">
+                    1. Rekap Absensi Petugas Dapur
+                  </h4>
+                  <span className="text-[8.5pt] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-0.5 tabular-nums">
+                    Kehadiran Keseluruhan: {dapurExtraReports.absen.persenTotal}%
+                  </span>
+                </div>
+                {dapurExtraReports.absen.rows.length === 0 ? (
+                  <p className="text-[9.5pt] leading-snug text-slate-600 italic py-1">
+                    Belum ada data petugas atau absensi dapur pada periode ini.
+                  </p>
+                ) : (
+                  <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
+                    <table className="w-full text-[8.5pt] leading-tight border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 text-left">
+                          <th className="px-2 py-1.5 border border-slate-200 w-9 text-center whitespace-nowrap">No</th>
+                          <th className="px-2 py-1.5 border border-slate-200">Nama Petugas</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Total Jadwal</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Hadir</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Izin/Telat</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-center whitespace-nowrap">Alpha</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">% Kehadiran</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dapurExtraReports.absen.rows.map((r, idx) => (
+                          <tr key={`dapur-abs-${idx}`} className="break-inside-avoid">
+                            <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap">
+                              {idx + 1}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 font-semibold text-slate-900">
+                              {r.nama}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums whitespace-nowrap">
+                              {r.total}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-center font-mono font-semibold text-emerald-800 tabular-nums whitespace-nowrap">
+                              {r.hadir}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-center font-mono text-amber-800 tabular-nums whitespace-nowrap">
+                              {r.izinTelat}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-center font-mono text-rose-700 tabular-nums whitespace-nowrap">
+                              {r.alpha}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-right font-mono font-bold text-slate-900 tabular-nums whitespace-nowrap">
+                              {r.persen}%
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="bg-slate-50 font-bold text-slate-900">
+                          <td colSpan={2} className="px-2 py-1.5 border border-slate-200">
+                            Total Keseluruhan
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 text-center font-mono tabular-nums">
+                            {dapurExtraReports.absen.totals.total}
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 text-center font-mono text-emerald-800 tabular-nums">
+                            {dapurExtraReports.absen.totals.hadir}
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 text-center font-mono text-amber-800 tabular-nums">
+                            {dapurExtraReports.absen.totals.izinTelat}
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 text-center font-mono text-rose-700 tabular-nums">
+                            {dapurExtraReports.absen.totals.alpha}
+                          </td>
+                          <td className="px-2 py-1.5 border border-slate-200 text-right font-mono tabular-nums">
+                            {dapurExtraReports.absen.persenTotal}%
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Buku Kas Harian Belanja Masak Dapur (Buku 1 • Anggaran Pondok) */}
+              <div className="space-y-2 break-inside-avoid">
+                <h4 className="text-[10pt] font-bold uppercase tracking-wider text-slate-900">
+                  2. Buku Kas Harian Belanja Masak Dapur (Buku 1 &bull; Anggaran Pondok)
+                </h4>
+                <div data-siap-kpi-grid="true" className="grid grid-cols-4 gap-2.5 items-stretch">
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-emerald-800 block text-[8.5pt] leading-tight">Jatah Harian Masuk</span>
+                    <strong className="text-[10.5pt] font-bold text-emerald-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku1.jatahMasuk)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-rose-50 border border-rose-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-rose-800 block text-[8.5pt] leading-tight">Total Belanja Pagi &amp; Sore</span>
+                    <strong className="text-[10.5pt] font-bold text-rose-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku1.belanjaPagiSore)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-indigo-50 border border-indigo-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-indigo-800 block text-[8.5pt] leading-tight">Subsidi Masuk</span>
+                    <strong className="text-[10.5pt] font-bold text-indigo-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku1.subsidiMasuk)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-slate-600 block text-[8.5pt] leading-tight">Sisa Saldo Mengendap</span>
+                    <strong
+                      className={`text-[10.5pt] font-bold tabular-nums whitespace-nowrap ${
+                        dapurExtraReports.buku1.sisaSaldo < 0 ? 'text-rose-700' : 'text-slate-900'
+                      }`}
+                    >
+                      {formatRupiah(dapurExtraReports.buku1.sisaSaldo)}
+                    </strong>
+                  </div>
+                </div>
+                {dapurExtraReports.buku1.mutations.length === 0 ? (
+                  <p className="text-[9.5pt] leading-snug text-slate-600 italic py-1">
+                    Belum ada mutasi Buku 1 Belanja Masak pada periode ini.
+                  </p>
+                ) : (
+                  <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
+                    <table className="w-full text-[8.5pt] leading-tight border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 text-left">
+                          <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Tanggal</th>
+                          <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Kategori</th>
+                          <th className="px-2 py-1.5 border border-slate-200">Uraian &amp; PJ</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">Nominal</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dapurExtraReports.buku1.mutations.map((m) => (
+                          <tr key={m.id} className="break-inside-avoid">
+                            <td className="px-2 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                              {m.tanggal}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 font-semibold text-slate-800 whitespace-nowrap">
+                              {m.kategoriLabel}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-slate-700">
+                              <span className="font-semibold text-slate-900">{m.uraian}</span>
+                              {m.pj && m.pj !== '-' ? (
+                                <span className="text-slate-500"> &bull; PJ: {m.pj}</span>
+                              ) : null}
+                            </td>
+                            <td
+                              className={`px-2 py-1.5 border border-slate-200 text-right font-mono font-bold tabular-nums whitespace-nowrap ${
+                                m.arah === 'masuk' ? 'text-emerald-800' : 'text-rose-700'
+                              }`}
+                            >
+                              {m.arah === 'masuk' ? '+' : '-'} {formatRupiah(m.nominal)}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                              {formatRupiah(m.saldo)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Buku Kas Usaha Jualan Malam Dapur (Buku 2) */}
+              <div className="space-y-2 break-inside-avoid">
+                <h4 className="text-[10pt] font-bold uppercase tracking-wider text-slate-900">
+                  3. Buku Kas Usaha Jualan Malam Dapur (Buku 2)
+                </h4>
+                <div data-siap-kpi-grid="true" className="grid grid-cols-4 gap-2.5 items-stretch">
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-emerald-50 border border-emerald-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-emerald-800 block text-[8.5pt] leading-tight">Total Omzet Jualan</span>
+                    <strong className="text-[10.5pt] font-bold text-emerald-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku2.omzet)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-rose-50 border border-rose-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-rose-800 block text-[8.5pt] leading-tight">Total Modal / Pengeluaran</span>
+                    <strong className="text-[10.5pt] font-bold text-rose-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku2.modal)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-amber-50 border border-amber-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-amber-800 block text-[8.5pt] leading-tight">Subsidi Keluar ke Masak</span>
+                    <strong className="text-[10.5pt] font-bold text-amber-950 tabular-nums whitespace-nowrap">
+                      {formatRupiah(dapurExtraReports.buku2.subsidiKeluar)}
+                    </strong>
+                  </div>
+                  <div data-siap-kpi-card="true" className="rounded-xl overflow-hidden bg-slate-50 border border-slate-200 flex flex-col justify-between min-h-[74px] p-3">
+                    <span className="text-slate-600 block text-[8.5pt] leading-tight">Saldo Kas Jualan Bersih</span>
+                    <strong
+                      className={`text-[10.5pt] font-bold tabular-nums whitespace-nowrap ${
+                        dapurExtraReports.buku2.saldoBersih < 0 ? 'text-rose-700' : 'text-slate-900'
+                      }`}
+                    >
+                      {formatRupiah(dapurExtraReports.buku2.saldoBersih)}
+                    </strong>
+                  </div>
+                </div>
+                {dapurExtraReports.buku2.transactions.length === 0 ? (
+                  <p className="text-[9.5pt] leading-snug text-slate-600 italic py-1">
+                    Belum ada transaksi Buku 2 Usaha Jualan Malam pada periode ini.
+                  </p>
+                ) : (
+                  <div className="rounded-xl overflow-hidden border border-slate-200 siap-table-card">
+                    <table className="w-full text-[8.5pt] leading-tight border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 text-left">
+                          <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Tanggal</th>
+                          <th className="px-2 py-1.5 border border-slate-200 whitespace-nowrap">Kategori</th>
+                          <th className="px-2 py-1.5 border border-slate-200">Uraian &amp; PJ</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">Nominal</th>
+                          <th className="px-2 py-1.5 border border-slate-200 text-right whitespace-nowrap">Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dapurExtraReports.buku2.transactions.map((t) => (
+                          <tr key={t.id} className="break-inside-avoid">
+                            <td className="px-2 py-1.5 border border-slate-200 font-mono tabular-nums whitespace-nowrap">
+                              {t.tanggal}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 font-semibold text-slate-800 whitespace-nowrap">
+                              {t.kategoriLabel}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-slate-700">
+                              <span className="font-semibold text-slate-900">{t.uraian}</span>
+                              {t.pj && t.pj !== '-' ? (
+                                <span className="text-slate-500"> &bull; PJ: {t.pj}</span>
+                              ) : null}
+                            </td>
+                            <td
+                              className={`px-2 py-1.5 border border-slate-200 text-right font-mono font-bold tabular-nums whitespace-nowrap ${
+                                t.arah === 'masuk' ? 'text-emerald-800' : 'text-rose-700'
+                              }`}
+                            >
+                              {t.arah === 'masuk' ? '+' : '-'} {formatRupiah(t.nominal)}
+                            </td>
+                            <td className="px-2 py-1.5 border border-slate-200 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                              {formatRupiah(t.saldo)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Sumber tersembunyi Lembar Pengesahan baku (TTD & Stempel Digital pas & tidak terpotong) */}
