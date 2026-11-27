@@ -185,7 +185,9 @@ const DEFAULT_KAMAR_ORDER = [
 
 function normalizeDivisiName(raw: string): string {
   const trimmed = (raw || '').trim();
-  if (trimmed === 'Pimpinan & Harian') return 'Dewan Harian';
+  if (/^(?:pimpinan\s*(?:&|dan)\s*harian|pengurus\s+harian|pimpinan)$/i.test(trimmed)) {
+    return 'Dewan Harian';
+  }
   if (trimmed === 'Pengasuh') return 'Pengasuh Pondok';
   if (/^sie\s+koprasi$/i.test(trimmed)) return 'Sie Koperasi';
   return trimmed;
@@ -466,6 +468,23 @@ function formatIsoDisplay(iso: string): string {
   return `${d}/${m}/${y}`;
 }
 
+function compareIsoAsc(aIso: string, bIso: string, aCreated = '', bCreated = ''): number {
+  const aValid = Boolean(aIso && /^\d{4}-\d{2}-\d{2}$/.test(aIso));
+  const bValid = Boolean(bIso && /^\d{4}-\d{2}-\d{2}$/.test(bIso));
+  if (aValid && bValid) {
+    const diff = new Date(`${aIso}T00:00:00Z`).getTime() - new Date(`${bIso}T00:00:00Z`).getTime();
+    if (diff !== 0) return diff;
+  } else if (aValid !== bValid) {
+    return aValid ? -1 : 1;
+  } else if (aIso !== bIso) {
+    return aIso.localeCompare(bIso);
+  }
+  if (aCreated && bCreated && aCreated !== bCreated) {
+    return aCreated.localeCompare(bCreated);
+  }
+  return 0;
+}
+
 function computeActiveRangeDates(
   mode: PeriodeMode,
   anchorDate: string,
@@ -712,6 +731,15 @@ export default function PusatLaporanPage() {
         jabatanRows,
         santriKamarRows,
         kegiatanAgendaRes,
+        kegiatanPengisiRows,
+        kegiatanPetugasRows,
+        pengisiKegiatanRows,
+        kegiatanPengisiAcaraRows,
+        agendaPengisiRows,
+        kegiatanPanitiaRows,
+        kegiatanRundownRows,
+        kegiatanSusunanPengisiRows,
+        kegiatanPetugasAcaraRows,
         perizinan1,
         perizinan2,
         perizinan3,
@@ -744,6 +772,15 @@ export default function PusatLaporanPage() {
         fetchSafeTable('pengurus_jabatan'),
         fetchSafeTable('santri'),
         supabase.from('kegiatan_agenda').select('*'),
+        fetchSafeTable('kegiatan_pengisi'),
+        fetchSafeTable('kegiatan_petugas'),
+        fetchSafeTable('pengisi_kegiatan'),
+        fetchSafeTable('kegiatan_pengisi_acara'),
+        fetchSafeTable('agenda_pengisi'),
+        fetchSafeTable('kegiatan_panitia'),
+        fetchSafeTable('kegiatan_rundown'),
+        fetchSafeTable('kegiatan_susunan_pengisi'),
+        fetchSafeTable('kegiatan_petugas_acara'),
         fetchSafeTable('perizinan'),
         fetchSafeTable('perizinan_pulang'),
         fetchSafeTable('izin_pulang'),
@@ -776,19 +813,170 @@ export default function PusatLaporanPage() {
           patchedRaw[jamaahKey] = fullAbsenJamaahRows;
         }
       }
-      if (!kegiatanAgendaRes.error && Array.isArray(kegiatanAgendaRes.data)) {
-        const kegiatanKey = Object.keys(patchedRaw).find((k) => {
-          const val = patchedRaw[k];
-          if (!Array.isArray(val)) return false;
-          if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
-            const sample = val[0] as Record<string, unknown>;
-            if ('kode_kegiatan' in sample || 'pengisi_list' in sample) return true;
-          }
-          return /^kegiatan/i.test(k);
-        });
-        if (kegiatanKey) {
-          patchedRaw[kegiatanKey] = kegiatanAgendaRows;
+
+      const isNonEmptyPengisiVal = (val: unknown): boolean => {
+        if (val === null || val === undefined) return false;
+        if (Array.isArray(val)) return val.length > 0;
+        if (typeof val === 'string') {
+          const t = val.trim();
+          return Boolean(t && t !== '[]' && t !== '{}' && t !== '-' && t.toLowerCase() !== 'null');
         }
+        if (typeof val === 'object') return Object.keys(val as Record<string, unknown>).length > 0;
+        return false;
+      };
+
+      const kegiatanKey = Object.keys(patchedRaw).find((k) => {
+        if (/pengisi|petugas|peserta|absen|dokumentasi|rundown|panitia/i.test(k)) return false;
+        const val = patchedRaw[k];
+        if (!Array.isArray(val)) return false;
+        if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+          const sample = val[0] as Record<string, unknown>;
+          if ('kode_kegiatan' in sample || 'pengisi_list' in sample || ('judul' in sample && 'jam_mulai' in sample)) {
+            return true;
+          }
+        }
+        return /^kegiatan(?:_?agenda|rows)?$/i.test(k);
+      });
+
+      const rawKegiatanFallback: Array<Record<string, unknown>> = [];
+      const rawChildPengisiRows: Array<Record<string, unknown>> = [];
+      for (const [k, val] of Object.entries(patchedRaw)) {
+        if (!Array.isArray(val) || val.length === 0) continue;
+        const sample = val[0];
+        if (!sample || typeof sample !== 'object') continue;
+        const rec = sample as Record<string, unknown>;
+        const looksLikeChildPengisi =
+          (/pengisi|petugas|panitia|rundown/i.test(k) && !('judul' in rec && 'jam_mulai' in rec)) ||
+          (('kegiatan_id' in rec ||
+            'agenda_id' in rec ||
+            'kegiatan_agenda_id' in rec ||
+            'id_kegiatan' in rec ||
+            'id_agenda' in rec ||
+            'agenda_kode' in rec) &&
+            !('jam_mulai' in rec && 'judul' in rec));
+        if (looksLikeChildPengisi) {
+          rawChildPengisiRows.push(...(val as Array<Record<string, unknown>>));
+          continue;
+        }
+        if ('kode_kegiatan' in rec || 'pengisi_list' in rec || ('judul' in rec && 'jam_mulai' in rec)) {
+          rawKegiatanFallback.push(...(val as Array<Record<string, unknown>>));
+        }
+      }
+
+      const pengisiExtraByKey = new Map<string, Array<Record<string, unknown>>>();
+      const pengisiExtraSeen = new Map<string, Set<string>>();
+      const addPengisiToMap = (rawKey: unknown, pRow: Record<string, unknown>) => {
+        const key = String(rawKey || '').trim().toLowerCase();
+        if (!key) return;
+        const sig = String(pRow.id || '') || JSON.stringify(pRow);
+        const seen = pengisiExtraSeen.get(key) || new Set<string>();
+        if (seen.has(sig)) return;
+        seen.add(sig);
+        pengisiExtraSeen.set(key, seen);
+        const arr = pengisiExtraByKey.get(key) || [];
+        arr.push(pRow);
+        pengisiExtraByKey.set(key, arr);
+      };
+
+      for (const pRow of [
+        ...kegiatanPengisiRows,
+        ...kegiatanPetugasRows,
+        ...pengisiKegiatanRows,
+        ...kegiatanPengisiAcaraRows,
+        ...agendaPengisiRows,
+        ...kegiatanPanitiaRows,
+        ...kegiatanRundownRows,
+        ...kegiatanSusunanPengisiRows,
+        ...kegiatanPetugasAcaraRows,
+        ...rawChildPengisiRows,
+      ]) {
+        const fkCandidates = [
+          pRow.kegiatan_id,
+          pRow.agenda_id,
+          pRow.kegiatan_agenda_id,
+          pRow.id_kegiatan,
+          pRow.id_agenda,
+          pRow.kegiatan_uuid,
+          pRow.parent_id,
+          pRow.ref_id,
+          pRow.kode_kegiatan,
+          pRow.agenda_kode,
+        ];
+        for (const fk of fkCandidates) {
+          addPengisiToMap(fk, pRow);
+        }
+        const judulFk = pRow.judul_kegiatan || pRow.nama_kegiatan || pRow.agenda_judul;
+        if (judulFk) addPengisiToMap(judulFk, pRow);
+      }
+
+      const mergeAgendaPair = (
+        base: Record<string, unknown>,
+        incoming: Record<string, unknown>
+      ): Record<string, unknown> => {
+        const merged: Record<string, unknown> = { ...base };
+        for (const [k, v] of Object.entries(incoming)) {
+          if (v === null || v === undefined) continue;
+          if (!(k in merged) || merged[k] === null || merged[k] === undefined || !isNonEmptyPengisiVal(merged[k])) {
+            merged[k] = v;
+          }
+        }
+        return merged;
+      };
+
+      const agendaMergedMap = new Map<string, Record<string, unknown>>();
+      const agendaNoIdList: Array<Record<string, unknown>> = [];
+      for (const row of [...kegiatanAgendaRows, ...rawKegiatanFallback]) {
+        const rid = String(row.id || row.kode_kegiatan || '').trim();
+        if (!rid) {
+          agendaNoIdList.push(row);
+          continue;
+        }
+        const existing = agendaMergedMap.get(rid);
+        agendaMergedMap.set(rid, existing ? mergeAgendaPair(existing, row) : row);
+      }
+
+      const mergedKegiatanRows = [...Array.from(agendaMergedMap.values()), ...agendaNoIdList].map((row) => {
+        const lookupKeys = [
+          row.id,
+          row.kode_kegiatan,
+          row.judul,
+          row.nama_kegiatan,
+        ]
+          .map((v) => String(v || '').trim().toLowerCase())
+          .filter(Boolean);
+        let extraPengisi: Array<Record<string, unknown>> | undefined;
+        for (const lk of lookupKeys) {
+          const hit = pengisiExtraByKey.get(lk);
+          if (hit && hit.length > 0) {
+            extraPengisi = hit;
+            break;
+          }
+        }
+        const hasAnyPengisi = [
+          row.pengisi_list,
+          row.susunan_pengisi,
+          row.daftar_pengisi,
+          row.pengisi_acara,
+          row.pengisi,
+          row.petugas_list,
+          row.susunan_petugas,
+          row.daftar_petugas,
+          row.petugas,
+          row.kegiatan_pengisi,
+          row.kegiatan_petugas,
+        ].some(isNonEmptyPengisiVal);
+
+        if (extraPengisi && extraPengisi.length > 0) {
+          if (!hasAnyPengisi) {
+            return { ...row, pengisi_list: extraPengisi, kegiatan_pengisi_extra: extraPengisi };
+          }
+          return { ...row, kegiatan_pengisi_extra: extraPengisi };
+        }
+        return row;
+      });
+
+      if (kegiatanKey && mergedKegiatanRows.length > 0) {
+        patchedRaw[kegiatanKey] = mergedKegiatanRows;
       }
 
       setRawData(patchedRaw as unknown as AllLaporanRawData);
@@ -797,7 +985,7 @@ export default function PusatLaporanPage() {
         koperasiTransaksiRows: mergeUniqueRows([kopTrx, kopKas, kopJual, kopKulaan]),
         koperasiProdukRows: mergeUniqueRows([kopProduk, kopBarang]),
         psbRows: mergeUniqueRows([psb1, psb2, psb3]),
-        kegiatanRows: mergeUniqueRows([kegiatanAgendaRows]),
+        kegiatanRows: mergedKegiatanRows,
         perizinanRows: mergeUniqueRows([perizinan1, perizinan2, perizinan3]),
         santriRows: santriKamarRows,
         pembayaranDetailRows,
@@ -877,10 +1065,13 @@ export default function PusatLaporanPage() {
         for (const j of jabatanRows) {
           const pid = String(j.pengurus_id || '');
           if (!pid) continue;
+          const divisiNorm = normalizeDivisiName(String(j.divisi || ''));
+          const namaJab = String(j.nama_jabatan || '');
+          if (isExcludedTopLeadership(divisiNorm, namaJab)) continue;
           const list = jabMap.get(pid) || [];
           list.push({
-            divisi: normalizeDivisiName(String(j.divisi || '')),
-            nama_jabatan: String(j.nama_jabatan || ''),
+            divisi: divisiNorm,
+            nama_jabatan: namaJab,
             urutan_struktur: Number(j.urutan_struktur || 10),
           });
           jabMap.set(pid, list);
@@ -888,11 +1079,13 @@ export default function PusatLaporanPage() {
         resolvedPengurus = amanRows.map((p) => {
           const pid = String(p.id || '');
           const embedded = Array.isArray(p.jabatan_list)
-            ? (p.jabatan_list as Array<Record<string, unknown>>).map((j) => ({
-                divisi: normalizeDivisiName(String(j.divisi || '')),
-                nama_jabatan: String(j.nama_jabatan || ''),
-                urutan_struktur: Number(j.urutan_struktur || 10),
-              }))
+            ? (p.jabatan_list as Array<Record<string, unknown>>)
+                .map((j) => ({
+                  divisi: normalizeDivisiName(String(j.divisi || '')),
+                  nama_jabatan: String(j.nama_jabatan || ''),
+                  urutan_struktur: Number(j.urutan_struktur || 10),
+                }))
+                .filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan))
             : [];
           return {
             id: pid,
@@ -910,11 +1103,13 @@ export default function PusatLaporanPage() {
           status: String(p.status || 'aktif'),
           masa_khidmat: String(p.masa_khidmat || ''),
           jabatan_list: Array.isArray(p.jabatan_list)
-            ? (p.jabatan_list as Array<Record<string, unknown>>).map((j) => ({
-                divisi: normalizeDivisiName(String(j.divisi || '')),
-                nama_jabatan: String(j.nama_jabatan || ''),
-                urutan_struktur: Number(j.urutan_struktur || 10),
-              }))
+            ? (p.jabatan_list as Array<Record<string, unknown>>)
+                .map((j) => ({
+                  divisi: normalizeDivisiName(String(j.divisi || '')),
+                  nama_jabatan: String(j.nama_jabatan || ''),
+                  urutan_struktur: Number(j.urutan_struktur || 10),
+                }))
+                .filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan))
             : [],
         }));
       }
@@ -996,8 +1191,15 @@ export default function PusatLaporanPage() {
     const kebPersen = kebTotal > 0 ? Math.round((kebSelesai / kebTotal) * 100) : 0;
     const kebDetail = kebActive
       .slice()
-      .sort((a, b) => b.iso.localeCompare(a.iso))
-      .slice(0, 20)
+      .sort((a, b) =>
+        compareIsoAsc(
+          a.iso,
+          b.iso,
+          String(a.row.created_at || ''),
+          String(b.row.created_at || '')
+        )
+      )
+      .slice(0, 30)
       .map(({ row, iso }) => ({
         tanggal: formatIsoDisplay(iso),
         area: extractTextField(row, ['area', 'kamar', 'lokasi', 'zona', 'tempat']),
@@ -1056,8 +1258,15 @@ export default function PusatLaporanPage() {
 
     const kopDetail = kopCur
       .slice()
-      .sort((a, b) => b.iso.localeCompare(a.iso))
-      .slice(0, 20)
+      .sort((a, b) =>
+        compareIsoAsc(
+          a.iso,
+          b.iso,
+          String(a.row.created_at || ''),
+          String(b.row.created_at || '')
+        )
+      )
+      .slice(0, 30)
       .map(({ row, iso }) => ({
         tanggal: formatIsoDisplay(iso),
         keterangan: extractTextField(row, ['keterangan', 'nama_barang', 'produk', 'uraian', 'judul']),
@@ -1119,8 +1328,15 @@ export default function PusatLaporanPage() {
 
     const psbDetail = psbCur
       .slice()
-      .sort((a, b) => b.iso.localeCompare(a.iso))
-      .slice(0, 20)
+      .sort((a, b) =>
+        compareIsoAsc(
+          a.iso,
+          b.iso,
+          String(a.row.created_at || ''),
+          String(b.row.created_at || '')
+        )
+      )
+      .slice(0, 30)
       .map(({ row, iso }) => ({
         tanggal: formatIsoDisplay(iso),
         nama: extractTextField(row, ['nama_lengkap', 'nama_santri', 'nama', 'no_registrasi']),
@@ -1360,50 +1576,391 @@ export default function PusatLaporanPage() {
       });
     });
 
-    rows.sort((a, b) => b.tglPulangIso.localeCompare(a.tglPulangIso));
+    rows.sort((a, b) => {
+      const dCmp = compareIsoAsc(a.tglPulangIso, b.tglPulangIso);
+      if (dCmp !== 0) return dCmp;
+      return a.namaSantri.localeCompare(b.namaSantri, 'id');
+    });
     return rows;
   }, [activeRange, extraRaw, rawData, todayStr]);
 
   const kegiatanTableRows = useMemo<KegiatanTableRow[]>(() => {
     const { start, end } = activeRange;
 
+    const personNameMap = new Map<string, string>();
+    for (const p of pengurusRows) {
+      if (p.id && p.nama_lengkap) personNameMap.set(p.id, p.nama_lengkap);
+    }
+    for (const s of extraRaw.santriRows) {
+      const sid = String(s.id || '');
+      const nm = extractTextField(s, ['nama_lengkap', 'nama_santri', 'nama'], '');
+      if (sid && nm) personNameMap.set(sid, nm);
+    }
+
+    const extractNestedPersonName = (obj: unknown): string => {
+      if (!obj || typeof obj !== 'object') return '';
+      return extractTextField(
+        obj as Record<string, unknown>,
+        ['nama_lengkap', 'nama_santri', 'nama_pengurus', 'nama', 'name'],
+        ''
+      );
+    };
+
     const parsePengisi = (raw: unknown): Array<{ nama: string; peran: string }> => {
-      let arr: unknown[] = [];
-      if (Array.isArray(raw)) {
-        arr = raw;
-      } else if (typeof raw === 'string' && raw.trim()) {
-        const trimmed = raw.trim();
-        if (trimmed.startsWith('[')) {
-          try {
-            const parsed = JSON.parse(trimmed);
-            if (Array.isArray(parsed)) arr = parsed;
-          } catch {
-            arr = trimmed.split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
+      let current: unknown = raw;
+      if (typeof current === 'string') {
+        let trimmed = current.trim();
+        for (let depth = 0; depth < 2 && typeof current === 'string'; depth += 1) {
+          trimmed = current.trim();
+          if (!trimmed) break;
+          if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            try {
+              current = JSON.parse(trimmed);
+            } catch {
+              break;
+            }
+          } else {
+            break;
           }
-        } else {
-          arr = trimmed.split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
         }
       }
-      const out: Array<{ nama: string; peran: string }> = [];
+
+      const rawOut: Array<{ nama: string; peran: string }> = [];
+      let arr: unknown[] = [];
+
+      if (Array.isArray(current)) {
+        arr = current;
+      } else if (current && typeof current === 'object') {
+        const obj = current as Record<string, unknown>;
+        const arrCandidate =
+          obj.list ??
+          obj.items ??
+          obj.pengisi ??
+          obj.data ??
+          obj.rows ??
+          obj.members ??
+          obj.petugas ??
+          obj.susunan ??
+          obj.daftar;
+        if (Array.isArray(arrCandidate)) {
+          arr = arrCandidate;
+        } else if (
+          'nama' in obj ||
+          'nama_lengkap' in obj ||
+          'nama_pengisi' in obj ||
+          'pengisi_nama' in obj ||
+          'petugas' in obj ||
+          'santri_id' in obj ||
+          'pengurus_id' in obj
+        ) {
+          arr = [obj];
+        } else {
+          const skipMetaKeys = new Set([
+            'id',
+            'kegiatan_id',
+            'agenda_id',
+            'kegiatan_agenda_id',
+            'created_at',
+            'updated_at',
+            'urutan',
+            'sort_order',
+          ]);
+          for (const [k, v] of Object.entries(obj)) {
+            if (skipMetaKeys.has(k.toLowerCase())) continue;
+            if (typeof v === 'string' && v.trim()) {
+              rawOut.push({ nama: v.trim(), peran: k.replace(/_/g, ' ') });
+            } else if (Array.isArray(v)) {
+              v.forEach((sub) => {
+                if (typeof sub === 'string' && sub.trim()) {
+                  rawOut.push({ nama: sub.trim(), peran: k.replace(/_/g, ' ') });
+                } else if (sub && typeof sub === 'object') {
+                  arr.push({ ...(sub as Record<string, unknown>), __fallbackPeran: k.replace(/_/g, ' ') });
+                }
+              });
+            }
+          }
+          if (arr.length === 0) return rawOut;
+        }
+      } else if (typeof current === 'string' && current.trim()) {
+        const cleanedStr = current.trim();
+        if (cleanedStr === '-' || cleanedStr === '[]' || cleanedStr === '{}') {
+          return [];
+        }
+        const lineSplit = cleanedStr.split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
+        const degreeRx = /^(?:S\.|M\.|Dr\.|Drs\.|Ir\.|Lc\b|H\.|Hj\.|K\.H\.|KH\.|Ph\.D|SE\b|SH\b|MM\b|MA\b|M\.Si|S\.Pd|M\.Pd|S\.Ag|M\.Ag)/i;
+        if (lineSplit.length === 1 && /,/.test(lineSplit[0])) {
+          const commaParts = lineSplit[0].split(',').map((s) => s.trim()).filter(Boolean);
+          const looksLikeTitleComma = commaParts.some((p, idx) => idx > 0 && degreeRx.test(p));
+          if (!looksLikeTitleComma && (/[:()]/.test(lineSplit[0]) || commaParts.length >= 2)) {
+            arr = commaParts;
+          } else {
+            arr = lineSplit;
+          }
+        } else {
+          arr = lineSplit;
+        }
+      }
+
+      const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isoRx = /^\d{4}-\d{2}-\d{2}/;
+
       for (const item of arr) {
         if (typeof item === 'string') {
-          const s = item.trim();
-          if (!s) continue;
+          const s = item.replace(/^\d+[.)]\s*/, '').trim();
+          if (!s || s === '-') continue;
+          const colonMatch = s.match(/^([^:]{2,36}):\s*(.+)$/);
+          if (colonMatch) {
+            rawOut.push({ nama: colonMatch[2].trim(), peran: colonMatch[1].trim() });
+            continue;
+          }
           const m = s.match(/^(.+?)\s*(?:\(([^)]+)\)|[-—–]\s*(.+))$/);
           if (m) {
-            out.push({ nama: m[1].trim(), peran: (m[2] || m[3] || '').trim() });
+            rawOut.push({ nama: m[1].trim(), peran: (m[2] || m[3] || '').trim() });
           } else {
-            out.push({ nama: s, peran: '' });
+            rawOut.push({ nama: s, peran: '' });
           }
         } else if (item && typeof item === 'object') {
           const rec = item as Record<string, unknown>;
-          const nama = extractTextField(rec, ['nama', 'nama_lengkap', 'name', 'petugas', 'pengisi'], '');
-          const peran = extractTextField(rec, ['peran', 'tugas', 'jabatan', 'role', 'sebagai'], '');
-          if (nama) out.push({ nama, peran });
+          const idRef = String(
+            rec.pengurus_id ||
+              rec.santri_id ||
+              rec.person_id ||
+              rec.user_id ||
+              rec.anggota_id ||
+              rec.petugas_id ||
+              rec.pengisi_id ||
+              rec.id_santri ||
+              rec.id_pengurus ||
+              ''
+          );
+          let nama =
+            extractTextField(
+              rec,
+              [
+                'nama',
+                'nama_lengkap',
+                'nama_santri',
+                'nama_pengurus',
+                'nama_petugas',
+                'nama_pengisi',
+                'pengisi_nama',
+                'petugas_nama',
+                'santri_nama',
+                'pengurus_nama',
+                'name',
+                'petugas',
+                'pengisi',
+                'pelaksana',
+                'pemateri',
+                'narasumber',
+                'ustadz',
+                'orang',
+                'person',
+                'pic',
+                'anggota',
+                'peserta',
+                'value',
+                'isi',
+              ],
+              ''
+            ) ||
+            extractNestedPersonName(rec.santri) ||
+            extractNestedPersonName(rec.pengurus) ||
+            extractNestedPersonName(rec.user) ||
+            extractNestedPersonName(rec.anggota) ||
+            extractNestedPersonName(rec.petugas_obj) ||
+            extractNestedPersonName(rec.pengisi_obj) ||
+            (idRef ? personNameMap.get(idRef) || '' : '');
+
+          let peran = extractTextField(
+            rec,
+            [
+              'peran',
+              'tugas',
+              'jabatan',
+              'role',
+              'sebagai',
+              'bagian',
+              'posisi',
+              'peran_pengisi',
+              'keterangan',
+              '__fallbackPeran',
+            ],
+            ''
+          );
+
+          if (!peran && ('value' in rec || 'isi' in rec)) {
+            peran = extractTextField(rec, ['label', 'key', 'nama_peran'], '');
+          }
+
+          if (!nama && typeof rec.label === 'string' && rec.label.trim()) {
+            nama = rec.label.trim();
+          }
+
+          if (!nama) {
+            for (const [k, v] of Object.entries(rec)) {
+              if (typeof v !== 'string') continue;
+              const tv = v.trim();
+              if (!tv || tv === '-' || uuidRx.test(tv) || isoRx.test(tv)) continue;
+              if (/nama|pengisi|petugas|santri|pengurus|person|pic|orang|user|anggota|pemateri/i.test(k)) {
+                nama = tv;
+                break;
+              }
+            }
+          }
+
+          if (!peran) {
+            for (const [k, v] of Object.entries(rec)) {
+              if (typeof v !== 'string') continue;
+              const tv = v.trim();
+              if (!tv || tv === '-' || tv === nama || uuidRx.test(tv) || isoRx.test(tv)) continue;
+              if (/peran|tugas|jabatan|role|bagian|posisi|sebagai|label|jenis|bidang/i.test(k)) {
+                peran = tv;
+                break;
+              }
+            }
+          }
+
+          if (nama && nama !== '-') {
+            rawOut.push({ nama, peran: peran === '-' ? '' : peran });
+          }
         }
       }
-      return out;
+
+      const deduped: Array<{ nama: string; peran: string }> = [];
+      const seen = new Set<string>();
+      for (const entry of rawOut) {
+        const cleanNama = entry.nama.trim();
+        const cleanPeran = entry.peran.trim();
+        if (!cleanNama || cleanNama === '-') continue;
+        const key = `${cleanNama.toLowerCase()}||${cleanPeran.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push({ nama: cleanNama, peran: cleanPeran });
+      }
+      return deduped;
     };
+
+    const normalizeKey = (v: unknown) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const fallbackPengisiMap = new Map<string, Array<{ nama: string; peran: string }>>();
+    const addFallbackPengisi = (keyRaw: unknown, items: Array<{ nama: string; peran: string }>) => {
+      const k = normalizeKey(keyRaw);
+      if (!k || items.length === 0) return;
+      const existing = fallbackPengisiMap.get(k) || [];
+      const merged = [...existing];
+      const seen = new Set(existing.map((x) => `${x.nama.toLowerCase()}||${x.peran.toLowerCase()}`));
+      for (const it of items) {
+        const sig = `${it.nama.toLowerCase()}||${it.peran.toLowerCase()}`;
+        if (!seen.has(sig)) {
+          seen.add(sig);
+          merged.push(it);
+        }
+      }
+      fallbackPengisiMap.set(k, merged);
+    };
+
+    const inspectBundleValue = (val: unknown, depth = 0) => {
+      if (!val || depth > 4) return;
+      if (Array.isArray(val)) {
+        for (const entry of val) {
+          if (!entry || typeof entry !== 'object') continue;
+          const rec = entry as Record<string, unknown>;
+          const judul = extractTextField(rec, ['judul', 'nama_kegiatan', 'judul_kegiatan', 'agenda_judul', 'nama', 'kegiatan'], '');
+          const idKey = rec.id ?? rec.kegiatan_id ?? rec.agenda_id ?? rec.kegiatan_agenda_id ?? rec.kode_kegiatan;
+          const candidates = [
+            rec.pengisiList,
+            rec.pengisi_list,
+            rec.susunanPengisi,
+            rec.susunan_pengisi,
+            rec.daftarPengisi,
+            rec.daftar_pengisi,
+            rec.pengisiAcara,
+            rec.pengisi_acara,
+            rec.pengisi,
+            rec.petugasList,
+            rec.petugas_list,
+            rec.susunanPetugas,
+            rec.susunan_petugas,
+            rec.daftarPetugas,
+            rec.daftar_petugas,
+            rec.petugas,
+            rec.susunan,
+            rec.rundown,
+            rec.detailPengisi,
+            rec.detail_pengisi,
+            rec.pengisiText,
+            rec.petugasText,
+          ];
+          let parsed: Array<{ nama: string; peran: string }> = [];
+          for (const c of candidates) {
+            if (c !== null && c !== undefined) {
+              const p = parsePengisi(c);
+              if (p.length > 0) {
+                parsed = p;
+                break;
+              }
+            }
+          }
+          if (parsed.length === 0 && (rec.kegiatan_id || rec.agenda_id || rec.kegiatan_agenda_id || rec.judul_kegiatan || rec.agenda_judul)) {
+            parsed = parsePengisi([rec]);
+          }
+          if (parsed.length > 0) {
+            if (idKey) addFallbackPengisi(idKey, parsed);
+            if (rec.kode_kegiatan) addFallbackPengisi(rec.kode_kegiatan, parsed);
+            if (judul) addFallbackPengisi(judul, parsed);
+          }
+        }
+      } else if (typeof val === 'object') {
+        for (const sub of Object.values(val as Record<string, unknown>)) {
+          inspectBundleValue(sub, depth + 1);
+        }
+      }
+    };
+
+    const bundleGiatObj =
+      bundle && typeof bundle === 'object'
+        ? ((bundle as unknown as Record<string, unknown>).kegiatan as Record<string, unknown> | undefined)
+        : undefined;
+    if (bundleGiatObj) {
+      inspectBundleValue(bundleGiatObj);
+    }
+
+    if (rawData && typeof rawData === 'object') {
+      for (const [k, val] of Object.entries(rawData as unknown as Record<string, unknown>)) {
+        if (!Array.isArray(val) || val.length === 0) continue;
+        const first = val[0];
+        if (!first || typeof first !== 'object') continue;
+        const sample = first as Record<string, unknown>;
+        const isChildPengisiArr =
+          /pengisi|petugas|panitia|rundown/i.test(k) ||
+          'kegiatan_id' in sample ||
+          'agenda_id' in sample ||
+          'kegiatan_agenda_id' in sample ||
+          'id_kegiatan' in sample ||
+          'id_agenda' in sample;
+        if (!isChildPengisiArr) continue;
+        for (const item of val) {
+          if (!item || typeof item !== 'object') continue;
+          const rec = item as Record<string, unknown>;
+          const parsed = parsePengisi([rec]);
+          if (parsed.length === 0) continue;
+          for (const fk of [
+            rec.kegiatan_id,
+            rec.agenda_id,
+            rec.kegiatan_agenda_id,
+            rec.id_kegiatan,
+            rec.id_agenda,
+            rec.kode_kegiatan,
+            rec.agenda_kode,
+            rec.judul_kegiatan,
+            rec.nama_kegiatan,
+            rec.agenda_judul,
+          ]) {
+            if (fk) addFallbackPengisi(fk, parsed);
+          }
+        }
+      }
+    }
 
     const formatStatus = (
       rawStatus: string
@@ -1441,7 +1998,105 @@ export default function PusatLaporanPage() {
       const kategori = extractTextField(row, ['kategori', 'jenis', 'bidang'], 'Agenda Pondok');
       const lokasi = extractTextField(row, ['lokasi', 'tempat', 'ruangan'], '-');
       const pj = extractTextField(row, ['penanggung_jawab', 'pj', 'koordinator', 'ketua'], '-');
-      const pengisiList = parsePengisi(row.pengisi_list ?? row.pengisi ?? row.petugas_list);
+
+      const pengisiFieldCandidates: unknown[] = [
+        row.pengisi_list,
+        row.susunan_pengisi,
+        row.daftar_pengisi,
+        row.pengisi_acara,
+        row.pengisi,
+        row.petugas_list,
+        row.susunan_petugas,
+        row.daftar_petugas,
+        row.petugas,
+        row.petugas_acara,
+        row.tim_pelaksana,
+        row.panitia,
+        row.panitia_list,
+        row.rundown,
+        row.susunan_acara,
+        row.detail_pengisi,
+        row.pengisi_kegiatan,
+        row.petugas_kegiatan,
+        row.pemateri,
+        row.narasumber,
+        row.pengisi_json,
+        row.kegiatan_pengisi,
+        row.kegiatan_petugas,
+      ];
+      for (const [dynKey, dynVal] of Object.entries(row)) {
+        if (
+          /pengisi|petugas|panitia|pemateri|narasumber|rundown/i.test(dynKey) &&
+          !/id$|foto|url|jumlah|total|count/i.test(dynKey)
+        ) {
+          pengisiFieldCandidates.push(dynVal);
+        }
+      }
+
+      let pengisiList: Array<{ nama: string; peran: string }> = [];
+      for (const cand of pengisiFieldCandidates) {
+        if (cand === null || cand === undefined) continue;
+        const parsed = parsePengisi(cand);
+        if (parsed.length > 0) {
+          pengisiList = parsed;
+          break;
+        }
+      }
+
+      if (pengisiList.length === 0) {
+        const discreteRoles: Array<[string, string]> = [
+          ['mc', 'MC'],
+          ['pembawa_acara', 'MC'],
+          ['qori', 'Qori'],
+          ['imam', 'Imam'],
+          ['kultum', 'Kultum'],
+          ['penceramah', 'Penceramah'],
+          ['pemateri', 'Pemateri'],
+          ['moderator', 'Moderator'],
+          ['doa', 'Doa'],
+          ['sambutan', 'Sambutan'],
+          ['dirigen', 'Dirigen'],
+        ];
+        for (const [field, label] of discreteRoles) {
+          const val = extractTextField(row, [field], '');
+          if (val && val !== '-') {
+            pengisiList.push({ nama: val, peran: label });
+          }
+        }
+      }
+
+      if (pengisiList.length === 0) {
+        const notesBlob = [row.notulensi, row.deskripsi, row.keterangan, row.catatan]
+          .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          .join('\n');
+        if (notesBlob) {
+          const roleLineMatches = notesBlob.matchAll(
+            /^(?:[-*•]\s*)?(Pengisi|Petugas|MC|Pembawa Acara|Qori|Imam|Pemateri|Penceramah|Moderator|Kultum|Doa|Sambutan|Dirigen)\s*:\s*(.+)$/gim
+          );
+          for (const m of roleLineMatches) {
+            const roleLabel = m[1].trim();
+            const valText = m[2].trim();
+            if (valText && valText !== '-') {
+              if (/^(?:pengisi|petugas)$/i.test(roleLabel)) {
+                pengisiList.push(...parsePengisi(valText));
+              } else {
+                pengisiList.push({ nama: valText, peran: roleLabel });
+              }
+            }
+          }
+        }
+      }
+
+      if (pengisiList.length === 0) {
+        for (const fk of [row.id, row.kode_kegiatan, judul]) {
+          const hit = fallbackPengisiMap.get(normalizeKey(fk));
+          if (hit && hit.length > 0) {
+            pengisiList = hit;
+            break;
+          }
+        }
+      }
+
       const st = formatStatus(String(row.status || ''));
 
       out.push({
@@ -1460,12 +2115,12 @@ export default function PusatLaporanPage() {
     });
 
     out.sort((a, b) => {
-      const dCmp = a.tanggalIso.localeCompare(b.tanggalIso);
+      const dCmp = compareIsoAsc(a.tanggalIso, b.tanggalIso);
       if (dCmp !== 0) return dCmp;
       return a.waktuText.localeCompare(b.waktuText);
     });
     return out;
-  }, [activeRange, extraRaw.kegiatanRows]);
+  }, [activeRange, extraRaw.kegiatanRows, extraRaw.santriRows, pengurusRows, bundle, rawData]);
 
   const dapurExtraReports = useMemo(() => {
     const { start, end } = activeRange;
@@ -1560,15 +2215,27 @@ export default function PusatLaporanPage() {
       absenTotals.total > 0 ? Math.round((absenTotals.hadir / absenTotals.total) * 100) : 0;
 
     // 2. Buku Kas Harian Belanja Masak Dapur (Buku 1 • Anggaran Pondok)
+    const getBuku1TipeRank = (row: Record<string, unknown>): number => {
+      const tipe = String(row.tipe || '').toLowerCase();
+      if (tipe === 'jatah_harian') return 1;
+      if (tipe === 'subsidi_jualan_malam') return 2;
+      if (tipe === 'belanja_pagi' || tipe.includes('pagi')) return 3;
+      if (tipe === 'belanja_sore' || tipe.includes('sore')) return 4;
+      return 5;
+    };
+
     const b1Asc = [...extraRaw.dapurBukuMasakRows]
       .map((r) => ({
         row: r,
         iso: extractRowDateIso(r),
+        tipeRank: getBuku1TipeRank(r),
         createdAt: String(r.created_at || ''),
       }))
       .filter((x) => !end || !x.iso || x.iso <= end)
       .sort((a, b) => {
-        if (a.iso !== b.iso) return a.iso.localeCompare(b.iso);
+        const dCmp = compareIsoAsc(a.iso, b.iso);
+        if (dCmp !== 0) return dCmp;
+        if (a.tipeRank !== b.tipeRank) return a.tipeRank - b.tipeRank;
         return a.createdAt.localeCompare(b.createdAt);
       });
 
@@ -1638,10 +2305,7 @@ export default function PusatLaporanPage() {
         createdAt: String(r.created_at || ''),
       }))
       .filter((x) => !end || !x.iso || x.iso <= end)
-      .sort((a, b) => {
-        if (a.iso !== b.iso) return a.iso.localeCompare(b.iso);
-        return a.createdAt.localeCompare(b.createdAt);
-      });
+      .sort((a, b) => compareIsoAsc(a.iso, b.iso, a.createdAt, b.createdAt));
 
     let b2Saldo = 0;
     let b2Omzet = 0;
@@ -1704,14 +2368,14 @@ export default function PusatLaporanPage() {
         belanjaPagiSore: b1BelanjaPagiSore,
         subsidiMasuk: b1SubsidiMasuk,
         sisaSaldo: b1Saldo,
-        mutations: b1Mutations.slice().reverse(),
+        mutations: b1Mutations,
       },
       buku2: {
         omzet: b2Omzet,
         modal: b2Modal,
         subsidiKeluar: b2SubsidiKeluar,
         saldoBersih: b2Saldo,
-        transactions: b2Transactions.slice().reverse(),
+        transactions: b2Transactions,
       },
     };
   }, [
@@ -1779,14 +2443,25 @@ export default function PusatLaporanPage() {
     const matchDewanHarianRole = (rawJabatan: string, targetSlot: string): boolean => {
       const j = (rawJabatan || '').trim().toLowerCase();
       const t = targetSlot.toLowerCase();
-      if (j === t) return true;
-      const isWakil = /\bwakil\b/.test(j);
-      if (t === 'kepala pondok') return !isWakil && /\b(?:kepala|ketua)\s+pondok\b/.test(j);
-      if (t === 'wakil kepala pondok') return isWakil && /\b(?:kepala|ketua)\s+pondok\b/.test(j);
-      if (t === 'sekretaris') return !isWakil && /\bsekretaris\b/.test(j);
-      if (t === 'wakil sekretaris') return isWakil && /\bsekretaris\b/.test(j);
-      if (t === 'bendahara') return !isWakil && /\bbendahara\b/.test(j);
-      if (t === 'wakil bendahara') return isWakil && /\bbendahara\b/.test(j);
+      const isWakil = j.includes('wakil');
+      if (t === 'kepala pondok') {
+        return !isWakil && (j.includes('kepala pondok') || j.includes('ketua pondok'));
+      }
+      if (t === 'wakil kepala pondok') {
+        return isWakil && (j.includes('kepala pondok') || j.includes('ketua pondok'));
+      }
+      if (t === 'sekretaris') {
+        return !isWakil && j.includes('sekretaris');
+      }
+      if (t === 'wakil sekretaris') {
+        return isWakil && j.includes('sekretaris');
+      }
+      if (t === 'bendahara') {
+        return !isWakil && j.includes('bendahara');
+      }
+      if (t === 'wakil bendahara') {
+        return isWakil && j.includes('bendahara');
+      }
       return false;
     };
 
@@ -2419,6 +3094,24 @@ export default function PusatLaporanPage() {
           )
           .forEach((node) => node.remove());
         docRoot
+          .querySelectorAll<HTMLTableSectionElement>('tbody')
+          .forEach((tb) => {
+            const rec = tb as unknown as { __siapOrigRows?: Element[] };
+            if (Array.isArray(rec.__siapOrigRows)) {
+              rec.__siapOrigRows.forEach((r) => tb.appendChild(r));
+              delete rec.__siapOrigRows;
+            }
+          });
+        docRoot
+          .querySelectorAll('[data-siap-sorted-asc="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-sorted-asc'));
+        docRoot
+          .querySelectorAll('[data-siap-hidden-cover-author="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-hidden-cover-author'));
+        docRoot
+          .querySelectorAll('[data-siap-cover-date-right="true"]')
+          .forEach((node) => node.removeAttribute('data-siap-cover-date-right'));
+        docRoot
           .querySelectorAll<HTMLElement>('[data-siap-orig-text]')
           .forEach((node) => {
             const orig = node.getAttribute('data-siap-orig-text');
@@ -2808,6 +3501,76 @@ export default function PusatLaporanPage() {
         });
         targetCakupanWrap.appendChild(cakupanGrid);
       }
+
+      // 0a-2. Hapus total "Disusun oleh: ..." pada halaman Cover dan sisakan "Dicetak: ..." di sisi kanan bawah
+      const firstBabNode = outermostDivSections[0] || div1ScopeEl || null;
+      const isInCoverArea = (el: HTMLElement): boolean => {
+        if (el === searchContainer) return false;
+        if (outermostDivSections.some((d) => el === d || d.contains(el) || el.contains(d))) return false;
+        if (approvalEl && (el === approvalEl || approvalEl.contains(el) || el.contains(approvalEl))) return false;
+        if (
+          firstBabNode &&
+          !(el.compareDocumentPosition(firstBabNode) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ) {
+          return false;
+        }
+        return true;
+      };
+
+      const authorBlocks = Array.from(
+        searchContainer.querySelectorAll<HTMLElement>('div, p, span, footer, section')
+      ).filter((el) => {
+        if (!isInCoverArea(el)) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!txt || txt.length > 450) return false;
+        if (/cakupan\s+data\s+laporan|laporan\s+gabungan\s+pengurus/i.test(txt)) return false;
+        if (/dicetak\s*:/i.test(txt)) return false;
+        return /disusun\s+oleh/i.test(txt);
+      });
+
+      const outermostAuthorBlocks = authorBlocks.filter(
+        (cand) => !authorBlocks.some((other) => other !== cand && cand.contains(other))
+      );
+
+      outermostAuthorBlocks.forEach((blk) => {
+        blk.setAttribute('data-siap-hidden-cover-author', 'true');
+        const parent = blk.parentElement;
+        if (parent && isInCoverArea(parent)) {
+          const sibs = Array.from(parent.children) as HTMLElement[];
+          const dateSib = sibs.find(
+            (s) => s !== blk && /dicetak\s*:/i.test((s.textContent || '').trim())
+          );
+          if (dateSib) {
+            dateSib.setAttribute('data-siap-cover-date-right', 'true');
+          }
+        }
+      });
+
+      // Fallback apabila "Disusun oleh:" dan "Dicetak:" berada dalam elemen yang sama tanpa pembungkus terpisah
+      Array.from(searchContainer.querySelectorAll<HTMLElement>('div, p, span')).forEach((el) => {
+        if (!isInCoverArea(el)) return;
+        if (el.closest('[data-siap-hidden-cover-author="true"]')) return;
+        if (el.children.length > 0) return;
+        const rawTxt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/disusun\s+oleh/i.test(rawTxt) && /dicetak\s*:/i.test(rawTxt)) {
+          if (!el.hasAttribute('data-siap-orig-text')) {
+            el.setAttribute('data-siap-orig-text', el.textContent || '');
+          }
+          const onlyDate = rawTxt.replace(/^[\s\S]*?(Dicetak\s*:[\s\S]*)$/i, '$1').trim();
+          el.textContent = onlyDate;
+          el.setAttribute('data-siap-cover-date-right', 'true');
+        }
+      });
+
+      // Pastikan elemen "Dicetak: ..." di Cover tetap berada di sisi kanan bawah
+      Array.from(searchContainer.querySelectorAll<HTMLElement>('div, p, span')).forEach((el) => {
+        if (!isInCoverArea(el)) return;
+        if (el.closest('[data-siap-hidden-cover-author="true"]')) return;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/^dicetak\s*:/i.test(txt) && txt.length < 120 && el.children.length <= 2) {
+          el.setAttribute('data-siap-cover-date-right', 'true');
+        }
+      });
     }
 
     // 0b. Penataan Grafik di Ringkasan Eksekutif -> Pindahkan ke Bab II (Keuangan) & Bab VIII (Dapur)
@@ -4116,9 +4879,9 @@ export default function PusatLaporanPage() {
           }
         }
 
-        // Sapu bersih seluruh blok teks/tabel struktur personalia lama berformat titik dua (termasuk II. PLENO, H. Dewan Pengasuh (Dzurriyah), L. Pengasuh Pondok)
+        // Sapu bersih seluruh blok teks/tabel struktur personalia lama berformat titik dua (termasuk I. DEWAN HARIAN, II. PLENO, H. Dewan Pengasuh (Dzurriyah), L. Pengasuh Pondok, M. Sie Koperasi)
         const postScanEls = Array.from(
-          adminScopeEl.querySelectorAll('div, section, table, ul, ol, p, h3, h4, h5, h6')
+          adminScopeEl.querySelectorAll('div, section, table, ul, ol, p, h3, h4, h5, h6, li, tr')
         ) as HTMLElement[];
         const duplicateOldBlocks = postScanEls.filter((el) => {
           if (el === adminScopeEl || el === searchContainer) return false;
@@ -4133,7 +4896,7 @@ export default function PusatLaporanPage() {
           const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
           if (txt.length === 0 || txt.length > 25000) return false;
           if (
-            /\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar|Santri\s+Aktif|Santri\s+Ndalem|Mutasi\s+Santri/i.test(
+            /\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar|Santri\s+Aktif|Santri\s+Ndalem|Mutasi\s+Santri|Administrasi\s*&\s*Data\s+Santri/i.test(
               txt
             )
           ) {
@@ -4143,13 +4906,25 @@ export default function PusatLaporanPage() {
             /\bI\.\s*DEWAN\s*HARIAN\b/i.test(txt) ||
             /\bII\.\s*PLENO\b/i.test(txt) ||
             /pengasuh|dzurriyah|direktur\s+pendidikan/i.test(txt) ||
-            /\b[A-L]\.\s*(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Sie\s+Kegiatan|Sie\s+Keamanan|Sie\s+Kesehatan|Sie\s+Kebersihan|Sie\s+Sarpras|Sie\s+Dapur|Sie\s+Koperasi|Sie\s+Koprasi|Sie\s+Laundry|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\b/i.test(
+            /\b[A-M]\.\s*(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Direktur\s+Pendidikan|Sie\s+Kegiatan|Sie\s+Keamanan|Sie\s+Kesehatan|Sie\s+Kebersihan|Sie\s+Sarpras|Sie\s+Dapur|Sie\s+Koperasi|Sie\s+Koprasi|Sie\s+Laundry|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\b/i.test(
+              txt
+            ) ||
+            /^\s*(?:\d+\.\s*)?(?:Pengasuh\s+Pondok|Dewan\s+Pengasuh|Direktur\s+Pendidikan|Kepala\s+Pondok|Wakil\s+Kepala\s+Pondok|Sekretaris|Wakil\s+Sekretaris|Bendahara|Wakil\s+Bendahara|Sie\s+(?:Kegiatan|Keamanan|Kesehatan|Kebersihan|Sarpras|Dapur|Koperasi|Koprasi|Laundry)|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\s*:/i.test(
               txt
             ) ||
             (/Kepala\s+Pondok/i.test(txt) && /Sekretaris/i.test(txt) && /Bendahara/i.test(txt))
           );
         });
+        if (!cloneWrap && duplicateOldBlocks.length > 0 && duplicateOldBlocks[0].parentElement) {
+          cloneWrap = document.createElement('div');
+          cloneWrap.setAttribute('data-siap-personalia-clone', 'true');
+          cloneWrap.setAttribute('data-siap-page-start', 'true');
+          cloneWrap.className = 'break-before-page print:break-before-page';
+          cloneWrap.innerHTML = personaliaSource.innerHTML;
+          duplicateOldBlocks[0].parentElement.insertBefore(cloneWrap, duplicateOldBlocks[0]);
+        }
         for (const oldBlk of duplicateOldBlocks) {
+          if (cloneWrap && (oldBlk === cloneWrap || oldBlk.contains(cloneWrap))) continue;
           oldBlk.setAttribute('data-siap-hidden-personalia', 'true');
         }
       }
@@ -4624,6 +5399,96 @@ export default function PusatLaporanPage() {
         tableClone.className = 'mt-3 space-y-2';
         tableClone.innerHTML = kegiatanTableSource.innerHTML;
 
+        // Fallback DOM: jika ada baris dengan Susunan Pengisi / Petugas masih '-', cek konten asli LaporanDocument di div3El
+        const domPengisiByTitle = new Map<string, string[]>();
+        const escapeRx = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const trRows = Array.from(tableClone.querySelectorAll('tbody tr'));
+        const rowTitles = trRows
+          .map((tr) => (tr.children[2]?.querySelector('span')?.textContent || '').replace(/\s+/g, ' ').trim())
+          .filter(Boolean);
+
+        if (rowTitles.length > 0) {
+          const domSearchContainers = [...agendaBlocksToHide, ...outermostPengisi];
+          for (const container of domSearchContainers) {
+            const cText = (container.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!cText) continue;
+            // Cek baris tabel asli jika ada
+            container.querySelectorAll('tbody tr').forEach((origTr) => {
+              const cells = Array.from(origTr.children).map((c) => (c.textContent || '').replace(/\s+/g, ' ').trim());
+              if (cells.length < 2) return;
+              const matchedTitle = rowTitles.find((t) =>
+                cells.some((c) => c.toLowerCase().includes(t.toLowerCase()))
+              );
+              if (!matchedTitle) return;
+              const pengisiCell = cells.find(
+                (c) =>
+                  c !== '-' &&
+                  !c.toLowerCase().includes(matchedTitle.toLowerCase()) &&
+                  (/pengisi|petugas|mc|qori|imam|pemateri|moderator|kultum/i.test(c) || /\d+[.)]/.test(c))
+              );
+              if (pengisiCell) {
+                domPengisiByTitle.set(matchedTitle.toLowerCase(), pengisiCell.split(/\s*[;\n]+\s*/).filter(Boolean));
+              }
+            });
+            // Cek kartu agenda asli jika ada label Pengisi: / Petugas:
+            const rawContainerText =
+              container instanceof HTMLElement && container.innerText ? container.innerText : cText;
+            for (const title of rowTitles) {
+              if (domPengisiByTitle.has(title.toLowerCase())) continue;
+              const rx = new RegExp(
+                `${escapeRx(title)}[\\s\\S]{0,400}?(?:Susunan\\s+)?(?:Pengisi|Petugas)\\s*[:\\-]\\s*([^\\n]+)`,
+                'i'
+              );
+              const match = rawContainerText.match(rx);
+              if (match && match[1]) {
+                const rawVal = match[1]
+                  .replace(/\s*(?:Status|Lokasi|Penanggung\s+Jawab|PJ)\s*:.*$/i, '')
+                  .trim();
+                if (rawVal && rawVal !== '-' && !/^belum\s+ada/i.test(rawVal)) {
+                  domPengisiByTitle.set(
+                    title.toLowerCase(),
+                    rawVal
+                      .split(/\s*[;,]\s*|\n+/)
+                      .map((x: string) => x.trim())
+                      .filter(Boolean)
+                  );
+                }
+              }
+            }
+          }
+        }
+
+        trRows.forEach((tr) => {
+          const pengisiTd = tr.children[4] as HTMLElement | undefined;
+          const titleText = (tr.children[2]?.querySelector('span')?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+          if (!pengisiTd || !titleText) return;
+          if ((pengisiTd.textContent || '').trim() === '-') {
+            const domItems = domPengisiByTitle.get(titleText);
+            if (domItems && domItems.length > 0) {
+              pengisiTd.innerHTML = '';
+              const listWrap = document.createElement('div');
+              listWrap.className = 'space-y-0.5';
+              domItems.forEach((entryTxt, eIdx) => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'text-slate-800 break-words';
+                const numSpan = document.createElement('span');
+                numSpan.className = 'font-mono text-slate-500 mr-1';
+                numSpan.textContent = `${eIdx + 1}.`;
+                const txtSpan = document.createElement('span');
+                txtSpan.className = 'font-semibold';
+                txtSpan.textContent = entryTxt.replace(/^\d+[.)]\s*/, '');
+                lineDiv.appendChild(numSpan);
+                lineDiv.appendChild(txtSpan);
+                listWrap.appendChild(lineDiv);
+              });
+              pengisiTd.appendChild(listWrap);
+            }
+          }
+        });
+
         if (agendaBlocksToHide.length > 0) {
           agendaBlocksToHide[0].parentElement?.insertBefore(tableClone, agendaBlocksToHide[0]);
           agendaBlocksToHide.forEach((blk) =>
@@ -4842,6 +5707,283 @@ export default function PusatLaporanPage() {
       }
     });
 
+    // 3c. Urutkan SELURUH tabel kronologis di semua Bab (Bab I..XIII) dari tanggal paling awal ke paling akhir (Ascending)
+    const activeStartYear = Number((activeRange.start || '').slice(0, 4)) || new Date().getFullYear();
+    const activeEndYear = Number((activeRange.end || '').slice(0, 4)) || activeStartYear;
+
+    const parseTableDateMs = (rawText: string): number => {
+      const cleaned = (rawText || '').replace(/\s+/g, ' ').trim();
+      if (!cleaned || cleaned === '-') return Number.NaN;
+
+      const isoMatch = cleaned.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+      if (isoMatch) {
+        return Date.UTC(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+      }
+
+      const dmyFullMatch = cleaned.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/);
+      if (dmyFullMatch) {
+        const d = Number(dmyFullMatch[1]);
+        const m = Number(dmyFullMatch[2]);
+        let y = Number(dmyFullMatch[3]);
+        if (y < 100) y += 2000;
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return Date.UTC(y, m - 1, d);
+        }
+      }
+
+      const monthTextMatch = cleaned
+        .toLowerCase()
+        .match(
+          /\b(\d{1,2})\s+(jan|januari|feb|februari|mar|maret|apr|april|mei|may|jun|juni|jul|juli|agu|ags|agustus|aug|sep|sept|september|okt|oktober|oct|nov|november|des|desember|dec)(?:\s+(20\d{2}))?\b/
+        );
+      if (monthTextMatch) {
+        const extraMap: Record<string, string> = {
+          ...SHORT_ID_MONTH_MAP,
+          may: '05',
+          aug: '08',
+          oct: '10',
+          dec: '12',
+        };
+        const d = Number(monthTextMatch[1]);
+        const m = Number(extraMap[monthTextMatch[2]] || '0');
+        let y = monthTextMatch[3] ? Number(monthTextMatch[3]) : activeEndYear;
+        if (!monthTextMatch[3] && activeStartYear !== activeEndYear) {
+          y = m >= 11 ? activeStartYear : activeEndYear;
+        }
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return Date.UTC(y, m - 1, d);
+        }
+      }
+
+      const dmShortMatch = cleaned.match(/\b(\d{1,2})[\/-](\d{1,2})\b/);
+      if (dmShortMatch) {
+        const d = Number(dmShortMatch[1]);
+        const m = Number(dmShortMatch[2]);
+        let y = activeEndYear;
+        if (activeStartYear !== activeEndYear) {
+          y = m >= 11 ? activeStartYear : activeEndYear;
+        }
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return Date.UTC(y, m - 1, d);
+        }
+      }
+
+      return Number.NaN;
+    };
+
+    const parseShiftRank = (txt: string): number => {
+      const lower = (txt || '').toLowerCase();
+      if (/\bpagi\b|\bsubuh\b/.test(lower)) return 1;
+      if (/\bsiang\b|\bdzuhur\b/.test(lower)) return 2;
+      if (/\bsore\b|\bashar\b/.test(lower)) return 3;
+      if (/\bmalam\b|\bmaghrib\b|\bisya\b/.test(lower)) return 4;
+      return 9;
+    };
+
+    const parseTimeMinutes = (txt: string): number => {
+      const m = (txt || '').match(/\b(\d{1,2})[:.](\d{2})\b/);
+      if (!m) return 9999;
+      const hh = Number(m[1]);
+      const mm = Number(m[2]);
+      if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return hh * 60 + mm;
+      return 9999;
+    };
+
+    const parseSignedNominal = (txt: string): number | null => {
+      const cleaned = (txt || '').replace(/\s+/g, ' ').trim();
+      if (!cleaned || cleaned === '-') return null;
+      const isNeg = cleaned.startsWith('-');
+      const digits = cleaned.replace(/[^\d]/g, '');
+      if (!digits) return null;
+      const val = Number(digits);
+      if (!Number.isFinite(val)) return null;
+      return isNeg ? -val : val;
+    };
+
+    searchContainer.querySelectorAll<HTMLTableElement>('table').forEach((tbl) => {
+      if (tbl.closest('[data-siap-hidden-personalia="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-approval="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-kamar="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-perizinan="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-tunggakan="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-kegiatan-list="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-kegiatan-foto="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-dup="true"]')) return;
+      if (tbl.closest('[data-siap-hidden-chart="true"]')) return;
+      if (tbl.closest('[data-siap-personalia-clone="true"]')) return;
+      if (tbl.closest('[data-siap-kamar-grid="true"]')) return;
+      if (tbl.closest('[data-siap-approval="true"]')) return;
+      if (tbl.hasAttribute('data-siap-tunggakan-table')) return;
+      if (tbl.hasAttribute('data-siap-izin-table')) return;
+      if (tbl.closest('[data-siap-kegiatan-table-clone="true"]')) return;
+      if (tbl.closest('[data-siap-dapur-extra-clone="true"]')) return;
+
+      const thead = tbl.querySelector('thead');
+      const tbody = tbl.querySelector('tbody');
+      if (!thead || !tbody) return;
+
+      const headers = Array.from(thead.querySelectorAll('th, td')).map((h) =>
+        (h.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+      );
+      if (headers.some((h) => h.includes('bulan menunggak') || h.includes('musyrif') || h.includes('jabatan'))) {
+        return;
+      }
+
+      let dateColIdx = headers.findIndex(
+        (h) =>
+          /^(?:tgl|tanggal)$/.test(h) ||
+          /^(?:tgl|tanggal)\s+(?:kejadian|periksa|sakit|masak|pulang|keluar|lapor|setor|transaksi|daftar|kegiatan|mulai|pelanggaran|nota|mutasi)\b/.test(
+            h
+          )
+      );
+      if (dateColIdx === -1) {
+        dateColIdx = headers.findIndex(
+          (h) =>
+            (h.includes('tanggal') || /\btgl\b/.test(h) || h.includes('hari / tgl') || h.includes('waktu')) &&
+            !/rencana|batas|estimasi|tgl\s*masuk|tanggal\s*masuk/.test(h)
+        );
+      }
+      if (dateColIdx === -1) return;
+
+      const shiftColIdx = headers.findIndex((h) => /\b(?:shift|sesi|waktu\s*masak)\b/.test(h));
+      const noColIdx = headers.findIndex((h) => /^no\.?$/.test(h));
+      const saldoColIdx = headers.findIndex((h) => /^saldo\b/.test(h));
+      const masukColIdx = headers.findIndex((h) => /\bmasuk\b|\bdebet\b|\bdebit\b/.test(h));
+      const keluarColIdx = headers.findIndex((h) => /\bkeluar\b|\bkredit\b/.test(h));
+      const nominalColIdx = headers.findIndex((h) => /\bnominal\b|\bjumlah\b/.test(h));
+      const jenisColIdx = headers.findIndex((h) => /\bjenis\b|\bkategori\b|\barah\b/.test(h));
+
+      const rawChildren = Array.from(tbody.children) as HTMLTableRowElement[];
+      if (rawChildren.length < 2) return;
+
+      const summaryRows: HTMLTableRowElement[] = [];
+      const dataItems: Array<{
+        tr: HTMLTableRowElement;
+        cells: HTMLElement[];
+        dateMs: number;
+        shiftRank: number;
+        timeMinutes: number;
+        origIdx: number;
+        saldoVal: number | null;
+        deltaVal: number | null;
+      }> = [];
+
+      rawChildren.forEach((tr, origIdx) => {
+        const cells = Array.from(tr.children) as HTMLElement[];
+        const hasColspan = cells.some((c) => ((c as HTMLTableCellElement).colSpan || 1) > 1);
+        const firstTxt = (cells[0]?.textContent || '').replace(/\s+/g, ' ').trim();
+        const fullRowTxt = (tr.textContent || '').replace(/\s+/g, ' ').trim();
+        if (
+          hasColspan ||
+          /^(?:total|jumlah|grand\s+total|saldo\s+akhir|rata-rata|belum\s+ada|tidak\s+ada)\b/i.test(
+            firstTxt
+          ) ||
+          /^(?:total\s+keseluruhan|grand\s+total)\b/i.test(fullRowTxt)
+        ) {
+          summaryRows.push(tr);
+          return;
+        }
+
+        const dateCellTxt = (cells[dateColIdx]?.textContent || '').replace(/\s+/g, ' ').trim();
+        const shiftCellTxt = shiftColIdx >= 0 ? (cells[shiftColIdx]?.textContent || '') : '';
+        const dateMs = parseTableDateMs(dateCellTxt);
+        const shiftRank = parseShiftRank(`${shiftCellTxt} ${fullRowTxt}`);
+        const timeMinutes = parseTimeMinutes(`${dateCellTxt} ${shiftCellTxt}`);
+
+        let deltaVal: number | null = null;
+        if (saldoColIdx >= 0) {
+          if (masukColIdx >= 0 && keluarColIdx >= 0) {
+            const mVal = parseSignedNominal(cells[masukColIdx]?.textContent || '') ?? 0;
+            const kVal = parseSignedNominal(cells[keluarColIdx]?.textContent || '') ?? 0;
+            deltaVal = Math.abs(mVal) - Math.abs(kVal);
+          } else if (nominalColIdx >= 0) {
+            const rawNom = (cells[nominalColIdx]?.textContent || '').trim();
+            const nVal = parseSignedNominal(rawNom);
+            if (nVal !== null) {
+              const jenisTxt = jenisColIdx >= 0 ? (cells[jenisColIdx]?.textContent || '').toLowerCase() : '';
+              const isOut = rawNom.startsWith('-') || /\bkeluar\b|\bbeban\b|\bbelanja\b|\bpengeluaran\b/.test(jenisTxt);
+              deltaVal = isOut ? -Math.abs(nVal) : Math.abs(nVal);
+            }
+          }
+        }
+        const saldoVal =
+          saldoColIdx >= 0 ? parseSignedNominal(cells[saldoColIdx]?.textContent || '') : null;
+
+        dataItems.push({
+          tr,
+          cells,
+          dateMs,
+          shiftRank,
+          timeMinutes,
+          origIdx,
+          saldoVal,
+          deltaVal,
+        });
+      });
+
+      const validDates = dataItems.filter((it) => !Number.isNaN(it.dateMs));
+      if (dataItems.length < 2 || validDates.length < 2) return;
+
+      const wasDescending = validDates[0].dateMs > validDates[validDates.length - 1].dateMs;
+
+      const tbStore = tbody as unknown as { __siapOrigRows?: Element[] };
+      if (!tbStore.__siapOrigRows) {
+        tbStore.__siapOrigRows = [...rawChildren];
+      }
+
+      const sorted = [...dataItems].sort((a, b) => {
+        const aValid = !Number.isNaN(a.dateMs);
+        const bValid = !Number.isNaN(b.dateMs);
+        if (aValid && bValid && a.dateMs !== b.dateMs) {
+          return a.dateMs - b.dateMs;
+        }
+        if (aValid !== bValid) return aValid ? -1 : 1;
+        if (a.shiftRank !== b.shiftRank) return a.shiftRank - b.shiftRank;
+        if (a.timeMinutes !== b.timeMinutes) return a.timeMinutes - b.timeMinutes;
+        return wasDescending ? b.origIdx - a.origIdx : a.origIdx - b.origIdx;
+      });
+
+      // Verifikasi kolom Saldo berjalan (jika ada) agar tetap akurat setelah urut ascending
+      if (saldoColIdx >= 0 && sorted.every((it) => it.saldoVal !== null && it.deltaVal !== null)) {
+        const isAscendingSaldoConsistent = sorted.every(
+          (it, idx) =>
+            idx === 0 ||
+            Math.abs((it.saldoVal as number) - ((sorted[idx - 1].saldoVal as number) + (it.deltaVal as number))) <= 1
+        );
+        const wasTopToBottomOnOrig = dataItems.every(
+          (it, idx) =>
+            idx === 0 ||
+            Math.abs((it.saldoVal as number) - ((dataItems[idx - 1].saldoVal as number) + (it.deltaVal as number))) <= 1
+        );
+        if (!isAscendingSaldoConsistent && wasTopToBottomOnOrig && wasDescending) {
+          let running = (dataItems[0].saldoVal as number) - (dataItems[0].deltaVal as number);
+          sorted.forEach((it) => {
+            running += it.deltaVal as number;
+            const saldoCell = it.cells[saldoColIdx];
+            if (saldoCell) {
+              if (!saldoCell.hasAttribute('data-siap-orig-text')) {
+                saldoCell.setAttribute('data-siap-orig-text', saldoCell.textContent || '');
+              }
+              saldoCell.textContent = formatRupiah(running);
+            }
+          });
+        }
+      }
+
+      sorted.forEach((it, idx) => {
+        if (noColIdx >= 0 && it.cells[noColIdx]) {
+          const noCell = it.cells[noColIdx];
+          if (!noCell.hasAttribute('data-siap-orig-text')) {
+            noCell.setAttribute('data-siap-orig-text', noCell.textContent || '');
+          }
+          noCell.textContent = String(idx + 1);
+        }
+        tbody.appendChild(it.tr);
+      });
+      summaryRows.forEach((sr) => tbody.appendChild(sr));
+      tbl.setAttribute('data-siap-sorted-asc', 'true');
+    });
+
     // 4. Seragamkan sudut agak lengkung (rounded-xl overflow-hidden border) pada seluruh kartu & tabel laporan
     searchContainer.querySelectorAll<HTMLTableElement>('table').forEach((tbl) => {
       if (tbl.closest('[data-siap-hidden-personalia="true"]')) return;
@@ -4916,6 +6058,8 @@ export default function PusatLaporanPage() {
     kegiatanLampiranFoto,
     dapurExtraReports,
     validChartData,
+    activeRange.start,
+    activeRange.end,
   ]);
 
   const handleRefresh = () => {
@@ -5462,6 +6606,7 @@ export default function PusatLaporanPage() {
       <style jsx global>{`
         [data-siap-hidden-personalia="true"],
         [data-siap-hidden-cakupan="true"],
+        [data-siap-hidden-cover-author="true"],
         [data-siap-hidden-approval="true"],
         [data-siap-hidden-kamar="true"],
         [data-siap-hidden-perizinan="true"],
@@ -5471,6 +6616,13 @@ export default function PusatLaporanPage() {
         [data-siap-hidden-dup="true"],
         [data-siap-hidden-chart="true"] {
           display: none !important;
+        }
+        #pusat-laporan-dokumen [data-siap-cover-date-right="true"],
+        [data-siap-laporan-doc="true"] [data-siap-cover-date-right="true"] {
+          margin-left: auto !important;
+          text-align: right !important;
+          justify-content: flex-end !important;
+          grid-column: 1 / -1 !important;
         }
         [data-siap-hidden-signature="true"] {
           visibility: hidden !important;
@@ -6221,7 +7373,7 @@ export default function PusatLaporanPage() {
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
                   BAGIAN II &bull; PLENO / DIVISI
                 </h5>
-                <div className="grid grid-cols-2 gap-3 text-[9.5pt] leading-snug">
+                <div className="grid grid-cols-2 gap-2.5 text-[9.5pt] leading-snug">
                   {strukturPersonalia.plenoSections.map((sec) => {
                     const isMusyrif = sec.letter === 'K';
                     const mid = Math.ceil(sec.members.length / 2);
