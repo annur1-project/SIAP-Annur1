@@ -146,17 +146,17 @@ const PLENO_DIVISI_ORDER: Array<{
   label: string;
   aliases: string[];
 }> = [
-  { letter: 'A', label: 'Sie Kegiatan', aliases: ['sie kegiatan'] },
-  { letter: 'B', label: 'Sie Keamanan', aliases: ['sie keamanan'] },
-  { letter: 'C', label: 'Sie Kesehatan', aliases: ['sie kesehatan'] },
-  { letter: 'D', label: 'Sie Kebersihan', aliases: ['sie kebersihan'] },
-  { letter: 'E', label: 'Sie Sarpras', aliases: ['sie sarpras'] },
-  { letter: 'F', label: 'Sie Dapur', aliases: ['sie dapur'] },
-  { letter: 'G', label: 'Operator EMIS', aliases: ['operator emis'] },
-  { letter: 'H', label: 'Sie Koperasi', aliases: ['sie koperasi', 'sie koprasi'] },
-  { letter: 'I', label: 'Sie Laundry', aliases: ['sie laundry'] },
+  { letter: 'A', label: 'Sie Kegiatan', aliases: ['sie kegiatan', 'divisi kegiatan', 'kegiatan'] },
+  { letter: 'B', label: 'Sie Keamanan', aliases: ['sie keamanan', 'divisi keamanan', 'keamanan'] },
+  { letter: 'C', label: 'Sie Kesehatan', aliases: ['sie kesehatan', 'divisi kesehatan', 'kesehatan', 'poskestren'] },
+  { letter: 'D', label: 'Sie Kebersihan', aliases: ['sie kebersihan', 'divisi kebersihan', 'kebersihan', 'kebersihan & piket'] },
+  { letter: 'E', label: 'Sie Sarpras', aliases: ['sie sarpras', 'divisi sarpras', 'sarpras', 'sarana & prasarana'] },
+  { letter: 'F', label: 'Sie Dapur', aliases: ['sie dapur', 'divisi dapur', 'dapur', 'dapur & konsumsi'] },
+  { letter: 'G', label: 'Operator EMIS', aliases: ['operator emis', 'emis'] },
+  { letter: 'H', label: 'Sie Koperasi', aliases: ['sie koperasi', 'sie koprasi', 'divisi koperasi', 'koperasi', 'koperasi pondok'] },
+  { letter: 'I', label: 'Sie Laundry', aliases: ['sie laundry', 'divisi laundry', 'laundry'] },
   { letter: 'J', label: 'Guru Bantu', aliases: ['guru bantu'] },
-  { letter: 'K', label: 'Musyrif Kamar', aliases: ['musyrif kamar'] },
+  { letter: 'K', label: 'Musyrif Kamar', aliases: ['musyrif kamar', 'musyrif'] },
 ];
 
 const DEFAULT_KAMAR_ORDER = [
@@ -185,29 +185,64 @@ const DEFAULT_KAMAR_ORDER = [
 
 function normalizeDivisiName(raw: string): string {
   const trimmed = (raw || '').trim();
-  if (/^(?:pimpinan\s*(?:&|dan)\s*harian|pengurus\s+harian|pimpinan)$/i.test(trimmed)) {
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('pengasuh') ||
+    lower.includes('dzurriyah') ||
+    lower.includes('dzuriyah') ||
+    lower.includes('zurriyah') ||
+    lower.includes('zuriyah') ||
+    lower.includes('direktur')
+  ) {
+    return trimmed;
+  }
+  if (/^(?:dewan\s+harian.*|pimpinan\s*(?:&|dan)\s*harian|pengurus\s+harian|pengurus\s+inti|pimpinan|harian|inti)$/i.test(trimmed)) {
     return 'Dewan Harian';
   }
-  if (trimmed === 'Pengasuh') return 'Pengasuh Pondok';
   if (/^sie\s+koprasi$/i.test(trimmed)) return 'Sie Koperasi';
   return trimmed;
 }
 
 function isExcludedTopLeadership(divisi: string, namaJabatan: string): boolean {
-  const d = normalizeDivisiName(divisi).toLowerCase();
+  const d = (divisi || '').trim().toLowerCase();
   const j = (namaJabatan || '').trim().toLowerCase();
   const matchesExcluded = (val: string) =>
     val.includes('pengasuh') ||
     val.includes('dzurriyah') ||
-    val.includes('direktur');
+    val.includes('dzuriyah') ||
+    val.includes('zurriyah') ||
+    val.includes('zuriyah') ||
+    val.includes('direktur') ||
+    val.includes('pembina') ||
+    val.includes('pelindung') ||
+    val.includes('penasihat') ||
+    val.includes('penasehat') ||
+    val.includes('mustasyar');
   return matchesExcluded(d) || matchesExcluded(j);
 }
 
 function getRoleRank(namaJabatan: string, urutanStruktur: number): number {
   const lower = (namaJabatan || '').trim().toLowerCase();
-  if (lower.includes('wakil') && lower.includes('koordinator')) return 2;
-  if (lower.includes('koordinator')) return 1;
-  if (lower.includes('anggota')) return 3;
+  if (
+    lower.includes('wakil') &&
+    (lower.includes('koordinator') || lower.includes('ketua') || lower.includes('kepala'))
+  ) {
+    return 2;
+  }
+  if (
+    lower.includes('koordinator') ||
+    lower.includes('ketua') ||
+    lower.includes('kepala') ||
+    lower.includes('penanggung jawab')
+  ) {
+    return 1;
+  }
+  if (lower.includes('sekretaris') || lower.includes('bendahara')) {
+    return 2;
+  }
+  if (lower.includes('anggota') || lower.includes('staf') || lower.includes('petugas')) {
+    return 3;
+  }
   if (urutanStruktur === 1) return 1;
   if (urutanStruktur === 2) return 2;
   return 3;
@@ -979,7 +1014,6 @@ export default function PusatLaporanPage() {
         patchedRaw[kegiatanKey] = mergedKegiatanRows;
       }
 
-      setRawData(patchedRaw as unknown as AllLaporanRawData);
       setExtraRaw({
         kebersihanRows: mergeUniqueRows([kebLog, kebPiket, kebTugas, kebChecklist, kebNilai]),
         koperasiTransaksiRows: mergeUniqueRows([kopTrx, kopKas, kopJual, kopKulaan]),
@@ -1060,6 +1094,43 @@ export default function PusatLaporanPage() {
       setKamarOrder(mergedRooms);
 
       let resolvedPengurus: RawPengurusPersonalia[] = [];
+      const parseRawJabList = (rawJab: unknown): RawJabatanPersonalia[] => {
+        let arr: unknown = rawJab;
+        if (typeof arr === 'string') {
+          try {
+            arr = JSON.parse(arr);
+          } catch {
+            arr = [];
+          }
+        }
+        if (!Array.isArray(arr)) return [];
+        return arr
+          .filter((j): j is Record<string, unknown> => Boolean(j && typeof j === 'object'))
+          .map((j) => ({
+            divisi: normalizeDivisiName(String(j.divisi || '')),
+            nama_jabatan: String(j.nama_jabatan || ''),
+            urutan_struktur: Number(j.urutan_struktur || 10),
+          }))
+          .filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan));
+      };
+
+      const excludedOnlyIds = new Set<string>();
+      const operationalIds = new Set<string>();
+      for (const j of jabatanRows) {
+        const pid = String(j.pengurus_id || '');
+        if (!pid) continue;
+        const divisiNorm = normalizeDivisiName(String(j.divisi || ''));
+        const namaJab = String(j.nama_jabatan || '');
+        if (isExcludedTopLeadership(divisiNorm, namaJab)) {
+          excludedOnlyIds.add(pid);
+        } else {
+          operationalIds.add(pid);
+        }
+      }
+      for (const pid of operationalIds) {
+        excludedOnlyIds.delete(pid);
+      }
+
       if (amanRows.length > 0) {
         const jabMap = new Map<string, RawJabatanPersonalia[]>();
         for (const j of jabatanRows) {
@@ -1076,43 +1147,98 @@ export default function PusatLaporanPage() {
           });
           jabMap.set(pid, list);
         }
-        resolvedPengurus = amanRows.map((p) => {
-          const pid = String(p.id || '');
-          const embedded = Array.isArray(p.jabatan_list)
-            ? (p.jabatan_list as Array<Record<string, unknown>>)
-                .map((j) => ({
-                  divisi: normalizeDivisiName(String(j.divisi || '')),
-                  nama_jabatan: String(j.nama_jabatan || ''),
-                  urutan_struktur: Number(j.urutan_struktur || 10),
-                }))
-                .filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan))
-            : [];
-          return {
-            id: pid,
-            nama_lengkap: String(p.nama_lengkap || ''),
-            status: String(p.status || 'aktif'),
-            masa_khidmat: String(p.masa_khidmat || ''),
-            jabatan_list: jabMap.get(pid) || embedded,
-          };
-        });
+        resolvedPengurus = amanRows
+          .map((p) => {
+            const pid = String(p.id || '');
+            const embedded = parseRawJabList(p.jabatan_list);
+            const fallbackSingle =
+              embedded.length === 0 && (p.divisi || p.nama_jabatan || p.jabatan)
+                ? [
+                    {
+                      divisi: normalizeDivisiName(String(p.divisi || '')),
+                      nama_jabatan: String(p.nama_jabatan || p.jabatan || ''),
+                      urutan_struktur: Number(p.urutan_struktur || 10),
+                    },
+                  ].filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan) && (j.divisi || j.nama_jabatan))
+                : [];
+            const jabList = jabMap.get(pid) || (embedded.length > 0 ? embedded : fallbackSingle);
+            return {
+              id: pid,
+              nama_lengkap: String(p.nama_lengkap || ''),
+              status: String(p.status || 'aktif'),
+              masa_khidmat: String(p.masa_khidmat || ''),
+              jabatan_list: jabList,
+            };
+          })
+          .filter((p) => !excludedOnlyIds.has(p.id) && p.jabatan_list.length > 0);
       } else {
         const lengkapRows = await fetchSafeTable('v_pengurus_lengkap');
-        resolvedPengurus = lengkapRows.map((p) => ({
-          id: String(p.id || ''),
-          nama_lengkap: String(p.nama_lengkap || ''),
-          status: String(p.status || 'aktif'),
-          masa_khidmat: String(p.masa_khidmat || ''),
-          jabatan_list: Array.isArray(p.jabatan_list)
-            ? (p.jabatan_list as Array<Record<string, unknown>>)
-                .map((j) => ({
-                  divisi: normalizeDivisiName(String(j.divisi || '')),
-                  nama_jabatan: String(j.nama_jabatan || ''),
-                  urutan_struktur: Number(j.urutan_struktur || 10),
-                }))
-                .filter((j) => !isExcludedTopLeadership(j.divisi, j.nama_jabatan))
-            : [],
-        }));
+        resolvedPengurus = lengkapRows
+          .map((p) => {
+            const pid = String(p.id || '');
+            const jabList = parseRawJabList(p.jabatan_list);
+            return {
+              id: pid,
+              nama_lengkap: String(p.nama_lengkap || ''),
+              status: String(p.status || 'aktif'),
+              masa_khidmat: String(p.masa_khidmat || ''),
+              jabatan_list: jabList,
+            };
+          })
+          .filter((p) => !excludedOnlyIds.has(p.id) && p.jabatan_list.length > 0);
       }
+
+      // Pastikan data mentah yang dikirim ke LaporanDocument juga bebas Pengasuh / Dewan Pengasuh
+      const filteredPatchedRaw: Record<string, unknown> = { ...patchedRaw };
+      for (const [k, val] of Object.entries(filteredPatchedRaw)) {
+        if (!Array.isArray(val) || val.length === 0) continue;
+        const sample = val[0];
+        if (!sample || typeof sample !== 'object') continue;
+        const rec = sample as Record<string, unknown>;
+        if ('nama_jabatan' in rec && 'divisi' in rec && !('nama_lengkap' in rec)) {
+          filteredPatchedRaw[k] = val.filter((item) => {
+            if (!item || typeof item !== 'object') return true;
+            const jr = item as Record<string, unknown>;
+            return !isExcludedTopLeadership(String(jr.divisi || ''), String(jr.nama_jabatan || ''));
+          });
+        } else if (
+          'nama_lengkap' in rec &&
+          ('jabatan_list' in rec || 'masa_khidmat' in rec || /pengurus/i.test(k)) &&
+          !('nama_ayah' in rec || 'kamar' in rec)
+        ) {
+          filteredPatchedRaw[k] = val
+            .map((item) => {
+              if (!item || typeof item !== 'object') return item;
+              const pr = item as Record<string, unknown>;
+              if (Array.isArray(pr.jabatan_list)) {
+                const keptJabs = pr.jabatan_list.filter((j) => {
+                  if (!j || typeof j !== 'object') return true;
+                  const jr = j as Record<string, unknown>;
+                  return !isExcludedTopLeadership(String(jr.divisi || ''), String(jr.nama_jabatan || ''));
+                });
+                return { ...pr, jabatan_list: keptJabs };
+              }
+              return pr;
+            })
+            .filter((item) => {
+              if (!item || typeof item !== 'object') return true;
+              const pr = item as Record<string, unknown>;
+              const pid = String(pr.id || '');
+              if (pid && excludedOnlyIds.has(pid)) return false;
+              if (Array.isArray(pr.jabatan_list) && pr.jabatan_list.length === 0) return false;
+              if (
+                isExcludedTopLeadership(
+                  String(pr.divisi || ''),
+                  String(pr.nama_jabatan || pr.jabatan || '')
+                )
+              ) {
+                return false;
+              }
+              return true;
+            });
+        }
+      }
+      setRawData(filteredPatchedRaw as unknown as AllLaporanRawData);
       setPengurusRows(resolvedPengurus);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal memuat data laporan.';
@@ -2442,13 +2568,20 @@ export default function PusatLaporanPage() {
 
     const matchDewanHarianRole = (rawJabatan: string, targetSlot: string): boolean => {
       const j = (rawJabatan || '').trim().toLowerCase();
+      if (!j || isExcludedTopLeadership('', j)) return false;
       const t = targetSlot.toLowerCase();
       const isWakil = j.includes('wakil');
       if (t === 'kepala pondok') {
         return !isWakil && (j.includes('kepala pondok') || j.includes('ketua pondok'));
       }
       if (t === 'wakil kepala pondok') {
-        return isWakil && (j.includes('kepala pondok') || j.includes('ketua pondok'));
+        return (
+          isWakil &&
+          (j.includes('kepala pondok') ||
+            j.includes('ketua pondok') ||
+            j === 'wakil kepala' ||
+            j === 'wakil ketua')
+        );
       }
       if (t === 'sekretaris') {
         return !isWakil && j.includes('sekretaris');
@@ -2466,45 +2599,53 @@ export default function PusatLaporanPage() {
     };
 
     const dewanHarianSlots = DEWAN_HARIAN_ORDER.map((jabatan, index) => {
-      const names: string[] = [];
-      for (const person of sourcePeople) {
-        for (const jab of person.jabatan_list) {
-          if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
-          if (
-            normalizeDivisiName(jab.divisi).toLowerCase() === 'dewan harian' &&
-            matchDewanHarianRole(jab.nama_jabatan, jabatan)
-          ) {
-            if (!names.includes(person.nama_lengkap)) {
-              names.push(person.nama_lengkap);
-            }
-          }
-        }
-      }
-      return {
-        nomor: index + 1,
-        jabatan,
-        names,
-      };
-    });
-
-    const plenoSections = PLENO_DIVISI_ORDER.map((sec) => {
-      interface MemberEntry {
-        nama: string;
-        peran: string;
-        rank: number;
-        urutan: number;
-        kamarIdx: number;
-        kamarName: string;
-      }
-      const members: MemberEntry[] = [];
+      const entries: Array<{ nama: string; urutan: number }> = [];
       for (const person of sourcePeople) {
         for (const jab of person.jabatan_list) {
           if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
           const divLower = normalizeDivisiName(jab.divisi).toLowerCase();
-          if (!sec.aliases.includes(divLower)) continue;
+          if (
+            (divLower === 'dewan harian' || divLower === '') &&
+            matchDewanHarianRole(jab.nama_jabatan, jabatan)
+          ) {
+            if (!entries.some((e) => e.nama === person.nama_lengkap)) {
+              entries.push({ nama: person.nama_lengkap, urutan: jab.urutan_struktur || 10 });
+            }
+          }
+        }
+      }
+      entries.sort((a, b) => a.urutan - b.urutan || a.nama.localeCompare(b.nama, 'id'));
+      return {
+        nomor: index + 1,
+        jabatan,
+        names: entries.map((e) => e.nama),
+      };
+    });
+
+    interface PlenoMemberEntry {
+      nama: string;
+      peran: string;
+      rank: number;
+      urutan: number;
+      kamarIdx: number;
+      kamarName: string;
+    }
+
+    const buildDivisionMembers = (aliases: string[], isMusyrifDiv: boolean, exactNormName?: string) => {
+      const members: PlenoMemberEntry[] = [];
+      for (const person of sourcePeople) {
+        for (const jab of person.jabatan_list) {
+          if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
+          const divNorm = normalizeDivisiName(jab.divisi);
+          const divLower = divNorm.toLowerCase();
+          if (!divLower || divLower === 'dewan harian') continue;
+          const matched = exactNormName
+            ? divLower === exactNormName.toLowerCase()
+            : aliases.includes(divLower);
+          if (!matched) continue;
 
           const rank = getRoleRank(jab.nama_jabatan, jab.urutan_struktur);
-          if (sec.letter === 'K') {
+          if (isMusyrifDiv) {
             const kamarName = jab.nama_jabatan.replace(/^Musyrif\s+Kamar\s+/i, '').trim();
             const kIdx = kamarOrder.findIndex(
               (k) => k.toLowerCase() === kamarName.toLowerCase()
@@ -2531,7 +2672,7 @@ export default function PusatLaporanPage() {
       }
 
       members.sort((a, b) => {
-        if (sec.letter === 'K') {
+        if (isMusyrifDiv) {
           if (a.kamarIdx !== b.kamarIdx) return a.kamarIdx - b.kamarIdx;
           const kCmp = a.kamarName.localeCompare(b.kamarName, 'id', { numeric: true });
           if (kCmp !== 0) return kCmp;
@@ -2540,13 +2681,41 @@ export default function PusatLaporanPage() {
         if (a.urutan !== b.urutan) return a.urutan - b.urutan;
         return a.nama.localeCompare(b.nama, 'id');
       });
+      return members;
+    };
 
-      return {
-        letter: sec.letter,
-        label: sec.label,
-        members,
-      };
-    });
+    const plenoSections = PLENO_DIVISI_ORDER.map((sec) => ({
+      letter: sec.letter,
+      label: sec.label,
+      members: buildDivisionMembers(sec.aliases, sec.letter === 'K'),
+    }));
+
+    // Sertakan divisi operasional lain (selain Dewan Harian & Pengasuh/Dewan Pengasuh) jika ada di database
+    const knownAliases = new Set(PLENO_DIVISI_ORDER.flatMap((s) => s.aliases));
+    const extraDivNames = new Map<string, string>();
+    for (const person of sourcePeople) {
+      for (const jab of person.jabatan_list) {
+        if (isExcludedTopLeadership(jab.divisi, jab.nama_jabatan)) continue;
+        const norm = normalizeDivisiName(jab.divisi);
+        const lower = norm.toLowerCase();
+        if (!lower || lower === 'dewan harian' || knownAliases.has(lower)) continue;
+        if (!extraDivNames.has(lower)) {
+          extraDivNames.set(lower, norm);
+        }
+      }
+    }
+    let nextCharCode = 'L'.charCodeAt(0);
+    for (const [lower, label] of Array.from(extraDivNames.entries()).sort((a, b) =>
+      a[1].localeCompare(b[1], 'id')
+    )) {
+      const letter = String.fromCharCode(nextCharCode);
+      nextCharCode += 1;
+      plenoSections.push({
+        letter,
+        label,
+        members: buildDivisionMembers([lower], false, label),
+      });
+    }
 
     return {
       dewanHarianSlots,
@@ -4815,7 +4984,7 @@ export default function PusatLaporanPage() {
           return (
             txt.length > 0 &&
             txt.length < 140 &&
-            /struktur\s+(personalia|kepengurusan|pengurus)|personalia\s+pengurus|susunan\s+(pengurus|personalia|kepengurusan)|daftar\s+(pengurus|personalia)/i.test(
+            /struktur\s+(personalia|kepengurusan|pengurus|organisasi)|personalia\s+pengurus|susunan\s+(pengurus|personalia|kepengurusan)|daftar\s+(pengurus|personalia)|bagan\s+(pengurus|personalia)/i.test(
               txt
             )
           );
@@ -4879,9 +5048,9 @@ export default function PusatLaporanPage() {
           }
         }
 
-        // Sapu bersih seluruh blok teks/tabel struktur personalia lama berformat titik dua (termasuk I. DEWAN HARIAN, II. PLENO, H. Dewan Pengasuh (Dzurriyah), L. Pengasuh Pondok, M. Sie Koperasi)
+        // Sapu bersih seluruh blok teks/tabel struktur personalia lama berformat titik dua serta blok Pengasuh / Dewan Pengasuh
         const postScanEls = Array.from(
-          adminScopeEl.querySelectorAll('div, section, table, ul, ol, p, h3, h4, h5, h6, li, tr')
+          searchContainer.querySelectorAll('div, section, table, ul, ol, p, h3, h4, h5, h6, li, tr')
         ) as HTMLElement[];
         const duplicateOldBlocks = postScanEls.filter((el) => {
           if (el === adminScopeEl || el === searchContainer) return false;
@@ -4896,16 +5065,24 @@ export default function PusatLaporanPage() {
           const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
           if (txt.length === 0 || txt.length > 25000) return false;
           if (
-            /\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar|Santri\s+Aktif|Santri\s+Ndalem|Mutasi\s+Santri|Administrasi\s*&\s*Data\s+Santri/i.test(
+            /\bDivisi\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b|Ringkasan\s+Eksekutif|Daftar\s+Kamar|Santri\s+Aktif|Santri\s+Ndalem|Mutasi\s+Santri|Administrasi\s*&\s*Data\s+Santri|Mengetahui|Lembar\s+Pengesahan|CAKUPAN\s+DATA\s+LAPORAN/i.test(
               txt
             )
           ) {
             return false;
           }
+          const insideAdmin = adminScopeEl.contains(el);
+          if (
+            /(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Dzurriyah|Direktur\s+Pendidikan)/i.test(txt) &&
+            txt.length < 4000
+          ) {
+            return true;
+          }
+          if (!insideAdmin) return false;
           return (
             /\bI\.\s*DEWAN\s*HARIAN\b/i.test(txt) ||
             /\bII\.\s*PLENO\b/i.test(txt) ||
-            /pengasuh|dzurriyah|direktur\s+pendidikan/i.test(txt) ||
+            /pengasuh|dzurriyah|zurriyah|direktur\s+pendidikan/i.test(txt) ||
             /\b[A-M]\.\s*(?:Dewan\s+Pengasuh|Pengasuh\s+Pondok|Direktur\s+Pendidikan|Sie\s+Kegiatan|Sie\s+Keamanan|Sie\s+Kesehatan|Sie\s+Kebersihan|Sie\s+Sarpras|Sie\s+Dapur|Sie\s+Koperasi|Sie\s+Koprasi|Sie\s+Laundry|Operator\s+EMIS|Guru\s+Bantu|Musyrif\s+Kamar)\b/i.test(
               txt
             ) ||
@@ -7316,11 +7493,11 @@ export default function PusatLaporanPage() {
             </div>
           </div>
 
-          {/* Sumber tersembunyi Struktur Personalia baku (Bagian I Dewan Harian + Bagian II Pleno/Divisi A-K) */}
+          {/* Sumber tersembunyi Struktur Personalia baku (Bagian I Dewan Harian + Bagian II Divisi-Divisi) */}
           <div ref={personaliaSourceRef} className="hidden" aria-hidden="true">
             <div
               data-siap-page-start="true"
-              className="break-before-page print:break-before-page pt-1 space-y-2"
+              className="break-before-page print:break-before-page pt-1 space-y-2.5"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
                 <div>
@@ -7328,7 +7505,7 @@ export default function PusatLaporanPage() {
                     A. Struktur Personalia Pengurus Aktif
                   </h4>
                   <p className="text-[9.5pt] leading-snug text-slate-600">
-                    Susunan Dewan Harian &amp; Pleno Divisi (tidak termasuk Pengasuh, Dewan Pengasuh/Dzurriyah, dan Direktur Pendidikan)
+                    Susunan Dewan Harian &amp; Divisi Kepengurusan Aktif
                   </p>
                 </div>
                 <span className="text-[9.5pt] leading-snug font-semibold text-slate-600">
@@ -7336,42 +7513,63 @@ export default function PusatLaporanPage() {
                 </span>
               </div>
 
-              {/* BAGIAN I: DEWAN HARIAN (3 Kolom Berpasangan) */}
+              {/* BAGIAN I: DEWAN HARIAN (Hierarki: Pimpinan Harian di atas, lalu Kesekretariatan & Kebendaharaan) */}
               <div className="space-y-1.5">
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
                   BAGIAN I &bull; DEWAN HARIAN
                 </h5>
-                <div className="grid grid-cols-3 gap-2.5 text-[9pt] leading-snug items-stretch">
-                  {[
-                    [strukturPersonalia.dewanHarianSlots[0], strukturPersonalia.dewanHarianSlots[1]],
-                    [strukturPersonalia.dewanHarianSlots[2], strukturPersonalia.dewanHarianSlots[3]],
-                    [strukturPersonalia.dewanHarianSlots[4], strukturPersonalia.dewanHarianSlots[5]],
-                  ].map((pair, colIdx) => (
-                    <div
-                      key={`dh-col-${colIdx}`}
-                      className="border border-slate-200 rounded-xl overflow-hidden bg-white divide-y divide-slate-100 break-inside-avoid flex flex-col"
-                    >
-                      {pair.map((slot) =>
-                        slot ? (
-                          <div key={slot.nomor} className="px-3 py-2 flex-1">
-                            <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
-                              {slot.nomor}. {slot.jabatan}
-                            </span>
-                            <span className="text-[9pt] font-semibold text-slate-900 block mt-0.5 break-words">
-                              {slot.names.length > 0 ? slot.names.join(', ') : '-'}
-                            </span>
-                          </div>
-                        ) : null
-                      )}
-                    </div>
-                  ))}
+                <div className="space-y-2 text-[9pt] leading-snug">
+                  <div className="grid grid-cols-2 gap-2.5 items-stretch">
+                    {[
+                      strukturPersonalia.dewanHarianSlots[0],
+                      strukturPersonalia.dewanHarianSlots[1],
+                    ].map((slot) =>
+                      slot ? (
+                        <div
+                          key={slot.nomor}
+                          className="border border-emerald-200 rounded-xl overflow-hidden bg-emerald-50/40 px-3 py-2 break-inside-avoid"
+                        >
+                          <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
+                            {slot.nomor}. {slot.jabatan}
+                          </span>
+                          <span className="text-[9.5pt] font-bold text-slate-900 block mt-0.5 break-words">
+                            {slot.names.length > 0 ? slot.names.join(', ') : '-'}
+                          </span>
+                        </div>
+                      ) : null
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5 items-stretch">
+                    {[
+                      [strukturPersonalia.dewanHarianSlots[2], strukturPersonalia.dewanHarianSlots[3]],
+                      [strukturPersonalia.dewanHarianSlots[4], strukturPersonalia.dewanHarianSlots[5]],
+                    ].map((pair, colIdx) => (
+                      <div
+                        key={`dh-col-${colIdx}`}
+                        className="border border-slate-200 rounded-xl overflow-hidden bg-white divide-y divide-slate-100 break-inside-avoid flex flex-col"
+                      >
+                        {pair.map((slot) =>
+                          slot ? (
+                            <div key={slot.nomor} className="px-3 py-2 flex-1">
+                              <span className="text-[8pt] font-bold uppercase tracking-wide text-emerald-800 block">
+                                {slot.nomor}. {slot.jabatan}
+                              </span>
+                              <span className="text-[9pt] font-semibold text-slate-900 block mt-0.5 break-words">
+                                {slot.names.length > 0 ? slot.names.join(', ') : '-'}
+                              </span>
+                            </div>
+                          ) : null
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* BAGIAN II: PLENO / DIVISI (A - K) */}
+              {/* BAGIAN II: DIVISI-DIVISI */}
               <div className="space-y-1.5">
                 <h5 className="text-[9.5pt] font-bold uppercase tracking-wider text-emerald-800">
-                  BAGIAN II &bull; PLENO / DIVISI
+                  BAGIAN II &bull; DIVISI-DIVISI
                 </h5>
                 <div className="grid grid-cols-2 gap-2.5 text-[9.5pt] leading-snug">
                   {strukturPersonalia.plenoSections.map((sec) => {
