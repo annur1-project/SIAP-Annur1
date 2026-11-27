@@ -24,6 +24,7 @@ import {
   MapPin,
   Wallet,
   Info,
+  ClipboardCheck,
 } from 'lucide-react';
 import SarprasQuickReportModal from '@/components/SarprasQuickReportModal';
 import {
@@ -47,6 +48,7 @@ import {
   fetchSarprasLaporan,
   saveSarprasInventarisRow,
   deleteSarprasInventarisRow,
+  createSarprasLaporanRow,
   updateSarprasLaporanRow,
   deleteSarprasLaporanRow,
 } from '@/lib/sarpras';
@@ -122,6 +124,21 @@ function subtractMonthsIso(todayIso: string, monthsAgo: number): string {
   return getLocalTodayStr(d);
 }
 
+function generateDirectWorkTicketCode(
+  tanggal: string,
+  existing: SarprasLaporanItem[]
+): string {
+  const used = new Set(existing.map((item) => item.kode_tiket));
+  const compact = (tanggal || getLocalTodayStr()).replace(/-/g, '').slice(2);
+  let seq = 1;
+  while (seq < 9999) {
+    const candidate = `PKJ-${compact}-${String(seq).padStart(3, '0')}`;
+    if (!used.has(candidate)) return candidate;
+    seq += 1;
+  }
+  return `PKJ-${compact}-${Date.now().toString().slice(-4)}`;
+}
+
 export default function SarprasPage() {
   const { canEditModule } = useAuth();
   const canEditSarpras = canEditModule('sarpras');
@@ -139,6 +156,21 @@ export default function SarprasPage() {
 
   // Quick Report Modal
   const [showQuickReportModal, setShowQuickReportModal] = useState<boolean>(false);
+
+  // Direct Completed Work Modal (Catat Pekerjaan Sarpras Langsung Selesai)
+  const [showDirectWorkModal, setShowDirectWorkModal] = useState<boolean>(false);
+  const [workTanggal, setWorkTanggal] = useState<string>('');
+  const [workRuanganMode, setWorkRuanganMode] = useState<'preset' | 'custom'>('preset');
+  const [workRuanganPreset, setWorkRuanganPreset] = useState<string>(SARPRAS_RUANGAN_DEFAULT[0]);
+  const [workRuanganCustom, setWorkRuanganCustom] = useState<string>('');
+  const [workUraian, setWorkUraian] = useState<string>('');
+  const [workPetugas, setWorkPetugas] = useState<string>('');
+  const [workBiaya, setWorkBiaya] = useState<string>('0');
+  const [workFile, setWorkFile] = useState<File | null>(null);
+  const [workPreviewUrl, setWorkPreviewUrl] = useState<string>('');
+  const [workCompressing, setWorkCompressing] = useState<boolean>(false);
+  const workCameraRef = useRef<HTMLInputElement | null>(null);
+  const workGalleryRef = useRef<HTMLInputElement | null>(null);
 
   // Lightbox image preview
   const [lightboxPhoto, setLightboxPhoto] = useState<{
@@ -555,6 +587,123 @@ export default function SarprasPage() {
   };
 
   // ==========================================
+  // HANDLERS: CATAT PEKERJAAN LANGSUNG SELESAI
+  // ==========================================
+
+  const openDirectWorkModal = () => {
+    if (!canEditSarpras) return;
+    setWorkTanggal(todayStr || getLocalTodayStr());
+    setWorkRuanganMode('preset');
+    setWorkRuanganPreset(roomFilterOptions[0] || SARPRAS_RUANGAN_DEFAULT[0]);
+    setWorkRuanganCustom('');
+    setWorkUraian('');
+    setWorkPetugas('');
+    setWorkBiaya('0');
+    setWorkFile(null);
+    setWorkPreviewUrl('');
+    setShowDirectWorkModal(true);
+  };
+
+  const handleDirectWorkPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setWorkCompressing(true);
+    try {
+      const res = await compressImageForSarpras(file);
+      setWorkFile(file);
+      setWorkPreviewUrl(res.dataUrlFallback);
+    } catch (err) {
+      showToast(
+        'error',
+        'Gagal Memproses Foto',
+        err instanceof Error ? err.message : 'Pilih file gambar yang valid.'
+      );
+    } finally {
+      setWorkCompressing(false);
+    }
+  };
+
+  const handleDirectWorkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditSarpras) return;
+
+    const tanggal = workTanggal.trim() || todayStr || getLocalTodayStr();
+    const ruangan =
+      workRuanganMode === 'custom' ? workRuanganCustom.trim() : workRuanganPreset.trim();
+    const uraian = workUraian.trim();
+    const petugas = workPetugas.trim();
+    const biayaNominal = Math.max(0, parseInt(workBiaya.replace(/\D/g, '') || '0', 10));
+
+    if (!ruangan) {
+      showToast('error', 'Lokasi Kosong', 'Pilih atau ketik lokasi / ruangan pekerjaan.');
+      return;
+    }
+    if (!uraian) {
+      showToast('error', 'Uraian Pekerjaan Kosong', 'Isi uraian pekerjaan yang dilakukan.');
+      return;
+    }
+    if (!petugas) {
+      showToast('error', 'Petugas Kosong', 'Isi nama petugas pelaksana pekerjaan.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let fotoSelesaiUrl: string | null = null;
+      let totalKb = 0;
+
+      if (workFile) {
+        const up = await uploadSarprasPhoto(workFile, 'selesai');
+        fotoSelesaiUrl = up.url;
+        totalKb = up.compressedKb;
+      }
+
+      const payload: SarprasLaporanItem = {
+        id: createSarprasId('lap'),
+        kode_tiket: generateDirectWorkTicketCode(tanggal, laporanList),
+        tanggal_lapor: tanggal,
+        pelapor_nama: petugas,
+        ruangan,
+        judul_kerusakan: uraian,
+        rincian: 'Pekerjaan langsung diselesaikan tanpa laporan kerusakan awal',
+        urgensi: 'biasa',
+        status: 'selesai',
+        inventaris_id: null,
+        foto_rusak_url: null,
+        foto_proses_url: null,
+        foto_selesai_url: fotoSelesaiUrl,
+        petugas_sarpras: petugas,
+        catatan_proses: '',
+        catatan_selesai: 'Dicatat langsung selesai',
+        tgl_proses: tanggal,
+        tgl_selesai: tanggal,
+        biaya_perbaikan: biayaNominal,
+        ukuran_total_kb: totalKb,
+      };
+
+      const { saved } = await createSarprasLaporanRow(payload);
+      const recordToAdd = saved || payload;
+
+      setLaporanList((prev) => [recordToAdd, ...prev]);
+      setShowDirectWorkModal(false);
+      showToast(
+        'success',
+        'Pekerjaan Selesai Dicatat',
+        `${recordToAdd.kode_tiket} · ${uraian} (${ruangan}) masuk ke rekap selesai.`
+      );
+    } catch (err) {
+      showToast(
+        'error',
+        'Gagal Mencatat Pekerjaan',
+        err instanceof Error ? err.message : 'Terjadi kendala saat menyimpan ke database.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ==========================================
   // HANDLERS: INVENTARIS CRUD & EXPORT
   // ==========================================
 
@@ -880,13 +1029,22 @@ export default function SarprasPage() {
             <button
               type="button"
               onClick={() => setShowQuickReportModal(true)}
-              className={`min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 ${
-                canEditSarpras ? 'col-span-2 sm:col-span-1' : ''
-              }`}
+              className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Camera className="w-4 h-4" />
               Lapor Kerusakan
             </button>
+
+            {canEditSarpras && (
+              <button
+                type="button"
+                onClick={openDirectWorkModal}
+                className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                Catat Pekerjaan Selesai
+              </button>
+            )}
           </div>
         </div>
 
@@ -2538,6 +2696,234 @@ export default function SarprasPage() {
                   {saving ? 'Membersihkan...' : 'Ya, Bersihkan Foto'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CATAT PEKERJAAN SARPRAS (LANGSUNG SELESAI) */}
+        {showDirectWorkModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+            <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl border border-slate-200 shadow-xl max-h-[92vh] flex flex-col overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <ClipboardCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    Catat Pekerjaan Sarpras (Langsung Selesai)
+                  </h2>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Catat pekerjaan perbaikan atau pemasangan yang langsung dikerjakan tanpa laporan awal.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDirectWorkModal(false)}
+                  className="min-h-[36px] min-w-[36px] rounded-lg border border-slate-200 bg-white text-slate-600 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleDirectWorkSubmit} className="p-5 space-y-4 overflow-y-auto text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Tanggal Pengerjaan <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={workTanggal}
+                      onChange={(e) => setWorkTanggal(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-slate-700">
+                        Lokasi / Ruangan <span className="text-rose-600">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setWorkRuanganMode((m) => (m === 'preset' ? 'custom' : 'preset'))
+                        }
+                        className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                      >
+                        {workRuanganMode === 'preset' ? '+ Ketik Manual' : 'Pilih Daftar'}
+                      </button>
+                    </div>
+                    {workRuanganMode === 'preset' ? (
+                      <select
+                        value={workRuanganPreset}
+                        onChange={(e) => setWorkRuanganPreset(e.target.value)}
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {roomFilterOptions.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={workRuanganCustom}
+                        onChange={(e) => setWorkRuanganCustom(e.target.value)}
+                        placeholder="Contoh: Masjid / Musholla, Kamar A1"
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        required
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Uraian Pekerjaan yang Dilakukan <span className="text-rose-600">*</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={workUraian}
+                    onChange={(e) => setWorkUraian(e.target.value)}
+                    placeholder="Contoh: Memperbaiki keran wudhu atau Memasang 4 kipas angin"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Petugas Pelaksana <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={workPetugas}
+                      onChange={(e) => setWorkPetugas(e.target.value)}
+                      placeholder="Contoh: Ust. Ahmad / Pak Budi (Tukang)"
+                      className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Biaya / Pembelian Bahan (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={workBiaya}
+                      onChange={(e) => setWorkBiaya(e.target.value)}
+                      placeholder="0"
+                      className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Foto Bukti Pekerjaan (Opsional) */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <span className="font-bold text-slate-800 block">
+                    Foto Bukti Pekerjaan (Opsional)
+                  </span>
+
+                  <input
+                    ref={workCameraRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleDirectWorkPhotoChange}
+                    className="hidden"
+                  />
+                  <input
+                    ref={workGalleryRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDirectWorkPhotoChange}
+                    className="hidden"
+                  />
+
+                  {!workPreviewUrl ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={workCompressing}
+                        onClick={() => workCameraRef.current?.click()}
+                        className="min-h-[42px] px-3 py-2 bg-white hover:bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        {workCompressing ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Camera className="w-4 h-4 text-emerald-600" />
+                        )}
+                        Kamera
+                      </button>
+                      <button
+                        type="button"
+                        disabled={workCompressing}
+                        onClick={() => workGalleryRef.current?.click()}
+                        className="min-h-[42px] px-3 py-2 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-slate-800 font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        <ImageIcon className="w-4 h-4 text-slate-600" />
+                        Galeri
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={workPreviewUrl}
+                        alt="Pratinjau foto bukti pekerjaan"
+                        referrerPolicy="no-referrer"
+                        className="w-16 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span className="font-bold text-emerald-700 block">
+                          Foto siap disimpan
+                        </span>
+                        <div className="flex gap-2 mt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => workCameraRef.current?.click()}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[11px] font-semibold text-slate-700"
+                          >
+                            Ganti
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWorkFile(null);
+                              setWorkPreviewUrl('');
+                            }}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 rounded-lg text-[11px] font-semibold text-rose-700"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDirectWorkModal(false)}
+                    className="min-h-[42px] px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold rounded-xl"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || workCompressing}
+                    className="min-h-[42px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-60"
+                  >
+                    {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Simpan Pekerjaan Selesai
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
